@@ -1,0 +1,10 @@
+# Default: auto line endings
+* text=auto
+
+# Always LF on the server — these files run on Linux
+*.sh    text eol=lf
+*.py    text eol=lf
+*.conf  text eol=lf
+Dockerfile text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
