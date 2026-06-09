@@ -1,19 +1,6 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-dist/
-build/
-
 # Environment — never commit secrets
 .env
-
-# Data
-*.db
-*.sqlite
-*.sqlite3
+.dev.vars
 
 # IDE
 .vscode/
@@ -24,3 +11,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Wrangler
+.wrangler/

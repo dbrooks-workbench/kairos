@@ -30,81 +30,80 @@ A **personal project management / calendar hybrid** where:
 ### Layer Overview
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Clients                           │
-│   SPA (Web)          Flutter (Mobile)               │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP / REST
-┌──────────────────────▼──────────────────────────────┐
-│              FastAPI Backend (Python)                │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐   │
-│  │           Aggregation Layer                  │   │
-│  │  ICalendarProvider[]  +  ITaskProvider[]     │   │
-│  └────────────┬──────────────────┬─────────────┘   │
-│               │                  │                  │
-│  ┌────────────▼──┐   ┌───────────▼──────────────┐  │
-│  │ Google Cal    │   │ Google Tasks Provider    │  │
-│  │ Provider      │   │ (ITaskProvider impl)     │  │
-│  │ (OAuth2)      │   │ (OAuth2, shared tokens)  │  │
-│  └───────────────┘   └──────────────────────────┘  │
-│                                                     │
-│  ┌──────────────────────────────────────────────┐  │
-│  │ ICS Feed Provider (read-only, URL-based)     │  │
-│  └──────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
-                       │
-              ┌────────▼────────┐
-              │  ICS Feed Output │  ← any calendar client can subscribe
-              │  (tasks as       │
-              │   static events) │
-              └──────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  Cloudflare Pages                        │
+│                                                          │
+│  ┌─────────────────────┐   ┌──────────────────────────┐ │
+│  │  Static SPA          │   │  Pages Functions         │ │
+│  │  (client/web/)       │   │  (functions/auth/)       │ │
+│  │                      │   │                          │ │
+│  │  vanilla JS          │   │  /auth/start             │ │
+│  │  week-view calendar  │   │  /auth/callback          │ │
+│  │  Google API calls    │   │  /auth/refresh           │ │
+│  └──────────┬───────────┘   │  /auth/logout            │ │
+│             │               └────────────┬─────────────┘ │
+│             │                            │               │
+│             │               ┌────────────▼─────────────┐ │
+│             │               │  Cloudflare KV           │ │
+│             │               │  (session + token store) │ │
+│             │               └──────────────────────────┘ │
+└─────────────┼────────────────────────────────────────────┘
+              │ direct API calls (Bearer token)
+    ┌─────────▼──────────────────────────┐
+    │  Google APIs                       │
+    │  Calendar API v3  /  Tasks API v1  │
+    └────────────────────────────────────┘
 ```
 
-### Backend — FastAPI (Python)
+### Web SPA — Vanilla JS (`client/web/`)
 
-- **Framework**: FastAPI (minimal, async, self-documenting via OpenAPI)
-- **Primary responsibility**: Aggregation. Fetches from all configured providers, normalizes to internal model, serves unified feed
-- **Auth**: OAuth2 token storage per account (encrypted at rest). Handles token refresh
-- **ICS output**: Dynamic ICS feed endpoint. Tasks serialized as `VEVENT` entries. Consumable by any ICS-capable client (Apple Calendar, Outlook, Fantastical, etc.)
-- **Database**: TBD — likely SQLite for MVP simplicity, Postgres for production
+- No framework, no build step — files served directly by Cloudflare Pages
+- Custom calendar grid using CSS Grid and vanilla JS
+- Calls Google Calendar and Tasks APIs directly from the browser using a Bearer token
+- Token obtained by calling `/auth/refresh` (Pages Function); never stored in browser
+- Rendering is type-driven: each item knows its `item_type`, driving visual treatment and interaction surface
 
-### Web Frontend — Vanilla SPA
+### Auth — Cloudflare Pages Functions (`functions/auth/`)
 
-- **Single HTML/JS/CSS file** — no build pipeline required for basic use
-- **No calendar framework** — custom-rolled calendar grid using CSS Grid and vanilla JS
-- **Optionally bundleable as a PWA** for offline support
-- **Rendering is type-driven**: each `CalendarItem` knows its type, and the frontend uses that to determine visual treatment and available interactions
-- **Connects to**: FastAPI backend REST API
+- PKCE OAuth2 flow; client secret never exposed to the browser
+- PKCE verifier stored temporarily in KV (5-minute TTL)
+- Tokens stored in KV under a random session ID (1-year TTL)
+- Session ID in an HttpOnly Secure cookie — JS cannot access tokens directly
+- `/auth/refresh` returns a fresh access token to the SPA on demand
 
-### Mobile — Flutter
+### Mobile — Flutter (Phase 2, deferred)
 
 - Flutter app targeting iOS and Android
-- Connects to same FastAPI backend
-- Custom calendar rendering (consistent with web, adapted for mobile UX)
+- Will call Google APIs directly with the same OAuth pattern
 
 ---
 
 ## Core Data Model
 
-All time-aware data normalizes to a `CalendarItem`:
+All time-aware data normalizes to a `CalendarItem` (JavaScript object):
 
-```python
-class CalendarItem(BaseModel):
-    id: str
-    title: str
-    item_type: ItemType          # EVENT | TASK | MILESTONE | HABIT | ...
-    source: SourceInfo           # which provider + account this came from
-    start: datetime | date       # date = all-day
-    end: datetime | date | None
-    due: datetime | date | None  # for tasks with deadlines
-    all_day: bool
-    status: ItemStatus           # CONFIRMED | TENTATIVE | CANCELLED | COMPLETED | ...
-    recurrence: str | None       # RRULE string
-    metadata: dict               # type-specific extra fields
-    tags: list[str]
-    color: str | None            # provider-assigned or user-assigned
-    editable: bool               # can this item be mutated via this provider?
+```js
+{
+  id: string,
+  title: string,
+  item_type: 'EVENT' | 'TASK' | 'MILESTONE' | 'HABIT',
+  source: { provider: string, account_id: string, external_id: string },
+  start: Date,                // all-day items: midnight local time
+  end: Date | null,
+  due: Date | null,           // tasks with deadlines
+  all_day: boolean,
+  status: 'CONFIRMED' | 'TENTATIVE' | 'CANCELLED' | 'COMPLETED' | 'NEEDS_ACTION',
+  recurrence: string | null,  // RRULE string
+  metadata: {                 // type-specific fields
+    body?: string,            // prose notes
+    loe?: string,             // e.g. "2d 4h" (parsed from ~-prefix line)
+    comments?: [{timestamp, text}],
+    checklist?: [{text, checked}],
+    linked_task_ids?: string[],
+  },
+  color: string | null,
+  editable: boolean,
+}
 ```
 
 **`item_type` drives:**
@@ -116,30 +115,29 @@ class CalendarItem(BaseModel):
 
 ## Provider Abstractions
 
-```python
-class ICalendarProvider(ABC):
-    async def get_events(self, start: datetime, end: datetime) -> list[CalendarItem]: ...
-    async def create_event(self, item: CalendarItem) -> CalendarItem: ...
-    async def update_event(self, item: CalendarItem) -> CalendarItem: ...
-    async def delete_event(self, item_id: str) -> None: ...
+Providers are plain JS modules that take a token and return `CalendarItem[]`.
 
-class ITaskProvider(ABC):
-    async def get_tasks(self, start: date, end: date) -> list[CalendarItem]: ...
-    async def complete_task(self, task_id: str) -> None: ...
-    async def update_task(self, item: CalendarItem) -> CalendarItem: ...
+```js
+// calendar provider interface
+async function getEvents(token, start, end) -> CalendarItem[]
+
+// task provider interface
+async function getTasks(token, start, end) -> CalendarItem[]
+async function completeTask(token, taskId, listId) -> void
+async function updateTask(token, item) -> CalendarItem
 ```
 
 **Implemented providers (Phase 1):**
-- `GoogleCalendarProvider` — OAuth2, Google Calendar API v3, supports multiple accounts
-- `GoogleTasksProvider` — OAuth2 (shared token with calendar), Google Tasks API; parses agile-tasks metadata conventions from task body text
-- `ICSFeedProvider` — read-only, polls a URL on a configurable interval
+- `googleCalendar.js` — Google Calendar API v3; parses `---tasks---` blocks in event descriptions into `metadata.linked_task_ids`
+- `googleTasks.js` — Google Tasks API v1; parses agile-tasks metadata conventions (LOE, comments, checklists) from task notes field
 
-**Planned provider extensions (community):**
+**Planned provider extensions:**
 - Outlook / Microsoft 365
 - Apple Calendar (CalDAV)
 
-**Explicitly out of scope (initial release):**
-- Self-hosted task backend — Google Tasks remains the task provider indefinitely. The abstraction layer exists to normalize and extend Google's model, not to replace it.
+**Explicitly out of scope:**
+- Self-hosted task backend — Google Tasks is the task provider. The abstraction exists to normalize and extend Google's model, not replace it.
+- ICS feed output — indefinitely deferred.
 
 ---
 
@@ -172,23 +170,22 @@ class ITaskProvider(ABC):
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Backend language | Python / FastAPI | Minimal, async, great open source deployment story |
+| Hosting | Cloudflare Pages | Zero-ops, free tier, same pattern as agile-tasks |
+| Auth | PKCE + KV sessions | Client secret never in browser; tokens in KV, not localStorage |
 | Web frontend | Vanilla JS SPA | No build pipeline, maximum control over calendar rendering |
-| Mobile | Flutter | Single codebase for iOS + Android |
+| Mobile | Flutter (Phase 2) | Single codebase for iOS + Android |
 | Calendar rendering | Custom-rolled | Avoid fighting framework assumptions about task display |
-| Standards | ICS output, OAuth2 | Interop with any calendar client; standard auth |
-| Multi-account | Yes, Phase 1 | Multiple Google accounts merged into single view |
-| Provider pattern | Abstract interfaces | Normalize provider-specific models; accommodate metadata extensions (agile-tasks conventions in task body) |
+| No backend | Google APIs direct | No server to maintain; auth handled by Pages Functions |
+| Provider pattern | JS modules | Normalize provider-specific models; parse agile-tasks metadata extensions |
 | PWA | Optional | Offline support without a separate native app |
 
 ---
 
 ## Standards & Interop
 
-- **ICS / iCalendar (RFC 5545)**: Output feed format. Tasks serialized as `VEVENT` with appropriate `STATUS` and `DUE` fields
-- **CalDAV**: Not implemented in Phase 1, but provider abstraction accommodates it
-- **OAuth2**: Google auth. Tokens stored encrypted server-side, never in browser
-- **OpenAPI**: FastAPI auto-generates — all endpoints self-documented
+- **OAuth2 + PKCE**: Google auth via Cloudflare Pages Functions. Tokens in KV, never in browser storage
+- **Google Calendar API v3**: Primary event source
+- **Google Tasks API v1**: Task source; agile-tasks body conventions for structured metadata
 
 ---
 

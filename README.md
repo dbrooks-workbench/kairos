@@ -4,56 +4,53 @@
 
 A self-hosted calendar aggregation and personal task management platform. The calendar grid is the primary UI primitive — events, tasks, deadlines, and milestones all share a unified temporal model and render on it.
 
-Google Calendar and Google Tasks are the first (and currently only planned) provider implementations. The provider abstraction layer exists to normalize Google's data model and accommodate structured metadata extensions, not to swap out backends.
-
----
+Google Calendar and Google Tasks are the data providers. The app reads task metadata (LOE, comments, checklists) stored in the Google Tasks notes field using the conventions established in the agile-tasks project.
 
 ## Architecture
 
-```
-client/web      Vanilla JS SPA — custom week-view calendar grid, no framework
-api/            FastAPI backend — aggregates providers, serves /feed and /feed.ics
-```
+A static vanilla JS SPA deployed on Cloudflare Pages. Cloudflare Pages Functions handle the OAuth flow server-side (PKCE + KV session storage); the SPA calls Google APIs directly from the browser.
 
-The FastAPI backend normalizes all time-aware data to a common `CalendarItem` model and serves it as a unified JSON feed. A secondary `/feed.ics` endpoint produces a standard iCalendar feed consumable by any calendar client.
+```
+functions/auth/     Cloudflare Pages Functions — OAuth start/callback/refresh/logout
+client/web/         Static SPA — vanilla JS week-view calendar, no framework or build step
+```
 
 ## Deployment
 
-The stack runs as two Docker containers (FastAPI + nginx) managed by Docker Compose. Images are built by GitHub Actions and pushed to GHCR on every push to `main`.
+The app deploys automatically via Cloudflare Pages' GitHub integration on every push to `main`. No build step required.
 
-**On the server, you only need two files:**
+### First-time setup
+
+**1. Cloudflare KV namespace**
+
+In the Cloudflare dashboard, create a KV namespace named `kairos-sessions`. Copy the namespace ID and preview ID into `wrangler.toml`.
+
+**2. Cloudflare Pages project**
+
+Connect this GitHub repo to a new Cloudflare Pages project:
+- Build command: *(none)*
+- Build output directory: `client/web`
+- Add environment variables: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+
+**3. Google Cloud**
+
+- Enable Google Calendar API and Tasks API
+- OAuth consent screen: Internal (Google Workspace)
+- Scopes: `openid email calendar tasks`
+- OAuth 2.0 Web Client credential; authorized redirect URI: `https://your-pages-domain/auth/callback`
+
+Once deployed, visit `https://your-pages-domain/auth/start` to connect your Google account.
+
+## Local development
 
 ```bash
-# 1. Copy docker-compose.yml and .env to the server
-# 2. Authenticate to GHCR
-echo YOUR_PAT | docker login ghcr.io -u dbrooks-workbench --password-stdin
-# 3. Pull and start
-docker compose pull && docker compose up -d
+npm install -g wrangler
+cp .env.example .dev.vars   # fill in GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+wrangler pages dev client/web --compatibility-date=2024-09-23
 ```
 
-See `.env.example` for required configuration. `BASE_URL` must be set to your public domain — it drives OAuth redirect URIs.
-
-## Google Cloud Setup
-
-1. Create a project in [Google Cloud Console](https://console.cloud.google.com)
-2. Enable **Google Calendar API** and **Tasks API**
-3. Configure an OAuth consent screen (Internal if Google Workspace, External otherwise)
-4. Create an OAuth 2.0 Web Client credential; add `https://your-domain/api/auth/google/callback` as an authorized redirect URI
-5. Copy the client ID and secret into `.env`
-
-Once deployed, visit `https://your-domain/api/auth/google/login` to connect your Google account.
-
-## Development
-
-```bash
-cp .env.example .env
-# fill in GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL, SECRET_KEY
-
-docker compose up --build
-```
-
-The API auto-documents at `http://localhost/api/docs`.
+Wrangler reads KV bindings and `.dev.vars` automatically for local Pages dev.
 
 ## Status
 
-Phase 1 in progress — Google-backed validation build.
+Phase 1 in progress — Google Calendar and Tasks integration.
