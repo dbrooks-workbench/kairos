@@ -131,13 +131,15 @@ class ITaskProvider(ABC):
 
 **Implemented providers (Phase 1):**
 - `GoogleCalendarProvider` — OAuth2, Google Calendar API v3, supports multiple accounts
-- `GoogleTasksProvider` — OAuth2 (shared token with calendar), Google Tasks API
+- `GoogleTasksProvider` — OAuth2 (shared token with calendar), Google Tasks API; parses agile-tasks metadata conventions from task body text
 - `ICSFeedProvider` — read-only, polls a URL on a configurable interval
 
 **Planned provider extensions (community):**
 - Outlook / Microsoft 365
 - Apple Calendar (CalDAV)
-- Custom FastAPI task backend (the self-hosted replacement for Google Tasks)
+
+**Explicitly out of scope (initial release):**
+- Self-hosted task backend — Google Tasks remains the task provider indefinitely. The abstraction layer exists to normalize and extend Google's model, not to replace it.
 
 ---
 
@@ -155,16 +157,11 @@ class ITaskProvider(ABC):
 - [ ] Task rendering on calendar (all-day chips, deadline-aware positioning)
 - [ ] Type-driven interaction surface (events vs tasks have different click behavior)
 
-### Phase 2 — Self-Hosted Task Backend
-- [ ] FastAPI task CRUD API (replaces Google Tasks as provider)
-- [ ] Swap `GoogleTasksProvider` → `SelfHostedTaskProvider`
-- [ ] Task editing/creation UI in SPA
-
-### Phase 3 — Flutter Mobile
+### Phase 2 — Flutter Mobile
 - [ ] Flutter calendar app consuming same backend
 - [ ] Feature parity with web SPA
 
-### Phase 4 — Extensibility
+### Phase 3 — Extensibility
 - [ ] Plugin/adapter pattern for community providers
 - [ ] Custom event type registration
 - [ ] ICS feed import from arbitrary URLs
@@ -181,7 +178,7 @@ class ITaskProvider(ABC):
 | Calendar rendering | Custom-rolled | Avoid fighting framework assumptions about task display |
 | Standards | ICS output, OAuth2 | Interop with any calendar client; standard auth |
 | Multi-account | Yes, Phase 1 | Multiple Google accounts merged into single view |
-| Provider pattern | Abstract interfaces | Swap Google → self-hosted without UI changes |
+| Provider pattern | Abstract interfaces | Normalize provider-specific models; accommodate metadata extensions (agile-tasks conventions in task body) |
 | PWA | Optional | Offline support without a separate native app |
 
 ---
@@ -211,3 +208,4 @@ class ITaskProvider(ABC):
 - Provider interfaces should be finalized before writing implementations
 - The SPA calendar grid is custom — build the week view first, then month view
 - All-day area and timed area are separate rendering zones; tasks can appear in either depending on whether they have a time component
+- `GoogleTasksProvider` is responsible for parsing agile-tasks metadata conventions (stored in Google Tasks body text) and surfacing them via `CalendarItem.metadata`. See the agile-tasks repo for the conventions.
