@@ -208,4 +208,5 @@ class ITaskProvider(ABC):
 - Provider interfaces should be finalized before writing implementations
 - The SPA calendar grid is custom — build the week view first, then month view
 - All-day area and timed area are separate rendering zones; tasks can appear in either depending on whether they have a time component
-- `GoogleTasksProvider` is responsible for parsing agile-tasks metadata conventions (stored in Google Tasks body text) and surfacing them via `CalendarItem.metadata`. See the agile-tasks repo for the conventions.
+- `GoogleTasksProvider` must parse agile-tasks metadata conventions from the Google Tasks `notes` field and surface them via `CalendarItem.metadata`. Conventions (from `../agile-tasks/src/parsers.js`): LOE as `~1d 5h 20m` (→ `metadata.loe`), timestamped comments as `@2026-05-21T14:30:00 text` (→ `metadata.comments`), checklists as GFM `- [ ] item` (→ `metadata.checklist`). Serialization order within notes: prose body → checklist → LOE → comments.
+- `GoogleCalendarProvider` should parse the `---tasks---` block in event descriptions (agile-tasks convention for task-event linking) and surface linked task IDs via `metadata.linked_task_ids`.
