@@ -5,4 +5,4 @@ compatibility_date = "2024-09-23"
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_NAMESPACE_PREVIEW_ID"
+# preview_id is only needed for `wrangler pages dev` local development — skip for now
