@@ -195,6 +195,7 @@ async function updateTask(token, item) -> CalendarItem
 - Not a team collaboration tool (single-user, self-hosted first)
 - Not a replacement for a full PMS or project management suite — it is a *calendar-first* view of personal work
 - Not locked to Google — Google is the first implementation, not the architecture
+- Tasks are not events: due time and recurrence on tasks are considered abstraction leakage. A task needing a specific time or recurrence should be an event.
 
 ---
 
