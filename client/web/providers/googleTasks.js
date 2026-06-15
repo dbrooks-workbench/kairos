@@ -75,8 +75,8 @@ export async function getTasks(token, start, end) {
   const results = await Promise.allSettled(
     lists.map(async list => {
       const params = new URLSearchParams({
-        showCompleted: 'false',
-        showHidden: 'false',
+        showCompleted: 'true',
+        showHidden: 'true',
         dueMin: start.toISOString(),
         dueMax: end.toISOString(),
       })
