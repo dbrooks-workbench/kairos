@@ -9,6 +9,7 @@ const state = {
   items: [],
   calendars: [],
   hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
+  allDayCollapsed: true,
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -119,6 +120,13 @@ function renderCalendarPicker() {
     })
   })
 }
+
+// Toggle all-day section collapse
+document.getElementById('btn-allday-toggle').addEventListener('click', () => {
+  state.allDayCollapsed = !state.allDayCollapsed
+  renderAllDayToggle()
+  renderItems(getVisibleItems())
+})
 
 // Toggle picker panel open/close
 document.getElementById('btn-calendars').addEventListener('click', e => {
@@ -280,10 +288,18 @@ function computeOverlapLayout(events) {
   return sorted.map((ev, k) => ({ ...ev, colIdx: colIdx[k], numCols: numCols[k] }))
 }
 
-function renderItems(items) {
-  document.querySelectorAll('.cal-event, .allday-event').forEach(el => el.remove())
+const ALLDAY_LIMIT = 3
 
-  const timedByDay = Array.from({ length: 7 }, () => [])
+function renderAllDayToggle() {
+  document.getElementById('btn-allday-toggle').textContent =
+    (state.allDayCollapsed ? '▾' : '▴') + ' all‑day'
+}
+
+function renderItems(items) {
+  document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
+
+  const timedByDay  = Array.from({ length: 7 }, () => [])
+  const allDayByDay = Array.from({ length: 7 }, () => [])
 
   for (const item of items) {
     const start  = new Date(item.start)
@@ -291,17 +307,40 @@ function renderItems(items) {
     if (dayIdx < 0 || dayIdx >= 7) continue
 
     if (item.all_day) {
-      const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
-      if (!col) continue
+      allDayByDay[dayIdx].push(item)
+    } else {
+      const end = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
+      timedByDay[dayIdx].push({ item, start, end })
+    }
+  }
+
+  // All-day events — respect collapse state
+  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+    const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
+    if (!col) continue
+    const dayItems = allDayByDay[dayIdx]
+    const visible  = state.allDayCollapsed ? dayItems.slice(0, ALLDAY_LIMIT) : dayItems
+    const overflow = state.allDayCollapsed ? dayItems.length - ALLDAY_LIMIT : 0
+
+    for (const item of visible) {
       const el = document.createElement('div')
       el.className = `allday-event${item.item_type === 'TASK' ? ' type-task' : ''}`
       if (item.color) el.style.background = item.color
       el.textContent = item.title
       el.title = item.title
       col.appendChild(el)
-    } else {
-      const end = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
-      timedByDay[dayIdx].push({ item, start, end })
+    }
+
+    if (overflow > 0) {
+      const more = document.createElement('div')
+      more.className   = 'allday-more'
+      more.textContent = `+${overflow} more`
+      more.addEventListener('click', () => {
+        state.allDayCollapsed = false
+        renderAllDayToggle()
+        renderItems(getVisibleItems())
+      })
+      col.appendChild(more)
     }
   }
 
