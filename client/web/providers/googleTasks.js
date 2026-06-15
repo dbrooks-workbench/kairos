@@ -52,6 +52,21 @@ function normalizeTask(task, list) {
   }
 }
 
+export async function completeTask(token, listId, taskId) {
+  const res = await fetch(
+    `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'completed' }),
+    }
+  )
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+}
+
 export async function getTasks(token, start, end) {
   const lists = await getTaskLists(token)
   const results = await Promise.allSettled(

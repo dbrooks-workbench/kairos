@@ -1,6 +1,6 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks } from './providers/googleTasks.js'
+import { getTasks, completeTask } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -74,6 +74,19 @@ async function fetchItems(start, end) {
       .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
   ])
   return [...events, ...tasks]
+}
+
+async function handleCompleteTask(item) {
+  const token = await getToken()
+  if (!token) return
+  try {
+    await completeTask(token, item.source.account_id, item.source.external_id)
+    const target = state.items.find(i => i.id === item.id)
+    if (target) target.status = 'COMPLETED'
+    renderItems(getVisibleItems())
+  } catch (err) {
+    console.error('Failed to complete task:', err)
+  }
 }
 
 // Filter already-fetched items by calendar visibility — no network call needed.
@@ -323,11 +336,30 @@ function renderItems(items) {
     const overflow = state.allDayCollapsed ? dayItems.length - ALLDAY_LIMIT : 0
 
     for (const item of visible) {
+      const isTask = item.item_type === 'TASK'
+      const isDone = item.status === 'COMPLETED'
       const el = document.createElement('div')
-      el.className = `allday-event${item.item_type === 'TASK' ? ' type-task' : ''}`
-      if (item.color) el.style.background = item.color
-      el.textContent = item.title
+      el.className = `allday-event${isTask ? ' type-task' : ''}${isDone ? ' completed' : ''}`
       el.title = item.title
+
+      if (isTask) {
+        if (isDone) el.style.background = 'transparent'
+        else if (item.color) el.style.background = item.color
+
+        const check = document.createElement('button')
+        check.className = `task-check${isDone ? ' done' : ''}`
+        check.setAttribute('aria-label', isDone ? 'Completed' : 'Mark complete')
+        if (isDone) check.textContent = '✓'
+        else check.addEventListener('click', e => { e.stopPropagation(); handleCompleteTask(item) })
+
+        const titleSpan = document.createElement('span')
+        titleSpan.textContent = item.title
+        el.append(check, titleSpan)
+      } else {
+        if (item.color) el.style.background = item.color
+        el.textContent = item.title
+      }
+
       col.appendChild(el)
     }
 
