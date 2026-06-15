@@ -1,8 +1,9 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const VERSION   = '0.2.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -76,16 +77,23 @@ async function fetchItems(start, end) {
   return [...events, ...tasks]
 }
 
-async function handleCompleteTask(item) {
+async function handleToggleTask(item) {
   const token = await getToken()
   if (!token) return
+  const isDone = item.status === 'COMPLETED'
   try {
-    await completeTask(token, item.source.account_id, item.source.external_id)
-    const target = state.items.find(i => i.id === item.id)
-    if (target) target.status = 'COMPLETED'
+    if (isDone) {
+      await uncompleteTask(token, item.source.account_id, item.source.external_id)
+      const target = state.items.find(i => i.id === item.id)
+      if (target) target.status = 'NEEDS_ACTION'
+    } else {
+      await completeTask(token, item.source.account_id, item.source.external_id)
+      const target = state.items.find(i => i.id === item.id)
+      if (target) target.status = 'COMPLETED'
+    }
     renderItems(getVisibleItems())
   } catch (err) {
-    console.error('Failed to complete task:', err)
+    console.error('Failed to toggle task:', err)
   }
 }
 
@@ -348,9 +356,9 @@ function renderItems(items) {
 
           const check = document.createElement('button')
           check.className = `task-check${isDone ? ' done' : ''}`
-          check.setAttribute('aria-label', isDone ? 'Completed' : 'Mark complete')
+          check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
           if (isDone) check.textContent = '✓'
-          else check.addEventListener('click', e => { e.stopPropagation(); handleCompleteTask(item) })
+          check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
 
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
@@ -448,6 +456,9 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
   history.replaceState({}, '', '/')
   alert('Sign-in failed. Please try again.')
 }
+
+// Show version on hover over the app title
+document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 
 render().then(() => {
   // #pinned-top (col-headers + allday-row) is sticky so it always occupies
