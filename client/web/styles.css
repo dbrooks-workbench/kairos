@@ -381,7 +381,6 @@ body {
   border-radius: 6px;
   padding: 2px 4px;
   font-size: 11px;
-  line-height: 1.3;
   overflow: hidden;
   cursor: pointer;
   color: #fff;
@@ -389,6 +388,17 @@ body {
 }
 
 .cal-event.type-task { background: var(--task-color); }
+
+.event-title {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.event-time {
+  font-weight: 400;
+  opacity: 0.85;
+  line-height: 1.3;
+}
 
 .allday-event {
   border-radius: 3px;

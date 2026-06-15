@@ -215,6 +215,26 @@ function renderDayColumns() {
   }
 }
 
+// ── Time formatting ───────────────────────────────────────────────────────────
+
+// "8am–5pm", "1–4pm", "8:30–9am"
+// Same period → drop it from the start; different periods → show on both.
+function formatTimeRange(start, end) {
+  const sh = start.getHours(), sm = start.getMinutes()
+  const eh = end.getHours(),   em = end.getMinutes()
+  const sPeriod = sh < 12 ? 'am' : 'pm'
+  const ePeriod = eh < 12 ? 'am' : 'pm'
+
+  const fmt = (h, m) => {
+    const h12 = h % 12 || 12
+    return m === 0 ? `${h12}` : `${h12}:${String(m).padStart(2, '0')}`
+  }
+
+  const startStr = sPeriod === ePeriod ? fmt(sh, sm) : `${fmt(sh, sm)}${sPeriod}`
+  const endStr   = `${fmt(eh, em)}${ePeriod}`
+  return `${startStr}–${endStr}`
+}
+
 // ── Overlap layout ────────────────────────────────────────────────────────────
 
 // Given an array of {item, start, end} for one day's timed events, assigns
@@ -307,8 +327,14 @@ function renderItems(items) {
         el.style.width = `calc(${pct}% - 4px)`
         el.style.right = 'auto'
       }
-      el.textContent = item.title
-      el.title       = item.title
+      const titleEl = document.createElement('div')
+      titleEl.className   = 'event-title'
+      titleEl.textContent = item.title
+      const timeEl  = document.createElement('div')
+      timeEl.className   = 'event-time'
+      timeEl.textContent = formatTimeRange(start, end)
+      el.append(titleEl, timeEl)
+      el.title = item.title
       dayCol.appendChild(el)
     }
   }
