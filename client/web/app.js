@@ -290,14 +290,7 @@ function renderItems(items) {
     const dayCol = document.querySelector(`.timed-col[data-day="${dayIdx}"]`)
     if (!dayCol) continue
 
-    const layout = computeOverlapLayout(timedByDay[dayIdx])
-    console.group(`[overlap] day ${dayIdx}`)
-    layout.forEach(({ item, start, end, colIdx, numCols }) =>
-      console.log(`  col ${colIdx}/${numCols}  ${start.toLocaleTimeString()}–${end.toLocaleTimeString()}  "${item.title}"  cal=${item.source?.account_id}`)
-    )
-    console.groupEnd()
-
-    for (const { item, start, end, colIdx, numCols } of layout) {
+    for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
       const el     = document.createElement('div')
