@@ -1,4 +1,6 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
+import { getEvents } from './providers/googleCalendar.js'
+import { getTasks } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -38,19 +40,16 @@ function formatWeekLabel(start) {
   return `${s}–${e}`
 }
 
-// ── Google API ───────────────────────────────────────────────────────────────
-
-async function gFetch(url) {
-  const token = await getToken()
-  if (!token) return null
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-  if (!res.ok) return null
-  return res.json()
-}
+// ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchItems(start, end) {
-  // TODO: implement Google Calendar and Tasks fetches; return CalendarItem[]
-  return []
+  const token = await getToken()
+  if (!token) return []
+  const [events, tasks] = await Promise.all([
+    getEvents(token, start, end).catch(err => { console.error('Calendar fetch failed:', err); return [] }),
+    getTasks(token, start, end).catch(err => { console.error('Tasks fetch failed:', err); return [] }),
+  ])
+  return [...events, ...tasks]
 }
 
 // ── Auth UI ──────────────────────────────────────────────────────────────────
