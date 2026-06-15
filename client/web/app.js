@@ -284,9 +284,9 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 }
 
 render().then(() => {
-  // Scroll #calendar (the single scroll container) to 8am,
-  // accounting for the all-day row height above the timed area.
-  const calendar = document.getElementById('calendar')
-  const alldayRow = document.getElementById('allday-row')
-  calendar.scrollTop = alldayRow.offsetHeight + 8 * 60
+  // #col-headers is sticky so it always occupies the top of the visible area.
+  // Scroll past the all-day row then 8 hours into the timed grid.
+  const timedScroll = document.getElementById('timed-scroll')
+  const alldayRow   = document.getElementById('allday-row')
+  timedScroll.scrollTop = alldayRow.offsetHeight + 8 * 60
 })

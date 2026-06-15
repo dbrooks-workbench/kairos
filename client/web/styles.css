@@ -211,23 +211,35 @@ body {
 #connect-banner a:hover { text-decoration: underline; }
 
 /* ── Calendar shell ──────────────────────────────────────────────────────────
-   #calendar is the single scroll container. #col-headers is sticky so
-   day names stay visible. Everything shares one scrollbar → columns align.
+   #timed-scroll is THE single scroll container. #col-headers, #allday-row,
+   and #timed-area are all direct children so they share one content width.
+   The scrollbar only appears on #timed-scroll; no other element scrolls,
+   so columns are identical widths across all three sections.
    ────────────────────────────────────────────────────────────────────────── */
 
 #calendar {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Day name + date number headers — sticky at top of scroll container */
+#timed-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: scroll;   /* always-visible scrollbar = consistent content width */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Day name + date number headers — sticky inside the scroll container */
 #col-headers {
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--bg);
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
   border-bottom: 1px solid var(--border);
@@ -279,6 +291,7 @@ body {
 
 /* All-day row */
 #allday-row {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
   border-bottom: 1px solid var(--border);
@@ -306,8 +319,9 @@ body {
 
 .allday-col:last-child { border-right: none; }
 
-/* Timed area — not a scroll container, just lays out gutter + columns */
-#timed-scroll {
+/* Timed area — same width as headers above since it's in the same scroll container */
+#timed-area {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
 }
