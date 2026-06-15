@@ -111,15 +111,26 @@ export async function moveTask(token, fromListId, taskId, toListId, overrides = 
   return newTask
 }
 
-// Fetch all tasks from all lists without a date filter (used by the board view).
+// Fetch all tasks for the board view.
+// - Active tasks: all included (no date filter applies to needsAction tasks)
+// - Completed tasks: last 30 days only (matches Google's own purge window, so
+//   there's nothing older to fetch anyway)
+// - maxResults=100 (API max) on every page to minimise round-trips
 export async function getAllTasks(token) {
   const lists = await getTaskLists(token)
+  // 30 days ago — the furthest back completed tasks can exist before Google purges them
+  const completedMin = new Date(Date.now() - 30 * 86_400_000).toISOString()
+
   const results = await Promise.allSettled(
     lists.map(async list => {
-      const tasks = await paginate(
-        token,
-        `${BASE}/lists/${encodeURIComponent(list.id)}/tasks?showCompleted=true&showHidden=true`
-      )
+      const enc    = encodeURIComponent(list.id)
+      const params = new URLSearchParams({
+        maxResults:   '100',
+        showCompleted: 'true',
+        showHidden:    'true',
+        completedMin,
+      })
+      const tasks = await paginate(token, `${BASE}/lists/${enc}/tasks?${params}`)
       return tasks.map(t => normalizeTask(t, list))
     })
   )
@@ -137,8 +148,9 @@ export async function getTasks(token, start, end) {
   const results = await Promise.allSettled(
     lists.map(async list => {
       const params = new URLSearchParams({
+        maxResults:    '100',
         showCompleted: 'true',
-        showHidden: 'true',
+        showHidden:    'true',
         dueMin: start.toISOString(),
         dueMax: end.toISOString(),
       })
