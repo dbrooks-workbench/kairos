@@ -346,10 +346,6 @@ body {
 
 .allday-col:last-child { border-right: none; }
 
-/* Collapsed all-day band: hide the event columns, shrink to label height */
-#allday-row.band-collapsed { min-height: 0; }
-#allday-row.band-collapsed #allday-cols { display: none; }
-
 /* Timed area — same width as headers above since it's in the same scroll container */
 #timed-area {
   flex-shrink: 0;

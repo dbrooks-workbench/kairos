@@ -9,8 +9,7 @@ const state = {
   items: [],
   calendars: [],
   hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
-  allDayCollapsed: false,  // true = band fully hidden (chevron)
-  allDayExpanded:  false,  // true = show all events beyond the 3-cap
+  allDayExpanded: false,   // false = top-3 cap; true = show all
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -135,10 +134,9 @@ function renderCalendarPicker() {
   })
 }
 
-// Toggle all-day section collapse
+// Toggle all-day between top-3 cap and show-all
 document.getElementById('btn-allday-toggle').addEventListener('click', () => {
-  state.allDayCollapsed = !state.allDayCollapsed
-  if (state.allDayCollapsed) state.allDayExpanded = false  // reset on hide
+  state.allDayExpanded = !state.allDayExpanded
   renderAllDayToggle()
   renderItems(getVisibleItems())
 })
@@ -305,8 +303,7 @@ function computeOverlapLayout(events) {
 
 function renderAllDayToggle() {
   document.getElementById('btn-allday-toggle').textContent =
-    (state.allDayCollapsed ? '▾' : '▴') + ' all‑day'
-  document.getElementById('allday-row').classList.toggle('band-collapsed', state.allDayCollapsed)
+    (state.allDayExpanded ? '▴' : '▾') + ' all‑day'
 }
 
 function renderItems(items) {
@@ -328,8 +325,8 @@ function renderItems(items) {
     }
   }
 
-  // All-day events — hidden entirely when band is collapsed
-  if (!state.allDayCollapsed) {
+  // All-day events — top-3 cap or show-all depending on allDayExpanded
+  {
     const LIMIT = 3
     for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
       const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
@@ -372,19 +369,10 @@ function renderItems(items) {
         more.textContent = `+${overflow} more`
         more.addEventListener('click', () => {
           state.allDayExpanded = true
+          renderAllDayToggle()
           renderItems(getVisibleItems())
         })
         col.appendChild(more)
-      } else if (state.allDayExpanded && dayItems.length > LIMIT && dayIdx === 0) {
-        // "− less" chip only in the first column to avoid visual clutter
-        const less = document.createElement('div')
-        less.className   = 'allday-more'
-        less.textContent = '− less'
-        less.addEventListener('click', () => {
-          state.allDayExpanded = false
-          renderItems(getVisibleItems())
-        })
-        col.appendChild(less)
       }
     }
   }
