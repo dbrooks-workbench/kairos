@@ -223,35 +223,33 @@ function renderDayColumns() {
 function computeOverlapLayout(events) {
   if (events.length === 0) return []
 
-  // Sort by start time; break ties by putting longer events first so they
-  // claim the earliest slot and shorter ones fill in around them.
-  const sorted = [...events].sort((a, b) =>
-    (a.start - b.start) || ((b.end - b.start) - (a.end - a.start))
-  )
+  // Work in epoch-ms throughout to avoid any Date-object comparison ambiguity.
+  const sorted = [...events]
+    .map(ev => ({ ...ev, s: ev.start.getTime(), e: ev.end.getTime() }))
+    .sort((a, b) => (a.s - b.s) || ((b.e - b.s) - (a.e - a.s)))
 
   const colIdx  = new Array(sorted.length).fill(0)
   const numCols = new Array(sorted.length).fill(1)
 
   let i = 0
   while (i < sorted.length) {
-    // Expand the cluster: any event that overlaps with any event already in
-    // the cluster (tracked via clusterEnd) joins the cluster.
-    let clusterEnd = sorted[i].end
+    // Expand the cluster: include every event that overlaps with anything
+    // already in the cluster (tracked by the running clusterEnd timestamp).
+    let clusterEnd = sorted[i].e
     let j = i + 1
-    while (j < sorted.length && sorted[j].start < clusterEnd) {
-      if (sorted[j].end > clusterEnd) clusterEnd = sorted[j].end
+    while (j < sorted.length && sorted[j].s < clusterEnd) {
+      if (sorted[j].e > clusterEnd) clusterEnd = sorted[j].e
       j++
     }
 
-    // Greedy slot assignment: for each event find the earliest slot whose
-    // last occupant ended at or before this event's start.
-    const slotEnds = []
+    // Greedy slot assignment: give each event the earliest slot whose last
+    // occupant finished at or before this event's start.
+    const slotEnds = [] // numeric ms timestamps
     for (let k = i; k < j; k++) {
-      const ev   = sorted[k]
-      let slot   = slotEnds.findIndex(end => end <= ev.start)
+      let slot = slotEnds.findIndex(end => end <= sorted[k].s)
       if (slot === -1) slot = slotEnds.length
-      slotEnds[slot] = ev.end
-      colIdx[k]  = slot
+      slotEnds[slot] = sorted[k].e
+      colIdx[k] = slot
     }
 
     const n = slotEnds.length
