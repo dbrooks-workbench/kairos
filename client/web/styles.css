@@ -233,13 +233,15 @@ body {
   flex-direction: column;
 }
 
-/* Day name + date number headers — sticky inside the scroll container */
-#col-headers {
+/* Day headers + all-day row pinned together — only timed grid scrolls */
+#pinned-top {
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--bg);
-  flex-shrink: 0;
+}
+
+#col-headers {
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
   border-bottom: 1px solid var(--border);
@@ -315,6 +317,7 @@ body {
   border-right: 1px solid var(--border);
   padding: 2px;
   min-height: 30px;
+  overflow: hidden;  /* clips chips to their grid column */
 }
 
 .allday-col:last-child { border-right: none; }

@@ -284,9 +284,9 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 }
 
 render().then(() => {
-  // #col-headers is sticky so it always occupies the top of the visible area.
-  // Scroll past the all-day row then 8 hours into the timed grid.
+  // #pinned-top (col-headers + allday-row) is sticky so it always occupies
+  // the top of the visible area. Scroll the timed grid to 8am.
   const timedScroll = document.getElementById('timed-scroll')
-  const alldayRow   = document.getElementById('allday-row')
-  timedScroll.scrollTop = alldayRow.offsetHeight + 8 * 60
+  const pinnedTop   = document.getElementById('pinned-top')
+  timedScroll.scrollTop = pinnedTop.offsetHeight + 8 * 60
 })
