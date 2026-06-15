@@ -378,7 +378,7 @@ body {
 
 .cal-event {
   position: absolute;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 2px 4px;
   font-size: 11px;
   line-height: 1.3;

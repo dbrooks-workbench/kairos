@@ -290,14 +290,21 @@ function renderItems(items) {
     const dayCol = document.querySelector(`.timed-col[data-day="${dayIdx}"]`)
     if (!dayCol) continue
 
-    for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
+    const layout = computeOverlapLayout(timedByDay[dayIdx])
+    console.group(`[overlap] day ${dayIdx}`)
+    layout.forEach(({ item, start, end, colIdx, numCols }) =>
+      console.log(`  col ${colIdx}/${numCols}  ${start.toLocaleTimeString()}–${end.toLocaleTimeString()}  "${item.title}"  cal=${item.source?.account_id}`)
+    )
+    console.groupEnd()
+
+    for (const { item, start, end, colIdx, numCols } of layout) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
       const el     = document.createElement('div')
       el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
-      el.style.height = `${durMin}px`
+      el.style.height = `${durMin - 2}px`
       if (numCols === 1) {
         el.style.left  = '2px'
         el.style.right = '2px'
