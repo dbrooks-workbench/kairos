@@ -52,23 +52,85 @@ function normalizeTask(task, list) {
   }
 }
 
-async function patchTaskStatus(token, listId, taskId, status) {
+export async function patchTask(token, listId, taskId, fields) {
   const res = await fetch(
     `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
     {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ status }),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
     }
+  )
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+  if (res.status === 204) return null
+  return res.json()
+}
+
+export const completeTask   = (token, listId, taskId) => patchTask(token, listId, taskId, { status: 'completed' })
+export const uncompleteTask = (token, listId, taskId) => patchTask(token, listId, taskId, { status: 'needsAction' })
+
+export async function createTask(token, listId, { title, notes, due }) {
+  const body = { title }
+  if (notes) body.notes = notes
+  if (due)   body.due   = due.includes('T') ? due : `${due}T00:00:00.000Z`
+  const res = await fetch(`${BASE}/lists/${encodeURIComponent(listId)}/tasks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
+export async function deleteTask(token, listId, taskId) {
+  const res = await fetch(
+    `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
   )
   if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
 }
 
-export const completeTask   = (token, listId, taskId) => patchTaskStatus(token, listId, taskId, 'completed')
-export const uncompleteTask = (token, listId, taskId) => patchTaskStatus(token, listId, taskId, 'needsAction')
+// Move a task between lists: read → create in target → delete from source.
+// Pass overrides to update content during the move (used by the modal's save path).
+export async function moveTask(token, fromListId, taskId, toListId, overrides = null) {
+  const src = await get(token, `${BASE}/lists/${encodeURIComponent(fromListId)}/tasks/${encodeURIComponent(taskId)}`)
+  const body = {
+    title: overrides?.title ?? src.title,
+    notes: overrides?.notes ?? src.notes,
+  }
+  const rawDue = overrides ? overrides.due : src.due
+  if (rawDue) body.due = rawDue.includes('T') ? rawDue : `${rawDue}T00:00:00.000Z`
+  const createRes = await fetch(`${BASE}/lists/${encodeURIComponent(toListId)}/tasks`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!createRes.ok) throw new Error(`Tasks API ${createRes.status} ${createRes.statusText}`)
+  const newTask = await createRes.json()
+  await deleteTask(token, fromListId, taskId)
+  return newTask
+}
+
+// Fetch all tasks from all lists without a date filter (used by the board view).
+export async function getAllTasks(token) {
+  const lists = await getTaskLists(token)
+  const results = await Promise.allSettled(
+    lists.map(async list => {
+      const tasks = await paginate(
+        token,
+        `${BASE}/lists/${encodeURIComponent(list.id)}/tasks?showCompleted=true&showHidden=true`
+      )
+      return tasks.map(t => normalizeTask(t, list))
+    })
+  )
+  return {
+    lists,
+    tasks: results.flatMap(r => {
+      if (r.status === 'rejected') { console.warn('Board tasks fetch error:', r.reason); return [] }
+      return r.value
+    }),
+  }
+}
 
 export async function getTasks(token, start, end) {
   const lists = await getTaskLists(token)

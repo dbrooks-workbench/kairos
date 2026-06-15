@@ -46,6 +46,54 @@ export function parseTaskNotes(notes) {
   }
 }
 
+// ── Serialization ────────────────────────────────────────────────────────────
+// Order: prose body → checklist → LOE line → comments (chronological)
+
+export function serializeNotes({ body, loe, checklist, comments }) {
+  const parts = []
+  if (body?.trim()) parts.push(body.trim())
+  if (checklist?.length)
+    parts.push(checklist.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'))
+  if (loe?.trim()) parts.push(`~${loe.trim()}`)
+  if (comments?.length) {
+    const sorted = [...comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    parts.push(sorted.map(c => `@${c.timestamp} ${c.text}`).join('\n'))
+  }
+  return parts.join('\n')
+}
+
+// ── LOE helpers ───────────────────────────────────────────────────────────────
+
+export function normalizeLoe(raw) {
+  if (!raw?.trim()) return null
+  const val = raw.trim().replace(/^~\s*/, '').trim()
+  if (!val) return null
+  const m = LOE_RE.exec('~' + val)
+  if (!m || (!m[1] && !m[2] && !m[3])) return null
+  return val
+}
+
+export function loeLabel(loe) {
+  if (!loe) return null
+  return loe.replace(/^~\s*/, '').trim() || null
+}
+
+// ── Timestamp helpers ─────────────────────────────────────────────────────────
+
+export function nowTimestamp() {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+export function displayTimestamp(ts) {
+  if (!ts) return ''
+  const d = new Date(ts.includes('T') ? ts : ts + 'T00:00:00')
+  if (isNaN(d)) return ts
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
 // ── Event description parser ──────────────────────────────────────────────────
 // Format: prose → JSON config block → @timestamp log entries
 

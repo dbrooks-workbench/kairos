@@ -1,9 +1,11 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, getAllTasks } from './providers/googleTasks.js'
+import { renderBoard, destroyBoard } from './board.js'
+import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.2.0'
+const VERSION   = '0.3.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -11,6 +13,9 @@ const state = {
   calendars: [],
   hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
   allDayExpanded: false,   // false = top-3 cap; true = show all
+  view: 'calendar',        // 'calendar' | 'board'
+  taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
+  boardItems: [],          // CalendarItem[] — all tasks, no date filter
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -94,6 +99,83 @@ async function handleToggleTask(item) {
     renderItems(getVisibleItems())
   } catch (err) {
     console.error('Failed to toggle task:', err)
+  }
+}
+
+// ── View switching ────────────────────────────────────────────────────────────
+
+function setView(v) {
+  state.view = v
+  document.getElementById('calendar').hidden = v !== 'calendar'
+  document.getElementById('board').hidden    = v !== 'board'
+  document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
+  document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
+
+  stopPolling()
+  if (v === 'board') {
+    loadBoardData()
+    startPolling(60_000)
+  } else {
+    startPolling(120_000)
+  }
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+
+let _pollHandle = null
+
+function startPolling(ms) {
+  stopPolling()
+  _pollHandle = setInterval(async () => {
+    if (document.hidden) return
+    if (state.view === 'board') {
+      await loadBoardData()
+    } else {
+      const end  = addDays(state.weekStart, 7)
+      state.items = await fetchItems(state.weekStart, end)
+      renderItems(getVisibleItems())
+    }
+  }, ms)
+}
+
+function stopPolling() {
+  if (_pollHandle !== null) { clearInterval(_pollHandle); _pollHandle = null }
+}
+
+// Resume immediately when the user returns to the tab
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return
+  if (state.view === 'board') loadBoardData()
+  else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
+    state.items = items
+    renderItems(getVisibleItems())
+  })
+})
+
+// ── Board data + callbacks ────────────────────────────────────────────────────
+
+function boardCallbacks() {
+  return {
+    onCreate:     listId  => openCreateModal(listId, state.taskLists, { onSaved: loadBoardData }),
+    onEdit:       item    => openModal(item, state.taskLists, {
+      onSaved:      loadBoardData,
+      onDeleted:    loadBoardData,
+      onToggleDone: loadBoardData,
+    }),
+    onRefresh: loadBoardData,
+  }
+}
+
+async function loadBoardData() {
+  const token = await getToken()
+  if (!token) return
+  try {
+    const { lists, tasks } = await getAllTasks(token)
+    state.taskLists  = lists
+    state.boardItems = tasks
+    renderBoard(state.taskLists, state.boardItems, boardCallbacks())
+  } catch (err) {
+    console.error('Board data load failed:', err)
   }
 }
 
@@ -457,8 +539,15 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
   alert('Sign-in failed. Please try again.')
 }
 
+// View toggle
+document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
+document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
+
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
+
+// Init modal event listeners once
+initModal()
 
 render().then(() => {
   // #pinned-top (col-headers + allday-row) is sticky so it always occupies
@@ -466,4 +555,5 @@ render().then(() => {
   const timedScroll = document.getElementById('timed-scroll')
   const pinnedTop   = document.getElementById('pinned-top')
   timedScroll.scrollTop = pinnedTop.offsetHeight + 8 * 60
+  startPolling(120_000)
 })

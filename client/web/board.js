@@ -1,0 +1,204 @@
+import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
+import { getToken } from './auth.js'
+import { completeTask, uncompleteTask, moveTask } from './providers/googleTasks.js'
+
+const DONE_COL_ID = '__done__'
+let _sortables  = []
+let _callbacks  = {}
+
+export function destroyBoard() {
+  _sortables.forEach(s => { try { s.destroy() } catch {} })
+  _sortables = []
+  document.getElementById('board').innerHTML = ''
+}
+
+export function renderBoard(taskLists, boardItems, callbacks) {
+  destroyBoard()
+  _callbacks = callbacks
+
+  const board = document.getElementById('board')
+
+  // Partition: active tasks keyed by list, completed tasks in Done column
+  const activeByList = {}
+  const doneItems    = []
+
+  for (const item of boardItems) {
+    if (item.status === 'COMPLETED') {
+      doneItems.push(item)
+    } else {
+      const lid = item.source.account_id
+      if (!activeByList[lid]) activeByList[lid] = []
+      activeByList[lid].push(item)
+    }
+  }
+
+  // One column per task list
+  for (const list of taskLists) {
+    const col = buildCol(list, activeByList[list.id] ?? [], false)
+    board.appendChild(col)
+    _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
+      group: 'tasks',
+      animation: 150,
+      ghostClass: 'board-ghost',
+      dragClass:  'board-dragging',
+      onEnd: handleDrop,
+    }))
+  }
+
+  // Done column — cap at 50 to keep the list manageable
+  const doneCol = buildCol({ id: DONE_COL_ID, title: 'Done' }, doneItems.slice(0, 50), true)
+  board.appendChild(doneCol)
+  _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
+    group: 'tasks',
+    animation: 150,
+    ghostClass: 'board-ghost',
+    onEnd: handleDrop,
+  }))
+}
+
+// ── Column ────────────────────────────────────────────────────────────────────
+
+function buildCol(list, items, isDone) {
+  const col = document.createElement('div')
+  col.className = `board-col${isDone ? ' board-col-done' : ''}`
+
+  // Header
+  const hdr = document.createElement('div')
+  hdr.className = 'board-col-header'
+
+  const titleEl = document.createElement('span')
+  titleEl.className = 'board-col-title'
+  titleEl.textContent = list.title
+
+  const countEl = document.createElement('span')
+  countEl.className = 'board-col-count'
+  countEl.textContent = items.length
+
+  hdr.append(titleEl, countEl)
+
+  if (!isDone) {
+    const addBtn = document.createElement('button')
+    addBtn.className = 'board-add-btn'
+    addBtn.title     = 'New task'
+    addBtn.textContent = '+'
+    addBtn.addEventListener('click', () => _callbacks.onCreate?.(list.id))
+    hdr.appendChild(addBtn)
+  }
+
+  // Task list
+  const listEl = document.createElement('div')
+  listEl.className      = 'board-task-list'
+  listEl.dataset.listId = list.id
+
+  for (const item of items) listEl.appendChild(buildCard(item))
+
+  col.append(hdr, listEl)
+  return col
+}
+
+// ── Card ──────────────────────────────────────────────────────────────────────
+
+function buildCard(item) {
+  const isDone = item.status === 'COMPLETED'
+  const card   = document.createElement('div')
+  card.className         = `board-card${isDone ? ' board-card-done' : ''}`
+  card.dataset.itemId    = item.id
+  card.dataset.listId    = item.source.account_id   // actual Google list ID
+  card.dataset.extId     = item.source.external_id  // Google task ID
+
+  const titleEl = document.createElement('div')
+  titleEl.className   = 'board-card-title'
+  titleEl.textContent = item.title
+  card.appendChild(titleEl)
+
+  const chips = buildChips(item)
+  if (chips.length) {
+    const meta = document.createElement('div')
+    meta.className = 'board-card-meta'
+    chips.forEach(c => meta.appendChild(c))
+    card.appendChild(meta)
+  }
+
+  card.addEventListener('click', () => _callbacks.onEdit?.(item))
+  return card
+}
+
+function buildChips(item) {
+  const chips = []
+
+  if (item.due) {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const due   = new Date(item.due); due.setHours(0, 0, 0, 0)
+    const diff  = Math.round((due - today) / 86_400_000)
+    const chip  = document.createElement('span')
+    chip.className = 'board-chip board-chip-due'
+    if (diff < 0)       chip.classList.add('overdue')
+    else if (diff === 0) chip.classList.add('today')
+    chip.textContent = diff === 0  ? 'Today'
+      : diff === -1 ? 'Yesterday'
+      : diff === 1  ? 'Tomorrow'
+      : due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    chips.push(chip)
+  }
+
+  if (item.metadata?.loe) {
+    const chip = document.createElement('span')
+    chip.className   = 'board-chip board-chip-loe'
+    chip.textContent = item.metadata.loe
+    chips.push(chip)
+  }
+
+  const cl = item.metadata?.checklist
+  if (cl?.length) {
+    const done = cl.filter(c => c.checked).length
+    const chip = document.createElement('span')
+    chip.className   = `board-chip board-chip-cl${done === cl.length ? ' complete' : ''}`
+    chip.textContent = `${done}/${cl.length} ✓`
+    chips.push(chip)
+  }
+
+  const cm = item.metadata?.comments
+  if (cm?.length) {
+    const chip = document.createElement('span')
+    chip.className   = 'board-chip board-chip-comments'
+    chip.textContent = `${cm.length} 💬`
+    chips.push(chip)
+  }
+
+  return chips
+}
+
+// ── Drag-drop ─────────────────────────────────────────────────────────────────
+
+async function handleDrop(evt) {
+  const { item: cardEl, from, to } = evt
+  if (from === to && evt.oldIndex === evt.newIndex) return
+
+  const fromColId = from.dataset.listId
+  const toColId   = to.dataset.listId
+  if (fromColId === toColId) return  // same-column reorder not yet supported
+
+  const listId = cardEl.dataset.listId  // actual Google Tasks list ID
+  const extId  = cardEl.dataset.extId
+
+  try {
+    const token = await getToken()
+    if (!token) { _callbacks.onRefresh?.(); return }
+
+    if (toColId === DONE_COL_ID) {
+      // Dropped into Done → complete
+      await completeTask(token, listId, extId)
+    } else if (fromColId === DONE_COL_ID) {
+      // Dragged out of Done → uncomplete (then move if to a different list)
+      await uncompleteTask(token, listId, extId)
+      if (toColId !== listId) await moveTask(token, listId, extId, toColId)
+    } else {
+      // Moved between active lists
+      await moveTask(token, listId, extId, toColId)
+    }
+  } catch (err) {
+    console.error('Drop failed:', err)
+  }
+
+  _callbacks.onRefresh?.()
+}

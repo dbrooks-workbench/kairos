@@ -19,6 +19,10 @@
         <span id="week-label"></span>
       </div>
       <div id="header-right">
+        <div class="view-toggle">
+          <button id="btn-view-calendar" class="view-toggle-btn active">Calendar</button>
+          <button id="btn-view-board"    class="view-toggle-btn">Board</button>
+        </div>
         <div id="cal-picker-wrap">
           <button id="btn-calendars">Calendars</button>
           <div id="cal-picker-panel" hidden></div>
@@ -49,6 +53,71 @@
         <div id="timed-area">
           <div id="time-gutter"></div>
           <div id="timed-cols"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Board view -->
+  <div id="board" hidden></div>
+
+  <!-- Task editor modal -->
+  <div id="task-modal" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <input id="modal-title" class="modal-title-input" type="text" placeholder="Task title…">
+        <button id="modal-close" class="modal-close-btn" title="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-field-row">
+          <label class="modal-label">List</label>
+          <select id="modal-list" class="modal-select"></select>
+        </div>
+        <div class="modal-field-row">
+          <label class="modal-label">Due</label>
+          <input id="modal-due" class="modal-input" type="date">
+        </div>
+        <div class="modal-field-row">
+          <label class="modal-label">LOE</label>
+          <input id="modal-loe" class="modal-input" type="text" placeholder="1d 4h 30m">
+          <span id="modal-loe-error" class="modal-loe-error" hidden>Invalid format (use 1d 4h 30m)</span>
+        </div>
+        <div class="modal-field">
+          <textarea id="modal-notes" class="modal-notes" placeholder="Notes…" rows="4"></textarea>
+        </div>
+        <details class="modal-section" id="modal-checklist-section">
+          <summary>
+            <span class="modal-chevron">›</span>
+            Checklist
+            <span id="modal-checklist-count" class="modal-section-count"></span>
+          </summary>
+          <div id="modal-checklist-items"></div>
+          <div class="modal-add-row">
+            <input id="modal-checklist-input" type="text" placeholder="Add item…">
+            <button id="modal-checklist-add">Add</button>
+          </div>
+        </details>
+        <details class="modal-section" id="modal-comments-section">
+          <summary>
+            <span class="modal-chevron">›</span>
+            Comments
+            <span id="modal-comments-count" class="modal-section-count"></span>
+          </summary>
+          <div id="modal-comments-items"></div>
+          <div class="modal-add-row">
+            <input id="modal-comment-input" type="text" placeholder="Add comment…">
+            <button id="modal-comment-add">Add</button>
+          </div>
+        </details>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button id="modal-delete"          class="btn-danger"    hidden>Delete</button>
+          <button id="modal-toggle-complete" class="btn-secondary" hidden>Mark complete</button>
+        </div>
+        <div class="modal-footer-right">
+          <button id="modal-cancel" class="btn-ghost">Cancel</button>
+          <button id="modal-save"   class="btn-primary">Save</button>
         </div>
       </div>
     </div>
