@@ -1,6 +1,6 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, getAllTasks } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 
@@ -102,6 +102,32 @@ async function handleToggleTask(item) {
   }
 }
 
+// ── Loading indicator ─────────────────────────────────────────────────────────
+
+function showLoading() { document.getElementById('loading-bar').hidden = false }
+function hideLoading() { document.getElementById('loading-bar').hidden = true  }
+
+// ── Calendar-view modal callbacks ─────────────────────────────────────────────
+
+async function refreshCalendarItems() {
+  const end  = addDays(state.weekStart, 7)
+  state.items = await fetchItems(state.weekStart, end)
+  renderItems(getVisibleItems())
+}
+
+function calendarModalCallbacks() {
+  return { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems, onToggleDone: refreshCalendarItems }
+}
+
+// Ensure task lists are loaded (needed by the modal's list selector).
+// Called lazily before first modal open if render() hasn't populated them yet.
+async function ensureTaskLists() {
+  if (state.taskLists.length) return
+  const token = await getToken()
+  if (!token) return
+  state.taskLists = await getTaskLists(token)
+}
+
 // ── View switching ────────────────────────────────────────────────────────────
 
 function setView(v) {
@@ -169,6 +195,7 @@ function boardCallbacks() {
 async function loadBoardData() {
   const token = await getToken()
   if (!token) return
+  showLoading()
   try {
     const { lists, tasks } = await getAllTasks(token)
     state.taskLists  = lists
@@ -176,6 +203,8 @@ async function loadBoardData() {
     renderBoard(state.taskLists, state.boardItems, boardCallbacks())
   } catch (err) {
     console.error('Board data load failed:', err)
+  } finally {
+    hideLoading()
   }
 }
 
@@ -445,6 +474,12 @@ function renderItems(items) {
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
           el.append(check, titleSpan)
+          // Clicking the chip body (not the check button) opens the editor
+          el.style.cursor = 'pointer'
+          el.addEventListener('click', async () => {
+            await ensureTaskLists()
+            openModal(item, state.taskLists, calendarModalCallbacks())
+          })
         } else {
           if (item.color) el.style.background = item.color
           el.textContent = item.title
@@ -497,6 +532,12 @@ function renderItems(items) {
       timeEl.textContent = formatTimeRange(start, end)
       el.append(titleEl, timeEl)
       el.title = item.title
+      if (item.item_type === 'TASK') {
+        el.addEventListener('click', async () => {
+          await ensureTaskLists()
+          openModal(item, state.taskLists, calendarModalCallbacks())
+        })
+      }
       dayCol.appendChild(el)
     }
   }
@@ -510,11 +551,21 @@ async function render() {
   renderTimeGutter()
   renderDayColumns()
   renderAccountStatus()
-  loadCalendars() // async, populates picker in background
+  loadCalendars()  // async, populates calendar picker in background
 
-  const end = addDays(state.weekStart, 7)
-  state.items = await fetchItems(state.weekStart, end)
-  renderItems(getVisibleItems())
+  showLoading()
+  try {
+    const end = addDays(state.weekStart, 7)
+    // Fetch items and task lists in parallel; task lists power the modal list selector
+    const [items] = await Promise.all([
+      fetchItems(state.weekStart, end),
+      getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
+    ])
+    state.items = items
+    renderItems(getVisibleItems())
+  } finally {
+    hideLoading()
+  }
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────

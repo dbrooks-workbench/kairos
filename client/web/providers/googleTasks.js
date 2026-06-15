@@ -19,7 +19,7 @@ async function paginate(token, url) {
   return items
 }
 
-async function getTaskLists(token) {
+export async function getTaskLists(token) {
   const data = await get(token, `${BASE}/users/@me/lists`)
   return data.items ?? []
 }
