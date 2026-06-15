@@ -123,6 +123,14 @@
       </div>
     </div><!-- /.modal-panel -->
     </div><!-- /#task-modal -->
+
+    <!-- Snooze popover (shared, positioned via JS) -->
+    <div id="snooze-popover" hidden>
+      <span class="snooze-label">Snooze for</span>
+      <input id="snooze-days" class="snooze-input" type="number" min="1" max="365" value="3">
+      <span id="snooze-day-label" class="snooze-unit">days</span>
+      <button id="snooze-confirm" class="snooze-ok">OK</button>
+    </div>
   </div><!-- /#app -->
 
   <script type="module" src="app.js"></script>

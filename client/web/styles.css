@@ -1020,3 +1020,100 @@ body {
 }
 
 .btn-danger:hover { background: #fce8e6; }
+
+/* ── Snooze popover ──────────────────────────────────── */
+
+#snooze-popover {
+  position: fixed;
+  z-index: 300;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.16);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 228px;
+}
+
+.snooze-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.snooze-input {
+  width: 48px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+}
+
+.snooze-input:focus { border-color: var(--today-color); }
+
+.snooze-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 28px;
+}
+
+.snooze-ok {
+  background: var(--today-color);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.snooze-ok:hover { opacity: 0.9; }
+
+/* Snooze button on calendar all-day task chips */
+.task-snooze {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+  display: flex;
+  align-items: center;
+}
+
+.allday-event.type-task:hover .task-snooze { opacity: 0.85; }
+.task-snooze:hover { opacity: 1 !important; }
+
+/* Snooze button on board cards */
+.board-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.board-card-header .board-card-title { flex: 1; }
+
+.card-snooze {
+  flex-shrink: 0;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.board-card:hover .card-snooze { opacity: 0.55; }
+.card-snooze:hover { opacity: 1 !important; }

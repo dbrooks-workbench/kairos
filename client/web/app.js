@@ -1,11 +1,11 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
-import { renderBoard, destroyBoard } from './board.js'
+import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.3.0'
+const VERSION   = '0.4.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -473,8 +473,21 @@ function renderItems(items) {
 
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
-          el.append(check, titleSpan)
-          // Clicking the chip body (not the check button) opens the editor
+
+          const snoozeBtn = item.due && !isDone ? (() => {
+            const btn = document.createElement('button')
+            btn.className = 'task-snooze'
+            btn.title     = 'Snooze'
+            btn.textContent = '⏰'
+            btn.addEventListener('click', e => {
+              e.stopPropagation()
+              openSnoozePopover(btn, item, refreshCalendarItems)
+            })
+            return btn
+          })() : null
+
+          el.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+          // Clicking the chip body (not the check/snooze button) opens the editor
           el.style.cursor = 'pointer'
           el.addEventListener('click', async () => {
             await ensureTaskLists()
@@ -597,8 +610,9 @@ document.getElementById('btn-view-board').addEventListener('click',    () => set
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 
-// Init modal event listeners once
+// Init modal + snooze popover listeners once
 initModal()
+initSnooze()
 
 render().then(() => {
   // #pinned-top (col-headers + allday-row) is sticky so it always occupies

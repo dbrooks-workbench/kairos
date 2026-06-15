@@ -1,10 +1,111 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask } from './providers/googleTasks.js'
+import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 
 const DONE_COL_ID = '__done__'
 let _sortables  = []
 let _callbacks  = {}
+
+// ── Snooze popover ────────────────────────────────────────────────────────────
+
+let _snoozeItem      = null
+let _snoozeOnRefresh = null
+let _activeSnoozeBtn = null
+
+async function executeSnooze() {
+  const n = parseInt(document.getElementById('snooze-days').value, 10)
+  if (!n || n < 1 || !_snoozeItem) return
+
+  const item = _snoozeItem
+  const cb   = _snoozeOnRefresh
+
+  const newDue = new Date(item.due)
+  newDue.setDate(newDue.getDate() + n)
+  const pad = v => String(v).padStart(2, '0')
+  const newDueIso = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}T00:00:00.000Z`
+  const dateLabel = newDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+  const newNotes = serializeNotes({
+    body:      item.metadata.body      ?? '',
+    loe:       item.metadata.loe       ?? null,
+    checklist: item.metadata.checklist ?? [],
+    comments:  [...(item.metadata.comments ?? []), {
+      timestamp: nowTimestamp(),
+      text: `Snoozed — follow up on ${dateLabel}`,
+    }],
+  })
+
+  document.getElementById('snooze-popover').hidden = true
+  _activeSnoozeBtn = null
+  _snoozeItem      = null
+  _snoozeOnRefresh = null
+
+  try {
+    const token = await getToken()
+    if (token) {
+      await patchTask(token, item.source.account_id, item.source.external_id, {
+        due:   newDueIso,
+        notes: newNotes,
+      })
+    }
+  } catch (err) {
+    console.error('Snooze failed:', err)
+  }
+  cb?.()
+}
+
+export function openSnoozePopover(btn, item, onRefresh) {
+  const popover = document.getElementById('snooze-popover')
+
+  if (_activeSnoozeBtn === btn && !popover.hidden) {
+    popover.hidden = true
+    _activeSnoozeBtn = null
+    return
+  }
+
+  _snoozeItem      = item
+  _snoozeOnRefresh = onRefresh
+  _activeSnoozeBtn = btn
+
+  const daysInput = document.getElementById('snooze-days')
+  daysInput.value = 3
+  document.getElementById('snooze-day-label').textContent = 'days'
+
+  const rect = btn.getBoundingClientRect()
+  const popoverWidth = 228
+  const left = Math.min(rect.left, window.innerWidth - popoverWidth - 8)
+  popover.style.top  = `${rect.bottom + 6}px`
+  popover.style.left = `${Math.max(8, left)}px`
+  popover.hidden = false
+  daysInput.focus()
+  daysInput.select()
+}
+
+export function initSnooze() {
+  document.getElementById('snooze-days').addEventListener('input', () => {
+    const n = parseInt(document.getElementById('snooze-days').value, 10)
+    document.getElementById('snooze-day-label').textContent = n === 1 ? 'day' : 'days'
+  })
+  document.getElementById('snooze-confirm').addEventListener('click', executeSnooze)
+  document.getElementById('snooze-days').addEventListener('keydown', e => {
+    if (e.key === 'Enter')  executeSnooze()
+    if (e.key === 'Escape') {
+      document.getElementById('snooze-popover').hidden = true
+      _activeSnoozeBtn = null
+    }
+  })
+  document.addEventListener('mousedown', e => {
+    const popover = document.getElementById('snooze-popover')
+    if (!popover.hidden
+        && !popover.contains(e.target)
+        && !e.target.closest('.card-snooze')
+        && !e.target.closest('.task-snooze')) {
+      popover.hidden = true
+      _activeSnoozeBtn = null
+    }
+  })
+}
 
 export function destroyBoard() {
   _sortables.forEach(s => { try { s.destroy() } catch {} })
@@ -106,10 +207,28 @@ function buildCard(item) {
   card.dataset.listId    = item.source.account_id   // actual Google list ID
   card.dataset.extId     = item.source.external_id  // Google task ID
 
+  // Header row: title + optional snooze button
+  const hdr = document.createElement('div')
+  hdr.className = 'board-card-header'
+
   const titleEl = document.createElement('div')
   titleEl.className   = 'board-card-title'
   titleEl.textContent = item.title
-  card.appendChild(titleEl)
+  hdr.appendChild(titleEl)
+
+  if (item.due && !isDone) {
+    const snoozeBtn = document.createElement('button')
+    snoozeBtn.className = 'card-snooze'
+    snoozeBtn.title     = 'Snooze'
+    snoozeBtn.textContent = '⏰'
+    snoozeBtn.addEventListener('click', e => {
+      e.stopPropagation()
+      openSnoozePopover(snoozeBtn, item, () => _callbacks.onRefresh?.())
+    })
+    hdr.appendChild(snoozeBtn)
+  }
+
+  card.appendChild(hdr)
 
   const chips = buildChips(item)
   if (chips.length) {
