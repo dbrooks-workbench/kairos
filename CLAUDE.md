@@ -195,7 +195,7 @@ async function updateTask(token, item) -> CalendarItem
 - Not a team collaboration tool (single-user, self-hosted first)
 - Not a replacement for a full PMS or project management suite — it is a *calendar-first* view of personal work
 - Not locked to Google — Google is the first implementation, not the architecture
-- Tasks are not events: due time and recurrence on tasks are considered abstraction leakage. A task needing a specific time or recurrence should be an event.
+- Tasks are not events: due time and recurrence are event properties, not task properties. Recurrence belongs on calendar events; a recurring commitment that triggers work should be modelled as a recurring event, not a recurring task. Google's own recurring task feature is considered a kludge that confirms this boundary. `GoogleTasksProvider` has no RRULE logic.
 
 ---
 
