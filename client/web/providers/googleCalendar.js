@@ -25,9 +25,8 @@ async function paginate(token, url) {
   return items
 }
 
-async function getCalendars(token) {
+export async function getCalendars(token) {
   const data = await get(token, `${BASE}/users/me/calendarList`)
-  // Exclude calendars where we only have free/busy visibility
   return (data.items ?? []).filter(c => c.accessRole !== 'freeBusyReader')
 }
 
@@ -84,10 +83,13 @@ function resolveColor(colorId) {
   return GCal_COLORS[colorId] ?? null
 }
 
-export async function getEvents(token, start, end) {
+export async function getEvents(token, start, end, visibleCalendarIds = null) {
   const calendars = await getCalendars(token)
+  const active = visibleCalendarIds
+    ? calendars.filter(c => visibleCalendarIds.has(c.id))
+    : calendars
   const results = await Promise.allSettled(
-    calendars.map(async calendar => {
+    active.map(async calendar => {
       const params = new URLSearchParams({
         timeMin: start.toISOString(),
         timeMax: end.toISOString(),

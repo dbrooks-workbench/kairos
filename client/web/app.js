@@ -1,5 +1,5 @@
 import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
-import { getEvents } from './providers/googleCalendar.js'
+import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -7,6 +7,8 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const state = {
   weekStart: getWeekStart(new Date()),
   items: [],
+  calendars: [],
+  hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -42,15 +44,91 @@ function formatWeekLabel(start) {
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
+async function loadCalendars() {
+  const token = await getToken()
+  if (!token) return
+  try {
+    state.calendars = await getCalendars(token)
+    renderCalendarPicker()
+  } catch (err) {
+    console.error('Failed to load calendar list:', err)
+  }
+}
+
 async function fetchItems(start, end) {
   const token = await getToken()
   if (!token) return []
+
+  const visibleIds = state.calendars.length
+    ? new Set(state.calendars.filter(c => !state.hiddenCalendars.has(c.id)).map(c => c.id))
+    : null
+
   const [events, tasks] = await Promise.all([
-    getEvents(token, start, end).catch(err => { console.error('Calendar fetch failed:', err); return [] }),
-    getTasks(token, start, end).catch(err => { console.error('Tasks fetch failed:', err); return [] }),
+    getEvents(token, start, end, visibleIds)
+      .catch(err => { console.error('Calendar events fetch failed:', err); return [] }),
+    getTasks(token, start, end)
+      .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
   ])
   return [...events, ...tasks]
 }
+
+// ── Calendar picker ───────────────────────────────────────────────────────────
+
+function renderCalendarPicker() {
+  const panel = document.getElementById('cal-picker-panel')
+  const btn   = document.getElementById('btn-calendars')
+  const visible = state.calendars.filter(c => !state.hiddenCalendars.has(c.id))
+
+  // Update button badge
+  btn.innerHTML = `Calendars <span class="count">${visible.length}/${state.calendars.length}</span>`
+
+  if (state.calendars.length === 0) {
+    panel.innerHTML = '<div class="cal-picker-empty">No calendars found</div>'
+    return
+  }
+
+  panel.innerHTML = state.calendars.map(cal => `
+    <label class="cal-picker-item">
+      <input type="checkbox" data-cal-id="${cal.id}"
+             ${state.hiddenCalendars.has(cal.id) ? '' : 'checked'}>
+      <span class="cal-swatch" style="background:${cal.backgroundColor ?? '#1a73e8'}"></span>
+      <span title="${cal.summary}">${cal.summary}</span>
+    </label>
+  `).join('')
+
+  panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.calId
+      if (cb.checked) state.hiddenCalendars.delete(id)
+      else            state.hiddenCalendars.add(id)
+      localStorage.setItem('kairos:hidden-cals', JSON.stringify([...state.hiddenCalendars]))
+      renderCalendarPicker()
+      refreshItems()
+    })
+  })
+}
+
+async function refreshItems() {
+  const end = addDays(state.weekStart, 7)
+  const items = await fetchItems(state.weekStart, end)
+  state.items = items
+  renderItems(items)
+}
+
+// Toggle picker panel open/close
+document.getElementById('btn-calendars').addEventListener('click', e => {
+  e.stopPropagation()
+  const panel = document.getElementById('cal-picker-panel')
+  panel.hidden = !panel.hidden
+})
+
+document.addEventListener('click', () => {
+  document.getElementById('cal-picker-panel').hidden = true
+})
+
+document.getElementById('cal-picker-panel').addEventListener('click', e => {
+  e.stopPropagation()
+})
 
 // ── Auth UI ──────────────────────────────────────────────────────────────────
 
@@ -145,6 +223,7 @@ function renderItems(items) {
       if (!col) continue
       const el = document.createElement('div')
       el.className = `allday-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      if (item.color) el.style.background = item.color
       el.textContent = item.title
       el.title = item.title
       col.appendChild(el)
@@ -156,6 +235,7 @@ function renderItems(items) {
       const durMin  = Math.max((end - start) / 60_000, 15)
       const el      = document.createElement('div')
       el.className  = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
       el.style.height = `${durMin}px`
       el.textContent  = item.title
@@ -173,6 +253,7 @@ async function render() {
   renderTimeGutter()
   renderDayColumns()
   renderAccountStatus()
+  loadCalendars() // async, populates picker in background
 
   const end   = addDays(state.weekStart, 7)
   const items = await fetchItems(state.weekStart, end)
@@ -203,5 +284,9 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 }
 
 render().then(() => {
-  document.getElementById('timed-scroll').scrollTop = 8 * 60
+  // Scroll #calendar (the single scroll container) to 8am,
+  // accounting for the all-day row height above the timed area.
+  const calendar = document.getElementById('calendar')
+  const alldayRow = document.getElementById('allday-row')
+  calendar.scrollTop = alldayRow.offsetHeight + 8 * 60
 })

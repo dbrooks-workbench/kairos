@@ -7,6 +7,7 @@
   --task-color: #0f9d58;
   --text: #202124;
   --text-muted: #70757a;
+  --bg: #fff;
 }
 
 *, *::before, *::after {
@@ -40,9 +41,17 @@ body {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 16px;
+  position: relative;
+  z-index: 20;
 }
 
 #header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#header-right {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -84,9 +93,99 @@ body {
   color: var(--text-muted);
 }
 
-#account-status a {
+#account-status a, #account-status button {
   color: var(--today-color);
   text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
+/* ── Calendar picker ─────────────────────── */
+
+#cal-picker-wrap {
+  position: relative;
+}
+
+#btn-calendars {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#btn-calendars:hover { background: #f1f3f4; }
+
+#btn-calendars .count {
+  font-size: 11px;
+  background: var(--today-color);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+#cal-picker-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 220px;
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 100;
+  padding: 6px 0;
+}
+
+#cal-picker-panel[hidden] { display: none; }
+
+.cal-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.cal-picker-item:hover { background: #f1f3f4; }
+
+.cal-picker-item input[type=checkbox] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--today-color);
+}
+
+.cal-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.cal-picker-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-picker-empty {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 /* ── Connect banner ──────────────────────── */
@@ -111,21 +210,27 @@ body {
 
 #connect-banner a:hover { text-decoration: underline; }
 
-/* ── Calendar shell ──────────────────────── */
+/* ── Calendar shell ──────────────────────────────────────────────────────────
+   #calendar is the single scroll container. #col-headers is sticky so
+   day names stay visible. Everything shares one scrollbar → columns align.
+   ────────────────────────────────────────────────────────────────────────── */
 
 #calendar {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
 }
 
-/* Day name + date number headers */
+/* Day name + date number headers — sticky at top of scroll container */
 #col-headers {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
 }
 
 #col-headers-gutter {
@@ -178,7 +283,6 @@ body {
   grid-template-columns: var(--gutter-w) 1fr;
   border-bottom: 1px solid var(--border);
   min-height: 32px;
-  flex-shrink: 0;
 }
 
 #allday-label {
@@ -202,10 +306,8 @@ body {
 
 .allday-col:last-child { border-right: none; }
 
-/* Timed scroll area — both gutter and grid scroll together */
+/* Timed area — not a scroll container, just lays out gutter + columns */
 #timed-scroll {
-  flex: 1;
-  overflow-y: auto;
   display: grid;
   grid-template-columns: var(--gutter-w) 1fr;
 }
@@ -267,7 +369,6 @@ body {
   line-height: 1.3;
   overflow: hidden;
   cursor: pointer;
-  background: var(--event-color);
   color: #fff;
   z-index: 1;
 }
@@ -280,7 +381,6 @@ body {
   font-size: 12px;
   overflow: hidden;
   cursor: pointer;
-  background: var(--event-color);
   color: #fff;
   white-space: nowrap;
   text-overflow: ellipsis;
