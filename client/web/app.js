@@ -9,7 +9,7 @@ const state = {
   items: [],
   calendars: [],
   hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
-  allDayCollapsed: true,
+  allDayCollapsed: false,
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -301,11 +301,10 @@ function computeOverlapLayout(events) {
   return sorted.map((ev, k) => ({ ...ev, colIdx: colIdx[k], numCols: numCols[k] }))
 }
 
-const ALLDAY_LIMIT = 3
-
 function renderAllDayToggle() {
   document.getElementById('btn-allday-toggle').textContent =
     (state.allDayCollapsed ? '▾' : '▴') + ' all‑day'
+  document.getElementById('allday-row').classList.toggle('band-collapsed', state.allDayCollapsed)
 }
 
 function renderItems(items) {
@@ -327,52 +326,39 @@ function renderItems(items) {
     }
   }
 
-  // All-day events — respect collapse state
-  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
-    const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
-    if (!col) continue
-    const dayItems = allDayByDay[dayIdx]
-    const visible  = state.allDayCollapsed ? dayItems.slice(0, ALLDAY_LIMIT) : dayItems
-    const overflow = state.allDayCollapsed ? dayItems.length - ALLDAY_LIMIT : 0
+  // All-day events — hidden entirely when band is collapsed
+  if (!state.allDayCollapsed) {
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
+      if (!col) continue
 
-    for (const item of visible) {
-      const isTask = item.item_type === 'TASK'
-      const isDone = item.status === 'COMPLETED'
-      const el = document.createElement('div')
-      el.className = `allday-event${isTask ? ' type-task' : ''}${isDone ? ' completed' : ''}`
-      el.title = item.title
+      for (const item of allDayByDay[dayIdx]) {
+        const isTask = item.item_type === 'TASK'
+        const isDone = item.status === 'COMPLETED'
+        const el = document.createElement('div')
+        el.className = `allday-event${isTask ? ' type-task' : ''}${isDone ? ' completed' : ''}`
+        el.title = item.title
 
-      if (isTask) {
-        if (isDone) el.style.background = 'transparent'
-        else if (item.color) el.style.background = item.color
+        if (isTask) {
+          if (isDone) el.style.background = 'transparent'
+          else if (item.color) el.style.background = item.color
 
-        const check = document.createElement('button')
-        check.className = `task-check${isDone ? ' done' : ''}`
-        check.setAttribute('aria-label', isDone ? 'Completed' : 'Mark complete')
-        if (isDone) check.textContent = '✓'
-        else check.addEventListener('click', e => { e.stopPropagation(); handleCompleteTask(item) })
+          const check = document.createElement('button')
+          check.className = `task-check${isDone ? ' done' : ''}`
+          check.setAttribute('aria-label', isDone ? 'Completed' : 'Mark complete')
+          if (isDone) check.textContent = '✓'
+          else check.addEventListener('click', e => { e.stopPropagation(); handleCompleteTask(item) })
 
-        const titleSpan = document.createElement('span')
-        titleSpan.textContent = item.title
-        el.append(check, titleSpan)
-      } else {
-        if (item.color) el.style.background = item.color
-        el.textContent = item.title
+          const titleSpan = document.createElement('span')
+          titleSpan.textContent = item.title
+          el.append(check, titleSpan)
+        } else {
+          if (item.color) el.style.background = item.color
+          el.textContent = item.title
+        }
+
+        col.appendChild(el)
       }
-
-      col.appendChild(el)
-    }
-
-    if (overflow > 0) {
-      const more = document.createElement('div')
-      more.className   = 'allday-more'
-      more.textContent = `+${overflow} more`
-      more.addEventListener('click', () => {
-        state.allDayCollapsed = false
-        renderAllDayToggle()
-        renderItems(getVisibleItems())
-      })
-      col.appendChild(more)
     }
   }
 
