@@ -13,6 +13,14 @@ const state = {
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
+// Compare by local calendar date (year/month/day) using Date.UTC so that DST
+// offsets cancel out and a "day" is always exactly 86 400 000 ms.
+function localDayIndex(date, weekStart) {
+  const a = Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate())
+  const b = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  return Math.round((b - a) / 86_400_000)
+}
+
 function getWeekStart(date) {
   const d = new Date(date)
   d.setHours(0, 0, 0, 0)
@@ -58,13 +66,8 @@ async function loadCalendars() {
 async function fetchItems(start, end) {
   const token = await getToken()
   if (!token) return []
-
-  const visibleIds = state.calendars.length
-    ? new Set(state.calendars.filter(c => !state.hiddenCalendars.has(c.id)).map(c => c.id))
-    : null
-
   const [events, tasks] = await Promise.all([
-    getEvents(token, start, end, visibleIds)
+    getEvents(token, start, end)
       .catch(err => { console.error('Calendar events fetch failed:', err); return [] }),
     getTasks(token, start, end)
       .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
@@ -72,15 +75,24 @@ async function fetchItems(start, end) {
   return [...events, ...tasks]
 }
 
+// Filter already-fetched items by calendar visibility — no network call needed.
+function getVisibleItems() {
+  return state.items.filter(item =>
+    item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
+  )
+}
+
 // ── Calendar picker ───────────────────────────────────────────────────────────
+
+function updateCalPickerBadge() {
+  const visible = state.calendars.filter(c => !state.hiddenCalendars.has(c.id))
+  document.getElementById('btn-calendars').innerHTML =
+    `Calendars <span class="count">${visible.length}/${state.calendars.length}</span>`
+}
 
 function renderCalendarPicker() {
   const panel = document.getElementById('cal-picker-panel')
-  const btn   = document.getElementById('btn-calendars')
-  const visible = state.calendars.filter(c => !state.hiddenCalendars.has(c.id))
-
-  // Update button badge
-  btn.innerHTML = `Calendars <span class="count">${visible.length}/${state.calendars.length}</span>`
+  updateCalPickerBadge()
 
   if (state.calendars.length === 0) {
     panel.innerHTML = '<div class="cal-picker-empty">No calendars found</div>'
@@ -102,17 +114,10 @@ function renderCalendarPicker() {
       if (cb.checked) state.hiddenCalendars.delete(id)
       else            state.hiddenCalendars.add(id)
       localStorage.setItem('kairos:hidden-cals', JSON.stringify([...state.hiddenCalendars]))
-      renderCalendarPicker()
-      refreshItems()
+      updateCalPickerBadge()
+      renderItems(getVisibleItems())
     })
   })
-}
-
-async function refreshItems() {
-  const end = addDays(state.weekStart, 7)
-  const items = await fetchItems(state.weekStart, end)
-  state.items = items
-  renderItems(items)
 }
 
 // Toggle picker panel open/close
@@ -210,12 +215,61 @@ function renderDayColumns() {
   }
 }
 
+// ── Overlap layout ────────────────────────────────────────────────────────────
+
+// Given an array of {item, start, end} for one day's timed events, assigns
+// each a colIdx (0-based slot) and numCols (total slots in its cluster) so
+// overlapping events sit side-by-side rather than stacking.
+function computeOverlapLayout(events) {
+  if (events.length === 0) return []
+
+  // Sort by start time; break ties by putting longer events first so they
+  // claim the earliest slot and shorter ones fill in around them.
+  const sorted = [...events].sort((a, b) =>
+    (a.start - b.start) || ((b.end - b.start) - (a.end - a.start))
+  )
+
+  const colIdx  = new Array(sorted.length).fill(0)
+  const numCols = new Array(sorted.length).fill(1)
+
+  let i = 0
+  while (i < sorted.length) {
+    // Expand the cluster: any event that overlaps with any event already in
+    // the cluster (tracked via clusterEnd) joins the cluster.
+    let clusterEnd = sorted[i].end
+    let j = i + 1
+    while (j < sorted.length && sorted[j].start < clusterEnd) {
+      if (sorted[j].end > clusterEnd) clusterEnd = sorted[j].end
+      j++
+    }
+
+    // Greedy slot assignment: for each event find the earliest slot whose
+    // last occupant ended at or before this event's start.
+    const slotEnds = []
+    for (let k = i; k < j; k++) {
+      const ev   = sorted[k]
+      let slot   = slotEnds.findIndex(end => end <= ev.start)
+      if (slot === -1) slot = slotEnds.length
+      slotEnds[slot] = ev.end
+      colIdx[k]  = slot
+    }
+
+    const n = slotEnds.length
+    for (let k = i; k < j; k++) numCols[k] = n
+    i = j
+  }
+
+  return sorted.map((ev, k) => ({ ...ev, colIdx: colIdx[k], numCols: numCols[k] }))
+}
+
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event').forEach(el => el.remove())
 
+  const timedByDay = Array.from({ length: 7 }, () => [])
+
   for (const item of items) {
     const start  = new Date(item.start)
-    const dayIdx = Math.floor((start - state.weekStart) / 86_400_000)
+    const dayIdx = localDayIndex(start, state.weekStart)
     if (dayIdx < 0 || dayIdx >= 7) continue
 
     if (item.all_day) {
@@ -228,19 +282,36 @@ function renderItems(items) {
       el.title = item.title
       col.appendChild(el)
     } else {
-      const col = document.querySelector(`.timed-col[data-day="${dayIdx}"]`)
-      if (!col) continue
-      const topMin  = start.getHours() * 60 + start.getMinutes()
-      const end     = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
-      const durMin  = Math.max((end - start) / 60_000, 15)
-      const el      = document.createElement('div')
-      el.className  = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      const end = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
+      timedByDay[dayIdx].push({ item, start, end })
+    }
+  }
+
+  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+    if (timedByDay[dayIdx].length === 0) continue
+    const dayCol = document.querySelector(`.timed-col[data-day="${dayIdx}"]`)
+    if (!dayCol) continue
+
+    for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
+      const topMin = start.getHours() * 60 + start.getMinutes()
+      const durMin = Math.max((end - start) / 60_000, 15)
+      const el     = document.createElement('div')
+      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
       el.style.height = `${durMin}px`
-      el.textContent  = item.title
-      el.title        = item.title
-      col.appendChild(el)
+      if (numCols === 1) {
+        el.style.left  = '2px'
+        el.style.right = '2px'
+      } else {
+        const pct      = 100 / numCols
+        el.style.left  = `calc(${colIdx * pct}% + 2px)`
+        el.style.width = `calc(${pct}% - 4px)`
+        el.style.right = 'auto'
+      }
+      el.textContent = item.title
+      el.title       = item.title
+      dayCol.appendChild(el)
     }
   }
 }
@@ -255,10 +326,9 @@ async function render() {
   renderAccountStatus()
   loadCalendars() // async, populates picker in background
 
-  const end   = addDays(state.weekStart, 7)
-  const items = await fetchItems(state.weekStart, end)
-  state.items = items
-  renderItems(items)
+  const end = addDays(state.weekStart, 7)
+  state.items = await fetchItems(state.weekStart, end)
+  renderItems(getVisibleItems())
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────

@@ -25,7 +25,10 @@ async function getTaskLists(token) {
 }
 
 function normalizeTask(task, list) {
-  const due = task.due ? new Date(task.due) : null
+  // task.due is UTC midnight (e.g. "2026-06-15T00:00:00.000Z"). Parsing directly
+  // shifts the date back by one day in any timezone west of UTC. Instead, extract
+  // the date portion and parse as local midnight so the day matches the due date.
+  const due = task.due ? new Date(task.due.slice(0, 10) + 'T00:00:00') : null
   const { body, loe, checklist, comments } = parseTaskNotes(task.notes ?? '')
 
   return {

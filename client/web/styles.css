@@ -378,8 +378,6 @@ body {
 
 .cal-event {
   position: absolute;
-  left: 2px;
-  right: 2px;
   border-radius: 4px;
   padding: 2px 4px;
   font-size: 11px;

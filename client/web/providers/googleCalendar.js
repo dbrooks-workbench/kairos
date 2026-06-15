@@ -83,13 +83,10 @@ function resolveColor(colorId) {
   return GCal_COLORS[colorId] ?? null
 }
 
-export async function getEvents(token, start, end, visibleCalendarIds = null) {
+export async function getEvents(token, start, end) {
   const calendars = await getCalendars(token)
-  const active = visibleCalendarIds
-    ? calendars.filter(c => visibleCalendarIds.has(c.id))
-    : calendars
   const results = await Promise.allSettled(
-    active.map(async calendar => {
+    calendars.map(async calendar => {
       const params = new URLSearchParams({
         timeMin: start.toISOString(),
         timeMax: end.toISOString(),
