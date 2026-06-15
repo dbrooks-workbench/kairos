@@ -111,29 +111,32 @@ export async function moveTask(token, fromListId, taskId, toListId, overrides = 
   return newTask
 }
 
-// Fetch all tasks for the board view.
-// - Active tasks: all included (no date filter applies to needsAction tasks)
-// - Completed tasks: last 30 days only (matches Google's own purge window, so
-//   there's nothing older to fetch anyway)
-// - maxResults=100 (API max) on every page to minimise round-trips
+// Fetch all tasks for the board view using two separate queries per list:
+// 1. Active (needsAction) tasks — no date constraint, typically a small set
+// 2. Completed tasks from the last 30 days — Google purges beyond that anyway
+// completedMin only filters the completed field; active tasks have no completed
+// field so a single query with completedMin would silently drop all active tasks.
 export async function getAllTasks(token) {
-  const lists = await getTaskLists(token)
-  // 30 days ago — the furthest back completed tasks can exist before Google purges them
+  const lists        = await getTaskLists(token)
   const completedMin = new Date(Date.now() - 30 * 86_400_000).toISOString()
 
   const results = await Promise.allSettled(
     lists.map(async list => {
-      const enc    = encodeURIComponent(list.id)
-      const params = new URLSearchParams({
-        maxResults:   '100',
-        showCompleted: 'true',
-        showHidden:    'true',
-        completedMin,
-      })
-      const tasks = await paginate(token, `${BASE}/lists/${enc}/tasks?${params}`)
-      return tasks.map(t => normalizeTask(t, list))
+      const enc = encodeURIComponent(list.id)
+
+      const [active, done] = await Promise.all([
+        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=false&showHidden=false`),
+        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=true&showHidden=true&completedMin=${encodeURIComponent(completedMin)}`),
+      ])
+
+      // Deduplicate by Google task ID then normalise
+      const seen = new Set()
+      return [...active, ...done]
+        .filter(t => !seen.has(t.id) && seen.add(t.id))
+        .map(t => normalizeTask(t, list))
     })
   )
+
   return {
     lists,
     tasks: results.flatMap(r => {
