@@ -228,13 +228,13 @@ body {
 }
 .acct-sweep-select:focus { border-color: var(--today-color); }
 
-.sweep-btn {
+.acct-sweep-now {
+  margin-top: 6px;
   background: none; border: 1px solid var(--border); border-radius: 5px;
-  padding: 4px 10px; font-size: 12px; cursor: pointer;
-  color: var(--text-muted); white-space: nowrap;
+  padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  color: var(--text-muted); width: 100%;
 }
-.sweep-btn:hover { border-color: var(--today-color); color: var(--today-color); }
-.sweep-btn.sweeping { opacity: 0.5; cursor: default; pointer-events: none; }
+.acct-sweep-now:hover { border-color: var(--today-color); color: var(--today-color); }
 
 /* ── Calendar picker ─────────────────────── */
 

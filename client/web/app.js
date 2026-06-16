@@ -289,17 +289,14 @@ async function renderAccountStatus() {
   const accounts = await getTokens()
   const statusEl = document.getElementById('account-status')
   const bannerEl = document.getElementById('connect-banner')
-  const sweepBtn = document.getElementById('btn-sweep')
 
   if (!accounts.length) {
     statusEl.innerHTML = `<a href="${loginUrl()}">Sign in</a>`
     bannerEl.style.display = 'flex'
-    sweepBtn.hidden = true
     return
   }
 
   bannerEl.style.display = 'none'
-  sweepBtn.hidden = !accounts.some(a => !a.primary)
 
   statusEl.innerHTML = `<button id="btn-accounts-toggle">Accounts ▾</button>`
   document.getElementById('btn-accounts-toggle').addEventListener('click', e => {
@@ -348,8 +345,8 @@ function renderAccountPanel(accounts) {
   addSec.innerHTML = `<button class="acct-add" id="btn-add-secondary">+ Add secondary account</button>`
   panel.appendChild(addSec)
 
-  // Sweep destination
-  if (state.taskLists.length) {
+  // Sweep destination + trigger (only when secondary accounts exist)
+  if (secondaries.length && state.taskLists.length) {
     const sweepSec = el('div', 'acct-section acct-section-border')
     sweepSec.innerHTML = `
       <div class="acct-sweep-config">
@@ -359,7 +356,8 @@ function renderAccountPanel(accounts) {
             `<option value="${escHtml(l.id)}"${l.id === configListId ? ' selected' : ''}>${escHtml(l.title)}</option>`
           ).join('')}
         </select>
-      </div>`
+      </div>
+      <button class="acct-sweep-now" id="btn-sweep-now">Sweep now</button>`
     panel.appendChild(sweepSec)
   }
 
@@ -370,6 +368,10 @@ function renderAccountPanel(accounts) {
   })
   panel.querySelector('#sweep-target-list')?.addEventListener('change', e => {
     setSweepTargetListId(e.target.value)
+  })
+  panel.querySelector('#btn-sweep-now')?.addEventListener('click', () => {
+    panel.hidden = true
+    runSweepAndRefresh()
   })
 }
 
@@ -386,9 +388,6 @@ async function runSweepAndRefresh() {
   const secondaries = accounts.filter(a => !a.primary)
   if (!secondaries.length) return
 
-  const sweepBtn = document.getElementById('btn-sweep')
-  sweepBtn?.classList.add('sweeping')
-
   try {
     const { moved } = await runSweep(accounts, state.taskLists)
     if (moved > 0) {
@@ -401,8 +400,6 @@ async function runSweepAndRefresh() {
     }
   } catch (err) {
     console.error('Sweep error:', err)
-  } finally {
-    sweepBtn?.classList.remove('sweeping')
   }
 }
 
@@ -733,9 +730,6 @@ document.addEventListener('click', () => {
   document.getElementById('account-panel').hidden = true
 })
 document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
-
-// Manual sweep trigger
-document.getElementById('btn-sweep').addEventListener('click', () => runSweepAndRefresh())
 
 render().then(() => {
   // #pinned-top (col-headers + allday-row) is sticky so it always occupies
