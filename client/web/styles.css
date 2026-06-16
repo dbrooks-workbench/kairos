@@ -819,7 +819,9 @@ body {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  min-width: 52px;
+  width: 60px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .modal-select,
