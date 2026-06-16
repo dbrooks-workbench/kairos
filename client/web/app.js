@@ -4,6 +4,7 @@ import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
+import { initEventEditor, openEventEditor } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const VERSION   = '0.5.0'
@@ -739,6 +740,81 @@ function initCalendarDrag() {
   })
 }
 
+// ── Context menu (new event / new task) ──────────────────────────────────────
+
+let _ctxOpts = {}
+
+function showContextMenu(x, y, opts = {}) {
+  _ctxOpts = opts
+  const menu = document.getElementById('context-menu')
+  menu.hidden = false
+  // Keep within viewport
+  menu.style.left = `${Math.min(x, window.innerWidth  - menu.offsetWidth  - 8)}px`
+  menu.style.top  = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`
+}
+
+function initContextMenu() {
+  const menu = document.getElementById('context-menu')
+
+  document.getElementById('ctx-new-event').addEventListener('click', () => {
+    menu.hidden = true
+    openEventEditor(
+      { date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? false, calendars: state.calendars },
+      { onSaved: refreshCalendarItems }
+    )
+  })
+
+  document.getElementById('ctx-new-task').addEventListener('click', async () => {
+    menu.hidden = true
+    await ensureTaskLists()
+    openCreateModal(
+      state.taskLists[0]?.id ?? null,
+      state.taskLists,
+      calendarModalCallbacks(),
+      { due: _ctxOpts.date ?? null }
+    )
+  })
+
+  // + button
+  document.getElementById('btn-add').addEventListener('click', e => {
+    e.stopPropagation()
+    showContextMenu(e.clientX, e.clientY)
+  })
+
+  // All-day col background click → context menu with date
+  document.getElementById('allday-cols').addEventListener('click', e => {
+    if (e.target.closest('.allday-event') || e.target.closest('.allday-more')) return
+    const col = e.target.closest('.allday-col')
+    if (!col) return
+    const dayIdx = parseInt(col.dataset.day, 10)
+    const date   = addDays(state.weekStart, dayIdx).toLocaleDateString('en-CA')
+    e.stopPropagation()
+    showContextMenu(e.clientX, e.clientY, { date, allDay: true })
+  })
+
+  // Timed col background click → straight to event editor for that 30-min block
+  document.getElementById('timed-cols').addEventListener('click', e => {
+    if (e.target.closest('.cal-event')) return
+    const col = e.target.closest('.timed-col')
+    if (!col) return
+    const dayIdx  = parseInt(col.dataset.day, 10)
+    const date    = addDays(state.weekStart, dayIdx).toLocaleDateString('en-CA')
+    const colRect = col.getBoundingClientRect()
+    const minsIntoDay = Math.max(0, Math.floor((e.clientY - colRect.top) / 30) * 30)
+    const h = Math.floor(minsIntoDay / 60) % 24
+    const m = minsIntoDay % 60
+    const startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    openEventEditor(
+      { date, startTime, allDay: false, calendars: state.calendars },
+      { onSaved: refreshCalendarItems }
+    )
+  })
+
+  // Close on outside click
+  document.addEventListener('click', () => { menu.hidden = true })
+  menu.addEventListener('click', e => e.stopPropagation())
+}
+
 // ── Full render pass ─────────────────────────────────────────────────────────
 
 async function render() {
@@ -797,6 +873,8 @@ document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 initModal()
 initSnooze()
 initCalendarDrag()
+initEventEditor()
+initContextMenu()
 
 // Close account panel on outside click
 document.addEventListener('click', () => {

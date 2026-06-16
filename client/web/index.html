@@ -19,6 +19,7 @@
         <span id="week-label"></span>
       </div>
       <div id="header-right">
+        <button id="btn-add" class="btn-add" title="New event or task">+</button>
         <div class="view-toggle">
           <button id="btn-view-calendar" class="view-toggle-btn active">Calendar</button>
           <button id="btn-view-board"    class="view-toggle-btn">Board</button>
@@ -126,6 +127,67 @@
       </div>
     </div><!-- /.modal-panel -->
     </div><!-- /#task-modal -->
+
+    <!-- Context menu for new event / new task -->
+    <div id="context-menu" hidden>
+      <button class="ctx-item" id="ctx-new-event">📅 New event</button>
+      <button class="ctx-item" id="ctx-new-task">✓ New task</button>
+    </div>
+
+    <!-- Event editor modal -->
+    <div id="event-modal" hidden>
+      <div class="modal-panel" id="event-modal-panel">
+        <div class="modal-header">
+          <input id="event-modal-title" class="modal-title-input" type="text" placeholder="Event title…">
+          <button id="event-modal-close" class="modal-close-btn" title="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-field-row">
+            <label class="modal-label">Calendar</label>
+            <select id="event-modal-calendar" class="modal-select"></select>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">All day</label>
+            <input id="event-modal-allday" type="checkbox">
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">Start</label>
+            <input id="event-modal-start-date" class="modal-input event-date-input" type="date">
+            <input id="event-modal-start-time" class="modal-input event-time-input" type="time">
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">End</label>
+            <input id="event-modal-end-date" class="modal-input event-date-input" type="date">
+            <input id="event-modal-end-time" class="modal-input event-time-input" type="time">
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">Repeats</label>
+            <select id="event-modal-recur" class="modal-select">
+              <option value="">Does not repeat</option>
+              <option value="DAILY">Daily</option>
+              <option value="WEEKLY">Weekly</option>
+              <option value="WEEKDAYS">Every weekday (Mon–Fri)</option>
+              <option value="MONTHLY">Monthly</option>
+              <option value="ANNUALLY">Annually</option>
+            </select>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">Location</label>
+            <input id="event-modal-location" class="modal-input" type="text" placeholder="Add location…">
+          </div>
+          <div class="modal-field">
+            <textarea id="event-modal-desc" class="modal-notes" placeholder="Description…" rows="4"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <div></div>
+          <div class="modal-footer-right">
+            <button id="event-modal-cancel" class="btn-ghost">Cancel</button>
+            <button id="event-modal-save" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Snooze popover (shared, positioned via JS) -->
     <div id="snooze-popover" hidden>

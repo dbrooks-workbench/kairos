@@ -83,6 +83,19 @@ function resolveColor(colorId) {
   return GCal_COLORS[colorId] ?? null
 }
 
+export async function createEvent(token, calendarId, body) {
+  const res = await fetch(
+    `${BASE}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  )
+  if (!res.ok) throw new Error(`createEvent: ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 export async function getEvents(token, start, end) {
   const calendars = await getCalendars(token)
   const results = await Promise.allSettled(

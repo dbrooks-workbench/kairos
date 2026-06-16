@@ -4,12 +4,13 @@ import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTa
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _item      = null   // null → create mode
-let _listId    = null
-let _taskLists = []
-let _checklist = []
-let _comments  = []
-let _callbacks = {}
+let _item       = null   // null → create mode
+let _listId     = null
+let _taskLists  = []
+let _checklist  = []
+let _comments   = []
+let _callbacks  = {}
+let _defaultDue = null   // 'yyyy-mm-dd' pre-fill for create mode
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -43,13 +44,14 @@ export function openModal(item, taskLists, callbacks) {
   show()
 }
 
-export function openCreateModal(listId, taskLists, callbacks) {
-  _item      = null
-  _listId    = listId
-  _taskLists = taskLists
-  _checklist = []
-  _comments  = []
-  _callbacks = callbacks
+export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
+  _item       = null
+  _listId     = listId
+  _taskLists  = taskLists
+  _checklist  = []
+  _comments   = []
+  _callbacks  = callbacks
+  _defaultDue = opts.due ?? null
   populate()
   show()
 }
@@ -78,7 +80,7 @@ function populate() {
   // Due date → yyyy-mm-dd for the date input
   el('modal-due').value = _item?.due
     ? new Date(_item.due).toLocaleDateString('en-CA')
-    : ''
+    : (_defaultDue ?? '')
 
   el('modal-loe').value     = _item?.metadata?.loe ?? ''
   el('modal-loe-error').hidden = true
