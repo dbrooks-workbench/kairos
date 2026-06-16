@@ -7,7 +7,7 @@ import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.6.3'
+const VERSION   = '0.6.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -825,14 +825,17 @@ function initContextMenu() {
     if (e.target.closest('.allday-event') || e.target.closest('.allday-more')) return
     const col = e.target.closest('.allday-col')
     if (!col) return
+    e.stopPropagation()
+    // Toggle: a second click anywhere in the all-day area closes the menu
+    if (!menu.hidden) { menu.hidden = true; return }
     const dayIdx = parseInt(col.dataset.day, 10)
     const date   = addDays(state.weekStart, dayIdx).toLocaleDateString('en-CA')
-    e.stopPropagation()
     showContextMenu(e.clientX, e.clientY, { date, allDay: true })
   })
 
   // Timed col background click → straight to event editor for that 30-min block
   document.getElementById('timed-cols').addEventListener('click', e => {
+    if (!menu.hidden) { menu.hidden = true; return }
     if (e.target.closest('.cal-event')) return
     const col = e.target.closest('.timed-col')
     if (!col) return
@@ -849,8 +852,9 @@ function initContextMenu() {
     )
   })
 
-  // Close on outside click
+  // Close on outside click or ESC
   document.addEventListener('click', () => { menu.hidden = true })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') menu.hidden = true })
   menu.addEventListener('click', e => e.stopPropagation())
 }
 
