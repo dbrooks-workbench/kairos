@@ -621,6 +621,15 @@ body {
 
 .allday-event.completed span { text-decoration: line-through; }
 
+/* Calendar drag-to-move */
+.allday-event.type-task[draggable="true"] { cursor: grab; }
+.allday-event.type-task.drag-source { opacity: 0.4; }
+.allday-col.drag-over {
+  background: color-mix(in srgb, var(--today-color) 10%, transparent);
+  outline: 2px dashed var(--today-color);
+  outline-offset: -2px;
+}
+
 /* ── View toggle ─────────────────────────────────────────── */
 
 .view-toggle {

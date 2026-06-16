@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 
@@ -536,6 +536,8 @@ function renderAllDayToggle() {
     (state.allDayExpanded ? '▴' : '▾') + ' all‑day'
 }
 
+let _calDragItem = null  // task being dragged in the calendar all-day area
+
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
@@ -604,6 +606,20 @@ function renderItems(items) {
             await ensureTaskLists()
             openModal(item, state.taskLists, calendarModalCallbacks())
           })
+
+          if (!isDone) {
+            el.draggable = true
+            el.addEventListener('dragstart', e => {
+              _calDragItem = item
+              e.dataTransfer.effectAllowed = 'move'
+              // Defer adding the class so the drag image captures the normal state
+              requestAnimationFrame(() => el.classList.add('drag-source'))
+            })
+            el.addEventListener('dragend', () => {
+              el.classList.remove('drag-source')
+              _calDragItem = null
+            })
+          }
         } else {
           if (item.color) el.style.background = item.color
           el.textContent = item.title
@@ -667,6 +683,62 @@ function renderItems(items) {
   }
 }
 
+// ── Calendar drag-to-move ────────────────────────────────────────────────────
+
+function initCalendarDrag() {
+  const container = document.getElementById('allday-cols')
+
+  container.addEventListener('dragover', e => {
+    if (!_calDragItem) return
+    const col = e.target.closest('.allday-col')
+    if (!col) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (!col.classList.contains('drag-over')) {
+      container.querySelectorAll('.allday-col.drag-over').forEach(c => c.classList.remove('drag-over'))
+      col.classList.add('drag-over')
+    }
+  })
+
+  container.addEventListener('dragleave', e => {
+    if (!container.contains(e.relatedTarget)) {
+      container.querySelectorAll('.allday-col.drag-over').forEach(c => c.classList.remove('drag-over'))
+    }
+  })
+
+  container.addEventListener('drop', async e => {
+    e.preventDefault()
+    container.querySelectorAll('.allday-col.drag-over').forEach(c => c.classList.remove('drag-over'))
+    const col = e.target.closest('.allday-col')
+    if (!col || !_calDragItem) return
+
+    const item   = _calDragItem
+    _calDragItem = null
+
+    const dayIdx  = parseInt(col.dataset.day, 10)
+    const newDate = addDays(state.weekStart, dayIdx)
+    const pad     = v => String(v).padStart(2, '0')
+    const newDue  = `${newDate.getFullYear()}-${pad(newDate.getMonth() + 1)}-${pad(newDate.getDate())}`
+
+    // No-op if dropped on the same day
+    const curDue = item.due
+      ? `${item.due.getFullYear()}-${pad(item.due.getMonth() + 1)}-${pad(item.due.getDate())}`
+      : null
+    if (newDue === curDue) return
+
+    try {
+      const token = await getToken()
+      if (!token) return
+      await patchTask(token, item.source.account_id, item.source.external_id, {
+        due: `${newDue}T00:00:00.000Z`,
+      })
+      await refreshCalendarItems()
+    } catch (err) {
+      console.error('Calendar drag move failed:', err)
+    }
+  })
+}
+
 // ── Full render pass ─────────────────────────────────────────────────────────
 
 async function render() {
@@ -724,6 +796,7 @@ document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 // Init modal + snooze popover listeners once
 initModal()
 initSnooze()
+initCalendarDrag()
 
 // Close account panel on outside click
 document.addEventListener('click', () => {
