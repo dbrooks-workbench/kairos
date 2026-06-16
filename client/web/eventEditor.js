@@ -540,7 +540,6 @@ async function saveAllEvents(token, body) {
     masterBody.end = { dateTime: origEndDate + newEndTime, timeZone: body.end.timeZone }
   }
 
-  console.log('[saveAllEvents] masterBody:', JSON.stringify(masterBody))
   await updateEvent(token, calId, masterId, masterBody)
 }
 
