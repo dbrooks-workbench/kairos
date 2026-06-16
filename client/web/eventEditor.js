@@ -228,13 +228,13 @@ export function initEventEditor() {
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
 
-  // Recurring-event scope picker
-  el('recur-scope-cancel').addEventListener('click', () => {
+  // Recurring-event scope picker (guard against stale-cache HTML/JS mismatch)
+  el('recur-scope-cancel')?.addEventListener('click', () => {
     el('recur-scope-modal').hidden = true
     _pendingBody = null
     el('event-modal-save').disabled = false
   })
-  el('recur-scope-ok').addEventListener('click', () => executeWithScope(
+  el('recur-scope-ok')?.addEventListener('click', () => executeWithScope(
     document.querySelector('input[name="recur-scope"]:checked')?.value ?? 'this'
   ))
 
@@ -447,10 +447,14 @@ async function save() {
 
   // For recurring event instances, pause and show the scope picker
   if (_editItem?.metadata?.recurring_event_id) {
-    _pendingBody = body
-    document.querySelector('input[name="recur-scope"][value="this"]').checked = true
-    el('recur-scope-modal').hidden = false
-    return  // executeWithScope() will finish the save after the user picks
+    const scopeModal = el('recur-scope-modal')
+    if (scopeModal) {
+      _pendingBody = body
+      document.querySelector('input[name="recur-scope"][value="this"]').checked = true
+      scopeModal.hidden = false
+      return  // executeWithScope() will finish the save after the user picks
+    }
+    // Scope modal missing (stale cache) — fall through and save as 'this event'
   }
 
   // Non-recurring edit or new event — save immediately
@@ -470,7 +474,8 @@ async function save() {
 }
 
 async function executeWithScope(scope) {
-  el('recur-scope-modal').hidden = true
+  const scopeModal = el('recur-scope-modal')
+  if (scopeModal) scopeModal.hidden = true
   const body    = _pendingBody
   _pendingBody  = null
   const saveBtn = el('event-modal-save')

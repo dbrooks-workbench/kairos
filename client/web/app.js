@@ -8,7 +8,7 @@ import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.7.6'
+const VERSION   = '0.7.7'
 
 const state = {
   weekStart: getWeekStart(new Date()),
