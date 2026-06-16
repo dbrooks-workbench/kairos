@@ -341,16 +341,32 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   renderSpawnList()
   el('event-spawn-section').open = _spawns.length > 0
 
-  // Populate calendar list
+  // Populate calendar list and, for recurring instances, load master RRULE
   const calSelect = el('event-modal-calendar')
   calSelect.innerHTML = '<option value="">Loading…</option>'
   const token = await getToken()
   if (token) {
-    try {
-      const { getCalendars } = await import('./providers/googleCalendar.js')
-      populateCalendars(calSelect, await getCalendars(token), item.source.account_id)
-    } catch {
-      calSelect.innerHTML = `<option value="${item.source.account_id}" selected>${item.metadata?.calendar_name ?? 'Current calendar'}</option>`
+    const calendarPromise = (async () => {
+      try {
+        const { getCalendars } = await import('./providers/googleCalendar.js')
+        populateCalendars(calSelect, await getCalendars(token), item.source.account_id)
+      } catch {
+        calSelect.innerHTML = `<option value="${item.source.account_id}" selected>${item.metadata?.calendar_name ?? 'Current calendar'}</option>`
+      }
+    })()
+
+    // Instances don't carry recurrence — fetch the master to show the correct RRULE
+    const masterPromise = item.metadata?.recurring_event_id
+      ? getEvent(token, item.source.account_id, item.metadata.recurring_event_id).catch(() => null)
+      : Promise.resolve(null)
+
+    const [, master] = await Promise.all([calendarPromise, masterPromise])
+
+    if (master?.recurrence?.[0]) {
+      const masterPreset = matchRrulePreset(master.recurrence[0])
+      el('event-modal-recur').value = masterPreset
+      el('custom-recur-panel').hidden = masterPreset !== 'CUSTOM'
+      _preserveRrule = masterPreset === 'CUSTOM' ? master.recurrence[0] : null
     }
   }
 
@@ -497,10 +513,35 @@ async function executeWithScope(scope) {
 // ── Recurring save helpers ────────────────────────────────────────────────────
 
 async function saveAllEvents(token, body) {
-  const calId   = _editItem.source.account_id
+  const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurring_event_id
-  // Patch the master event; all instances inherit the changes
-  await updateEvent(token, calId, masterId, body)
+
+  // Fetch the master so we can preserve its original start date while
+  // optionally applying a time-of-day change from the editor.
+  const master = await getEvent(token, calId, masterId)
+
+  // Build a safe patch body: text fields only, plus optional time update.
+  const masterBody = {}
+  if (body.summary)     masterBody.summary     = body.summary
+  if (body.location)    masterBody.location    = body.location
+  if (body.description !== undefined) masterBody.description = body.description
+  if (body.recurrence?.length) masterBody.recurrence = body.recurrence
+
+  // Apply time-of-day change to the master's original start/end date.
+  // We do this only for timed (non-all-day) events; all-day events have no
+  // meaningful time component to carry over.
+  if (body.start?.dateTime && master.start?.dateTime) {
+    const newTime  = body.start.dateTime.slice(11)   // 'HH:MM:SS'
+    const origDate = master.start.dateTime.slice(0, 11) // 'YYYY-MM-DDT'
+    masterBody.start = { dateTime: origDate + newTime, timeZone: body.start.timeZone }
+
+    const newEndTime  = body.end.dateTime.slice(11)
+    const origEndDate = master.end?.dateTime?.slice(0, 11) ?? origDate
+    masterBody.end = { dateTime: origEndDate + newEndTime, timeZone: body.end.timeZone }
+  }
+
+  console.log('[saveAllEvents] masterBody:', JSON.stringify(masterBody))
+  await updateEvent(token, calId, masterId, masterBody)
 }
 
 async function saveThisAndFollowing(token, body) {
