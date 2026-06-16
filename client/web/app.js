@@ -5,10 +5,10 @@ import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
-import { initEventEditor, openEventEditor } from './eventEditor.js'
+import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.7.2'
+const VERSION   = '0.7.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -689,6 +689,10 @@ function renderItems(items) {
         } else {
           if (item.color) el.style.background = item.color
           el.textContent = item.title
+          el.style.cursor = 'pointer'
+          el.addEventListener('click', () => {
+            openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
+          })
         }
 
         col.appendChild(el)
@@ -742,6 +746,11 @@ function renderItems(items) {
         el.addEventListener('click', async () => {
           await ensureTaskLists()
           openModal(item, state.taskLists, calendarModalCallbacks())
+        })
+      } else {
+        el.style.cursor = 'pointer'
+        el.addEventListener('click', () => {
+          openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
         })
       }
       dayCol.appendChild(el)

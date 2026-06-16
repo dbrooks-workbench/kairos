@@ -1,13 +1,32 @@
 import { getToken } from './auth.js'
-import { createEvent } from './providers/googleCalendar.js'
+import { createEvent, updateEvent } from './providers/googleCalendar.js'
 import { serializeNotes, serializeEventDescription } from './providers/parsers.js'
 
-let _callbacks = {}
-let _spawns    = []   // [{ key, title, triggerDays, dueDays, loe, checklist, _autoKey }]
+let _callbacks     = {}
+let _spawns        = []     // [{ key, title, triggerDays, dueDays, loe, checklist, _autoKey }]
+let _editItem      = null   // CalendarItem being edited; null = create mode
+let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-configured
 
 const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
-// ── Simple recurrence presets ─────────────────────────────────────────────────
+// ── Recurrence helpers ────────────────────────────────────────────────────────
+
+// Match an existing RRULE string to one of our simple preset keys (or 'CUSTOM')
+function matchRrulePreset(rrule) {
+  if (!rrule) return ''
+  if (rrule === 'RRULE:FREQ=DAILY')   return 'DAILY'
+  if (rrule === 'RRULE:FREQ=MONTHLY') return 'MONTHLY'
+  if (rrule === 'RRULE:FREQ=YEARLY')  return 'ANNUALLY'
+  if (/RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR/.test(rrule)) return 'WEEKDAYS'
+  if (/RRULE:FREQ=WEEKLY/.test(rrule)) return 'WEEKLY'
+  return 'CUSTOM'
+}
+
+// Parse "-30d" → -30 (used when loading spawn config from an existing event)
+function parseDayOffset(str) {
+  const m = String(str ?? '0d').match(/^(-?\d+)d$/)
+  return m ? parseInt(m[1], 10) : 0
+}
 
 function buildRrule(freq, startDate) {
   if (!freq || freq === 'CUSTOM') return null
@@ -200,6 +219,7 @@ export function initEventEditor() {
 
   el('event-modal-recur').addEventListener('change', e => {
     el('custom-recur-panel').hidden = e.target.value !== 'CUSTOM'
+    _preserveRrule = null  // user changed the selector — don't preserve original anymore
   })
 
   el('event-spawn-add').addEventListener('click', addSpawn)
@@ -211,8 +231,10 @@ export function initEventEditor() {
 }
 
 export async function openEventEditor(opts = {}, callbacks = {}) {
-  _callbacks = callbacks
-  _spawns    = []
+  _editItem      = null
+  _preserveRrule = null
+  _callbacks     = callbacks
+  _spawns        = []
 
   const allDay = opts.allDay ?? false
   el('event-modal-allday').checked = allDay
@@ -253,6 +275,71 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
       } catch {
         calSelect.innerHTML = '<option value="">Could not load calendars</option>'
       }
+    }
+  }
+
+  el('event-modal').hidden = false
+  el('event-modal-title').focus()
+}
+
+// Open the editor pre-populated with an existing CalendarItem for editing.
+export async function openEventEditorForEdit(item, callbacks = {}) {
+  _editItem      = item
+  _preserveRrule = null
+  _callbacks     = callbacks
+
+  const allDay = item.all_day
+  el('event-modal-allday').checked = allDay
+  setAllDayUI(allDay)
+
+  const start      = new Date(item.start)
+  const endRaw     = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
+  // All-day end from Google Calendar is exclusive — show inclusive to the user
+  const displayEnd = allDay ? new Date(endRaw.getTime() - 86_400_000) : endRaw
+
+  const toDate = d => d.toLocaleDateString('en-CA')
+  const toTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+
+  el('event-modal-start-date').value = toDate(start)
+  el('event-modal-end-date').value   = toDate(displayEnd)
+  el('event-modal-start-time').value = toTime(start)
+  el('event-modal-end-time').value   = toTime(endRaw)
+
+  el('event-modal-title').value    = item.title
+  el('event-modal-location').value = item.metadata?.location ?? ''
+  el('event-modal-desc').value     = item.metadata?.body ?? ''
+
+  // Recurrence — match to preset or fall back to CUSTOM (preserving original)
+  const preset = matchRrulePreset(item.recurrence)
+  el('event-modal-recur').value = preset
+  el('custom-recur-panel').hidden = preset !== 'CUSTOM'
+  if (preset === 'CUSTOM' && item.recurrence) _preserveRrule = item.recurrence
+
+  resetCustomRecur(toDate(start))
+
+  // Pre-load spawn prototypes from existing config
+  _spawns = (item.metadata?.config?.spawn ?? []).map(s => ({
+    key:         s.key,
+    title:       s.title,
+    triggerDays: Math.abs(parseDayOffset(s.trigger)),
+    dueDays:     Math.abs(parseDayOffset(s.due ?? '0d')),
+    loe:         s.loe ?? '',
+    checklist:   s.checklist ?? [],
+    _autoKey:    false,
+  }))
+  renderSpawnList()
+  el('event-spawn-section').open = _spawns.length > 0
+
+  // Populate calendar list
+  const calSelect = el('event-modal-calendar')
+  calSelect.innerHTML = '<option value="">Loading…</option>'
+  const token = await getToken()
+  if (token) {
+    try {
+      const { getCalendars } = await import('./providers/googleCalendar.js')
+      populateCalendars(calSelect, await getCalendars(token), item.source.account_id)
+    } catch {
+      calSelect.innerHTML = `<option value="${item.source.account_id}" selected>${item.metadata?.calendar_name ?? 'Current calendar'}</option>`
     }
   }
 
@@ -320,8 +407,26 @@ async function save() {
     body.end   = { dateTime: `${endDate}T${endTime}:00`,     timeZone: tz }
   }
 
-  const rrule = freq === 'CUSTOM' ? buildCustomRrule() : buildRrule(freq, startDate)
-  if (rrule) body.recurrence = [rrule]
+  // Recurrence: CUSTOM in edit mode preserves the original RRULE unless the user
+  // re-configured the custom panel (signaled by _preserveRrule being cleared).
+  let rrule
+  if (freq === 'CUSTOM') {
+    rrule = _preserveRrule ?? buildCustomRrule()
+  } else {
+    rrule = buildRrule(freq, startDate)
+  }
+  if (rrule) {
+    body.recurrence = [rrule]
+  } else if (_editItem && freq === '') {
+    // Explicitly removing recurrence from an existing event
+    body.recurrence = []
+  }
+
+  // In edit mode, preserve existing log comments — only update prose + config
+  if (_editItem) {
+    const existingComments = _editItem.metadata?.comments ?? []
+    body.description = serializeEventDescription(prose, config, existingComments) || undefined
+  }
 
   const token = await getToken()
   if (!token) return
@@ -329,7 +434,11 @@ async function save() {
   const saveBtn = el('event-modal-save')
   saveBtn.disabled = true
   try {
-    await createEvent(token, calendarId, body)
+    if (_editItem) {
+      await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
+    } else {
+      await createEvent(token, calendarId, body)
+    }
     close()
     _callbacks.onSaved?.()
   } catch (err) {

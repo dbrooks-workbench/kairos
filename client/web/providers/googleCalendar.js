@@ -66,6 +66,7 @@ function normalizeEvent(event, calendar) {
       calendar_name: calendar.summary,
       calendar_color: calendar.backgroundColor ?? null,
       recurring_event_id: event.recurringEventId ?? null,
+      location: event.location ?? null,
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
     editable: event.organizer?.self === true,
