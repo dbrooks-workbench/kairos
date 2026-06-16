@@ -931,7 +931,6 @@ body {
 .modal-section {
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow: hidden;
 }
 
 .modal-section > summary {
@@ -944,6 +943,7 @@ body {
   font-weight: 500;
   cursor: pointer;
   user-select: none;
+  border-radius: 6px;
 }
 
 .modal-section > summary::-webkit-details-marker { display: none; }
