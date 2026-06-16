@@ -759,7 +759,7 @@ function initContextMenu() {
   document.getElementById('ctx-new-event').addEventListener('click', () => {
     menu.hidden = true
     openEventEditor(
-      { date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? false, calendars: state.calendars },
+      { date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? true, calendars: state.calendars },
       { onSaved: refreshCalendarItems }
     )
   })

@@ -699,6 +699,112 @@ body {
 /* When all-day is active, hide both time inputs */
 #event-modal-panel.all-day .event-time-input { display: none; }
 
+/* ── Custom recurrence panel ─────────────────────────────── */
+
+.custom-recur-panel {
+  background: #f8f9fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.crp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.crp-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  width: 36px;
+  flex-shrink: 0;
+}
+
+.crp-interval {
+  width: 56px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.crp-interval:focus { border-color: var(--today-color); }
+
+.crp-select {
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.crp-select:focus { border-color: var(--today-color); }
+
+.crp-day-group { display: flex; gap: 4px; }
+
+.crp-day {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: none;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.crp-day:hover { border-color: var(--today-color); color: var(--today-color); }
+.crp-day.active { background: var(--today-color); border-color: var(--today-color); color: #fff; }
+
+.crp-end-section { align-items: flex-start; }
+
+.crp-end-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.crp-end-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.crp-end-input {
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.crp-end-input:focus { border-color: var(--today-color); }
+.crp-end-input:disabled { opacity: 0.4; cursor: default; }
+
+.crp-count-input { width: 56px; }
+
 /* ── View toggle ─────────────────────────────────────────── */
 
 .view-toggle {

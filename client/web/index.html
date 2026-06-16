@@ -169,8 +169,51 @@
               <option value="WEEKDAYS">Every weekday (Mon–Fri)</option>
               <option value="MONTHLY">Monthly</option>
               <option value="ANNUALLY">Annually</option>
+              <option value="CUSTOM">Custom…</option>
             </select>
           </div>
+
+          <!-- Custom recurrence panel — shown when "Custom…" is selected -->
+          <div id="custom-recur-panel" class="custom-recur-panel" hidden>
+            <div class="crp-row">
+              <span class="crp-label">Every</span>
+              <input id="crp-interval" type="number" min="1" max="999" value="1" class="crp-interval">
+              <select id="crp-freq" class="crp-select">
+                <option value="DAILY">day(s)</option>
+                <option value="WEEKLY" selected>week(s)</option>
+                <option value="MONTHLY">month(s)</option>
+                <option value="YEARLY">year(s)</option>
+              </select>
+            </div>
+            <div id="crp-days-row" class="crp-row">
+              <span class="crp-label">On</span>
+              <div class="crp-day-group">
+                <button type="button" class="crp-day" data-day="SU">S</button>
+                <button type="button" class="crp-day" data-day="MO">M</button>
+                <button type="button" class="crp-day" data-day="TU">T</button>
+                <button type="button" class="crp-day" data-day="WE">W</button>
+                <button type="button" class="crp-day" data-day="TH">T</button>
+                <button type="button" class="crp-day" data-day="FR">F</button>
+                <button type="button" class="crp-day" data-day="SA">S</button>
+              </div>
+            </div>
+            <div class="crp-row crp-end-section">
+              <span class="crp-label">Ends</span>
+              <div class="crp-end-options">
+                <label class="crp-end-row"><input type="radio" name="crp-end" value="never" checked> Never</label>
+                <label class="crp-end-row">
+                  <input type="radio" name="crp-end" value="date"> On
+                  <input id="crp-end-date" type="date" class="crp-end-input" disabled>
+                </label>
+                <label class="crp-end-row">
+                  <input type="radio" name="crp-end" value="count"> After
+                  <input id="crp-end-count" type="number" min="1" max="999" value="10" class="crp-end-input crp-count-input" disabled>
+                  <span>occurrences</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div class="modal-field-row">
             <label class="modal-label">Location</label>
             <input id="event-modal-location" class="modal-input" type="text" placeholder="Add location…">
