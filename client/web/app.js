@@ -5,7 +5,7 @@ import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './boar
 import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.5.0'
+const VERSION   = '0.5.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -131,7 +131,9 @@ async function ensureTaskLists() {
   if (state.taskLists.length) return
   const accounts = await getTokens()
   if (!accounts.length) return
-  const lists = await Promise.all(accounts.map(a => getTaskLists(a.token).catch(() => [])))
+  const lists = await Promise.all(accounts.map(a =>
+    getTaskLists(a.token).then(ls => ls.map(l => ({ ...l, owner_account: a.id }))).catch(() => [])
+  ))
   state.taskLists = lists.flat()
 }
 
@@ -205,7 +207,7 @@ async function loadBoardData() {
   showLoading()
   try {
     const results = await Promise.all(accounts.map(a => getAllTasks(a.token).then(({ lists, tasks }) => ({
-      lists,
+      lists: lists.map(l => ({ ...l, owner_account: a.id })),
       tasks: tasks.map(t => ({ ...t, source: { ...t.source, owner_account: a.id } })),
     })).catch(err => { console.error('Board data load failed:', err); return { lists: [], tasks: [] } })))
     state.taskLists  = results.flatMap(r => r.lists)
@@ -591,8 +593,9 @@ async function render() {
     const [items] = await Promise.all([
       fetchItems(state.weekStart, end),
       getTokens().then(accts =>
-        Promise.all(accts.map(a => getTaskLists(a.token).catch(() => [])))
-          .then(lists => { state.taskLists = lists.flat() })
+        Promise.all(accts.map(a =>
+          getTaskLists(a.token).then(ls => ls.map(l => ({ ...l, owner_account: a.id }))).catch(() => [])
+        )).then(lists => { state.taskLists = lists.flat() })
       ),
     ])
     state.items = items
