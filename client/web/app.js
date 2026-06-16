@@ -106,9 +106,21 @@ async function handleToggleTask(item) {
 }
 
 // ── Loading indicator ─────────────────────────────────────────────────────────
+// Ref-counted: bar shows whenever any fetch is in-flight, hides when all settle.
 
 function showLoading() { document.getElementById('loading-bar').hidden = false }
 function hideLoading() { document.getElementById('loading-bar').hidden = true  }
+
+let _pending = 0
+const _origFetch = window.fetch.bind(window)
+window.fetch = async (...args) => {
+  if (++_pending === 1) showLoading()
+  try {
+    return await _origFetch(...args)
+  } finally {
+    if (--_pending <= 0) { _pending = 0; hideLoading() }
+  }
+}
 
 // ── Calendar-view modal callbacks ─────────────────────────────────────────────
 
@@ -202,7 +214,6 @@ function boardCallbacks() {
 async function loadBoardData() {
   const token = await getToken()
   if (!token) return
-  showLoading()
   try {
     const { lists, tasks } = await getAllTasks(token, state.doneWindow)
     state.taskLists  = lists
@@ -210,8 +221,6 @@ async function loadBoardData() {
     renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow)
   } catch (err) {
     console.error('Board data load failed:', err)
-  } finally {
-    hideLoading()
   }
 }
 
@@ -825,7 +834,6 @@ async function render() {
   renderAccountStatus()
   loadCalendars()  // async, populates calendar picker in background
 
-  showLoading()
   try {
     const end = addDays(state.weekStart, 7)
     // Fetch items and task lists in parallel; task lists power the modal list selector
@@ -835,8 +843,8 @@ async function render() {
     ])
     state.items = items
     renderItems(getVisibleItems())
-  } finally {
-    hideLoading()
+  } catch (err) {
+    console.error('Render failed:', err)
   }
 }
 
