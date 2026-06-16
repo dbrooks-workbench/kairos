@@ -1,11 +1,39 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask, patchTask } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 
-const DONE_COL_ID = '__done__'
-let _sortables  = []
-let _callbacks  = {}
+const DONE_COL_ID    = '__done__'
+const SORT_KEY       = 'kairos-board-sort'
+
+let _sortables      = []
+let _callbacks      = {}
+let _taskLists      = []
+let _boardItems     = []
+let _doneWindow     = 30
+let _colSortModes   = {}
+let _sortModesLoaded = false
+
+function setColSort(listId, mode) {
+  if (_colSortModes[listId] === mode) return
+  _colSortModes[listId] = mode
+  try { localStorage.setItem(SORT_KEY, JSON.stringify(_colSortModes)) } catch {}
+  renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow)
+}
+
+function colSortMode(listId) {
+  return _colSortModes[listId] ?? 'manual'
+}
+
+function sortedItems(items, listId) {
+  if (colSortMode(listId) !== 'date') return items
+  return [...items].sort((a, b) => {
+    if (!a.due && !b.due) return 0
+    if (!a.due) return 1
+    if (!b.due) return -1
+    return a.due - b.due
+  })
+}
 
 // ── Snooze popover ────────────────────────────────────────────────────────────
 
@@ -140,8 +168,17 @@ export function destroyBoard() {
 }
 
 export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
+  _taskLists  = taskLists
+  _boardItems = boardItems
+  _doneWindow = doneWindow
+  _callbacks  = callbacks
+
+  if (!_sortModesLoaded) {
+    _sortModesLoaded = true
+    try { _colSortModes = JSON.parse(localStorage.getItem(SORT_KEY) ?? '{}') } catch {}
+  }
+
   destroyBoard()
-  _callbacks = callbacks
 
   const board = document.getElementById('board')
 
@@ -168,6 +205,7 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
       animation: 150,
       ghostClass: 'board-ghost',
       dragClass:  'board-dragging',
+      sort: colSortMode(list.id) !== 'date',
       onEnd: handleDrop,
     }))
   }
@@ -215,6 +253,18 @@ function buildCol(list, items, isDone, doneWindow) {
     }
     hdr.appendChild(toggle)
   } else {
+    const sortToggle = document.createElement('div')
+    sortToggle.className = 'col-sort-toggle'
+    const currentMode = colSortMode(list.id)
+    for (const [mode, label] of [['manual', 'My order'], ['date', 'By date']]) {
+      const btn = document.createElement('button')
+      btn.className = `col-sort-btn${currentMode === mode ? ' active' : ''}`
+      btn.textContent = label
+      btn.addEventListener('click', () => setColSort(list.id, mode))
+      sortToggle.appendChild(btn)
+    }
+    hdr.appendChild(sortToggle)
+
     const addBtn = document.createElement('button')
     addBtn.className = 'board-add-btn'
     addBtn.title     = 'New task'
@@ -228,7 +278,7 @@ function buildCol(list, items, isDone, doneWindow) {
   listEl.className      = 'board-task-list'
   listEl.dataset.listId = list.id
 
-  for (const item of items) listEl.appendChild(buildCard(item))
+  for (const item of sortedItems(items, list.id)) listEl.appendChild(buildCard(item))
 
   col.append(hdr, listEl)
   return col
@@ -332,10 +382,23 @@ async function handleDrop(evt) {
 
   const fromColId = from.dataset.listId
   const toColId   = to.dataset.listId
-  if (fromColId === toColId) return  // same-column reorder not yet supported
+  const listId    = cardEl.dataset.listId
+  const extId     = cardEl.dataset.extId
 
-  const listId = cardEl.dataset.listId  // actual Google Tasks list ID
-  const extId  = cardEl.dataset.extId
+  if (fromColId === toColId) {
+    if (fromColId === DONE_COL_ID) return
+    // Same-column reorder — persist to Google Tasks (no refresh; DOM already correct)
+    const prevCard   = to.children[evt.newIndex - 1]
+    const prevExtId  = prevCard?.dataset.extId ?? null
+    try {
+      const token = await getToken()
+      if (token) await reorderTask(token, listId, extId, prevExtId)
+    } catch (err) {
+      console.error('Reorder failed:', err)
+      _callbacks.onRefresh?.()
+    }
+    return
+  }
 
   try {
     const token = await getToken()

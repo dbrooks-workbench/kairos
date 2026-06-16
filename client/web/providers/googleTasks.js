@@ -90,6 +90,16 @@ export async function deleteTask(token, listId, taskId) {
   if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
 }
 
+export async function reorderTask(token, listId, taskId, previousTaskId) {
+  const qs = previousTaskId ? `?previous=${encodeURIComponent(previousTaskId)}` : ''
+  const res = await fetch(
+    `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}/move${qs}`,
+    { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+  )
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 // Move a task between lists: read → create in target → delete from source.
 // Pass overrides to update content during the move (used by the modal's save path).
 export async function moveTask(token, fromListId, taskId, toListId, overrides = null) {

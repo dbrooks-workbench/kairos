@@ -1039,6 +1039,25 @@ body {
 
 .board-add-btn:hover { color: var(--text); }
 
+.col-sort-toggle {
+  display: flex;
+  gap: 2px;
+}
+
+.col-sort-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.col-sort-btn:hover { border-color: var(--today-color); color: var(--today-color); }
+.col-sort-btn.active { background: var(--today-color); border-color: var(--today-color); color: #fff; }
+
 .done-window-toggle {
   display: flex;
   gap: 2px;
