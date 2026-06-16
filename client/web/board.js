@@ -13,8 +13,8 @@ let _snoozeItem      = null
 let _snoozeOnRefresh = null
 let _activeSnoozeBtn = null
 
-async function executeSnooze() {
-  const n = parseInt(document.getElementById('snooze-days').value, 10)
+async function executeSnooze(daysOverride) {
+  const n = daysOverride ?? parseInt(document.getElementById('snooze-days').value, 10)
   if (!n || n < 1 || !_snoozeItem) return
 
   const item = _snoozeItem
@@ -72,8 +72,29 @@ export function openSnoozePopover(btn, item, onRefresh) {
   daysInput.value = 3
   document.getElementById('snooze-day-label').textContent = 'days'
 
+  // Populate quick-select labels
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const daysToSat = (6 - today.getDay() + 7) % 7 || 7
+  const daysToMon = (1 - today.getDay() + 7) % 7 || 7
+  const fmt = d => {
+    const dow = d.toLocaleDateString('en-US', { weekday: 'short' })
+    return `${dow} ${d.getMonth() + 1}/${d.getDate()}`
+  }
+  const mkDate = n => { const d = new Date(today); d.setDate(d.getDate() + n); return d }
+
+  const qTomorrow = document.getElementById('snooze-q-tomorrow')
+  const qWeekend  = document.getElementById('snooze-q-weekend')
+  const qNextWeek = document.getElementById('snooze-q-nextweek')
+
+  qTomorrow.textContent     = `Tomorrow (${fmt(mkDate(1))})`
+  qTomorrow.dataset.days    = 1
+  qWeekend.textContent      = `This weekend (${fmt(mkDate(daysToSat))})`
+  qWeekend.dataset.days     = daysToSat
+  qNextWeek.textContent     = `Next week (${fmt(mkDate(daysToMon))})`
+  qNextWeek.dataset.days    = daysToMon
+
   const rect = btn.getBoundingClientRect()
-  const popoverWidth = 228
+  const popoverWidth = 240
   const left = Math.min(rect.left, window.innerWidth - popoverWidth - 8)
   popover.style.top  = `${rect.bottom + 6}px`
   popover.style.left = `${Math.max(8, left)}px`
@@ -87,13 +108,18 @@ export function initSnooze() {
     const n = parseInt(document.getElementById('snooze-days').value, 10)
     document.getElementById('snooze-day-label').textContent = n === 1 ? 'day' : 'days'
   })
-  document.getElementById('snooze-confirm').addEventListener('click', executeSnooze)
+  document.getElementById('snooze-confirm').addEventListener('click', () => executeSnooze())
   document.getElementById('snooze-days').addEventListener('keydown', e => {
     if (e.key === 'Enter')  executeSnooze()
     if (e.key === 'Escape') {
       document.getElementById('snooze-popover').hidden = true
       _activeSnoozeBtn = null
     }
+  })
+  ;['snooze-q-tomorrow', 'snooze-q-weekend', 'snooze-q-nextweek'].forEach(id => {
+    document.getElementById(id).addEventListener('click', () => {
+      executeSnooze(parseInt(document.getElementById(id).dataset.days, 10))
+    })
   })
   document.addEventListener('mousedown', e => {
     const popover = document.getElementById('snooze-popover')

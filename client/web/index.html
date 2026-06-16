@@ -245,10 +245,18 @@
 
     <!-- Snooze popover (shared, positioned via JS) -->
     <div id="snooze-popover" hidden>
-      <span class="snooze-label">Snooze for</span>
-      <input id="snooze-days" class="snooze-input" type="number" min="1" max="365" value="3">
-      <span id="snooze-day-label" class="snooze-unit">days</span>
-      <button id="snooze-confirm" class="snooze-ok">OK</button>
+      <div class="snooze-quick">
+        <button class="snooze-quick-btn" id="snooze-q-tomorrow"></button>
+        <button class="snooze-quick-btn" id="snooze-q-weekend"></button>
+        <button class="snooze-quick-btn" id="snooze-q-nextweek"></button>
+      </div>
+      <div class="snooze-divider"></div>
+      <div class="snooze-custom-row">
+        <span class="snooze-label">Snooze for</span>
+        <input id="snooze-days" class="snooze-input" type="number" min="1" max="365" value="3">
+        <span id="snooze-day-label" class="snooze-unit">days</span>
+        <button id="snooze-confirm" class="snooze-ok">OK</button>
+      </div>
     </div>
   </div><!-- /#app -->
 
