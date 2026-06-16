@@ -312,7 +312,9 @@ async function renderAccountStatus() {
 
   bannerEl.style.display = 'none'
 
-  statusEl.innerHTML = `<button id="btn-accounts-toggle">Accounts ▾</button>`
+  const primary = accounts.find(a => a.primary) ?? accounts[0]
+  const initial = (primary?.email?.[0] ?? '?').toUpperCase()
+  statusEl.innerHTML = `<button id="btn-accounts-toggle" class="acct-avatar" title="${escHtml(primary?.email ?? '')}">${escHtml(initial)}</button>`
   document.getElementById('btn-accounts-toggle').addEventListener('click', e => {
     e.stopPropagation()
     const panel = document.getElementById('account-panel')

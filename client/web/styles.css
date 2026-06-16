@@ -143,14 +143,30 @@ body {
   color: var(--text-muted);
 }
 
-#account-status a, #account-status button {
+#account-status a {
   color: var(--today-color);
   text-decoration: none;
-  background: none;
+}
+
+.acct-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--today-color);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
   border: none;
   cursor: pointer;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
+  transition: box-shadow 0.15s;
+}
+
+.acct-avatar:hover {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
 }
 
 #account-wrap { position: relative; }
