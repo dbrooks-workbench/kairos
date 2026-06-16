@@ -546,6 +546,36 @@ function renderAllDayToggle() {
     (state.allDayExpanded ? '▴' : '▾') + ' all‑day'
 }
 
+// ── Current-time indicator ────────────────────────────────────────────────────
+
+function updateTimeIndicator() {
+  document.querySelectorAll('.time-indicator').forEach(el => el.remove())
+
+  const now      = new Date()
+  const thisWeek = getWeekStart(now)
+  if (state.weekStart.getTime() !== thisWeek.getTime()) return
+
+  const dayIdx = localDayIndex(now, state.weekStart)
+  const col    = document.querySelector(`.timed-col[data-day="${dayIdx}"]`)
+  if (!col) return
+
+  const top = now.getHours() * 60 + now.getMinutes()
+
+  const bar = document.createElement('div')
+  bar.className = 'time-indicator'
+  bar.style.top = `${top}px`
+  bar.innerHTML = '<div class="time-indicator-dot"></div><div class="time-indicator-line"></div>'
+  col.appendChild(bar)
+}
+
+let _timeIndicatorInterval = null
+
+function initTimeIndicator() {
+  updateTimeIndicator()
+  clearInterval(_timeIndicatorInterval)
+  _timeIndicatorInterval = setInterval(updateTimeIndicator, 60_000)
+}
+
 let _calDragItem = null  // task being dragged in the calendar all-day area
 
 function renderItems(items) {
@@ -831,6 +861,7 @@ async function render() {
   renderColumnHeaders()
   renderTimeGutter()
   renderDayColumns()
+  updateTimeIndicator()
   renderAccountStatus()
   loadCalendars()  // async, populates calendar picker in background
 
@@ -883,6 +914,7 @@ initSnooze()
 initCalendarDrag()
 initEventEditor()
 initContextMenu()
+initTimeIndicator()
 
 // Close account panel on outside click
 document.addEventListener('click', () => {
@@ -891,11 +923,16 @@ document.addEventListener('click', () => {
 document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
 
 render().then(() => {
-  // #pinned-top (col-headers + allday-row) is sticky so it always occupies
-  // the top of the visible area. Scroll the timed grid to 8am.
+  // Scroll so current time is visible ~2 hours from the top of the timed grid.
+  // Falls back to 8am when viewing a past/future week.
   const timedScroll = document.getElementById('timed-scroll')
   const pinnedTop   = document.getElementById('pinned-top')
-  timedScroll.scrollTop = pinnedTop.offsetHeight + 8 * 60
+  const now         = new Date()
+  const minsNow     = now.getHours() * 60 + now.getMinutes()
+  const scrollMins  = getWeekStart(now).getTime() === state.weekStart.getTime()
+    ? Math.max(0, minsNow - 120)
+    : 8 * 60
+  timedScroll.scrollTop = pinnedTop.offsetHeight + scrollMins
   runSweepAndRefresh()
   startPolling(120_000)
 })
