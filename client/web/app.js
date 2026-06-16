@@ -1,11 +1,11 @@
-import { getTokens, getToken, getTokenFor, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
+import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.5.3'
+const VERSION   = '0.4.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -60,36 +60,30 @@ function formatWeekLabel(start) {
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function loadCalendars() {
-  const accounts = await getTokens()
-  if (!accounts.length) return
+  const token = await getToken()
+  if (!token) return
   try {
-    const lists = await Promise.all(accounts.map(a => getCalendars(a.token).catch(() => [])))
-    state.calendars = lists.flat()
+    state.calendars = await getCalendars(token)
     renderCalendarPicker()
   } catch (err) {
     console.error('Failed to load calendar list:', err)
   }
 }
 
-const escHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
 async function fetchItems(start, end) {
-  const accounts = await getTokens()
-  if (!accounts.length) return []
-  const perAccount = await Promise.all(accounts.map(async acct => {
-    const [events, tasks] = await Promise.all([
-      getEvents(acct.token, start, end).catch(err => { console.error('Calendar fetch failed:', err); return [] }),
-      getTasks(acct.token, start, end).catch(err => { console.error('Tasks fetch failed:', err); return [] }),
-    ])
-    // Tag every item with the owning account so mutations can find the right token
-    const tag = items => items.map(i => ({ ...i, source: { ...i.source, owner_account: acct.id } }))
-    return [...tag(events), ...tag(tasks)]
-  }))
-  return perAccount.flat()
+  const token = await getToken()
+  if (!token) return []
+  const [events, tasks] = await Promise.all([
+    getEvents(token, start, end)
+      .catch(err => { console.error('Calendar events fetch failed:', err); return [] }),
+    getTasks(token, start, end)
+      .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
+  ])
+  return [...events, ...tasks]
 }
 
 async function handleToggleTask(item) {
-  const token = await getTokenFor(item.source.owner_account)
+  const token = await getToken()
   if (!token) return
   const isDone = item.status === 'COMPLETED'
   try {
@@ -129,12 +123,9 @@ function calendarModalCallbacks() {
 // Called lazily before first modal open if render() hasn't populated them yet.
 async function ensureTaskLists() {
   if (state.taskLists.length) return
-  const accounts = await getTokens()
-  if (!accounts.length) return
-  const lists = await Promise.all(accounts.map(a =>
-    getTaskLists(a.token).then(ls => ls.map(l => ({ ...l, owner_account: a.id }))).catch(() => [])
-  ))
-  state.taskLists = lists.flat()
+  const token = await getToken()
+  if (!token) return
+  state.taskLists = await getTaskLists(token)
 }
 
 // ── View switching ────────────────────────────────────────────────────────────
@@ -202,17 +193,16 @@ function boardCallbacks() {
 }
 
 async function loadBoardData() {
-  const accounts = await getTokens()
-  if (!accounts.length) return
+  const token = await getToken()
+  if (!token) return
   showLoading()
   try {
-    const results = await Promise.all(accounts.map(a => getAllTasks(a.token).then(({ lists, tasks }) => ({
-      lists: lists.map(l => ({ ...l, owner_account: a.id })),
-      tasks: tasks.map(t => ({ ...t, source: { ...t.source, owner_account: a.id } })),
-    })).catch(err => { console.error('Board data load failed:', err); return { lists: [], tasks: [] } })))
-    state.taskLists  = results.flatMap(r => r.lists)
-    state.boardItems = results.flatMap(r => r.tasks)
+    const { lists, tasks } = await getAllTasks(token)
+    state.taskLists  = lists
+    state.boardItems = tasks
     renderBoard(state.taskLists, state.boardItems, boardCallbacks())
+  } catch (err) {
+    console.error('Board data load failed:', err)
   } finally {
     hideLoading()
   }
@@ -288,28 +278,18 @@ document.getElementById('cal-picker-panel').addEventListener('click', e => {
 // ── Auth UI ──────────────────────────────────────────────────────────────────
 
 async function renderAccountStatus() {
-  const accounts = await getTokens()
-  const statusEl  = document.getElementById('account-status')
-  const bannerEl  = document.getElementById('connect-banner')
+  const authed = await isAuthenticated()
+  const statusEl = document.getElementById('account-status')
+  const bannerEl = document.getElementById('connect-banner')
 
-  if (!accounts.length) {
+  if (!authed) {
     statusEl.innerHTML = `<a href="${loginUrl()}">Sign in</a>`
     bannerEl.style.display = 'flex'
-    return
+  } else {
+    bannerEl.style.display = 'none'
+    statusEl.innerHTML = `<button id="btn-signout">Sign out</button>`
+    document.getElementById('btn-signout').addEventListener('click', logout)
   }
-
-  bannerEl.style.display = 'none'
-  statusEl.innerHTML = accounts.map(a => `
-    <span class="account-pill">
-      <span class="account-email" title="${escHtml(a.email ?? 'Account')}">${escHtml(a.email ?? 'Account')}</span>
-      <button class="account-remove" data-id="${escHtml(a.id)}" title="Disconnect">×</button>
-    </span>
-  `).join('') + `<button id="btn-add-account" class="btn-add-account">+ Add</button>`
-
-  statusEl.querySelectorAll('.account-remove').forEach(btn => {
-    btn.addEventListener('click', () => logoutAccount(btn.dataset.id))
-  })
-  document.getElementById('btn-add-account').addEventListener('click', addAccount)
 }
 
 // ── Calendar render ──────────────────────────────────────────────────────────
@@ -589,14 +569,10 @@ async function render() {
   showLoading()
   try {
     const end = addDays(state.weekStart, 7)
-    // Fetch calendar items and task lists in parallel; task lists power the modal list selector
+    // Fetch items and task lists in parallel; task lists power the modal list selector
     const [items] = await Promise.all([
       fetchItems(state.weekStart, end),
-      getTokens().then(accts =>
-        Promise.all(accts.map(a =>
-          getTaskLists(a.token).then(ls => ls.map(l => ({ ...l, owner_account: a.id }))).catch(() => [])
-        )).then(lists => { state.taskLists = lists.flat() })
-      ),
+      getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
     ])
     state.items = items
     renderItems(getVisibleItems())

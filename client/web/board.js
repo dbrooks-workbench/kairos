@@ -1,5 +1,5 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
-import { getTokenFor } from './auth.js'
+import { getToken } from './auth.js'
 import { completeTask, uncompleteTask, moveTask, patchTask } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 
@@ -42,7 +42,7 @@ async function executeSnooze() {
   _snoozeOnRefresh = null
 
   try {
-    const token = await getTokenFor(item.source.owner_account)
+    const token = await getToken()
     if (token) {
       await patchTask(token, item.source.account_id, item.source.external_id, {
         due:   newDueIso,
@@ -203,10 +203,9 @@ function buildCard(item) {
   const isDone = item.status === 'COMPLETED'
   const card   = document.createElement('div')
   card.className         = `board-card${isDone ? ' board-card-done' : ''}`
-  card.dataset.itemId      = item.id
-  card.dataset.listId      = item.source.account_id    // actual Google list ID
-  card.dataset.extId       = item.source.external_id   // Google task ID
-  card.dataset.ownerAccount = item.source.owner_account ?? ''
+  card.dataset.itemId    = item.id
+  card.dataset.listId    = item.source.account_id   // actual Google list ID
+  card.dataset.extId     = item.source.external_id  // Google task ID
 
   // Header row: title + optional snooze button
   const hdr = document.createElement('div')
@@ -298,12 +297,11 @@ async function handleDrop(evt) {
   const toColId   = to.dataset.listId
   if (fromColId === toColId) return  // same-column reorder not yet supported
 
-  const listId      = cardEl.dataset.listId      // actual Google Tasks list ID
-  const extId       = cardEl.dataset.extId
-  const ownerAccount = cardEl.dataset.ownerAccount
+  const listId = cardEl.dataset.listId  // actual Google Tasks list ID
+  const extId  = cardEl.dataset.extId
 
   try {
-    const token = await getTokenFor(ownerAccount)
+    const token = await getToken()
     if (!token) { _callbacks.onRefresh?.(); return }
 
     if (toColId === DONE_COL_ID) {

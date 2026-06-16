@@ -135,62 +135,19 @@ body {
 }
 
 #account-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 13px;
   color: var(--text-muted);
 }
 
-#account-status a {
+#account-status a, #account-status button {
   color: var(--today-color);
   text-decoration: none;
-  font-size: 13px;
-}
-
-.account-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: #f1f3f4;
-  border-radius: 12px;
-  padding: 3px 4px 3px 8px;
-  font-size: 11px;
-  color: var(--text);
-}
-
-.account-email {
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-remove {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  color: var(--text-muted);
-  padding: 0 3px;
-  border-radius: 50%;
+  font-size: 13px;
+  padding: 0;
 }
-
-.account-remove:hover { background: #ddd; color: var(--text); }
-
-.btn-add-account {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 3px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.btn-add-account:hover { border-color: var(--today-color); color: var(--today-color); }
 
 /* ── Calendar picker ─────────────────────── */
 
