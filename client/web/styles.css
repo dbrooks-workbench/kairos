@@ -149,6 +149,93 @@ body {
   padding: 0;
 }
 
+#account-wrap { position: relative; }
+
+#account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  width: 256px;
+  overflow: hidden;
+}
+
+.acct-section { padding: 8px 12px; }
+.acct-section-border { border-top: 1px solid var(--border); }
+
+.acct-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.acct-email {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.acct-badge {
+  font-size: 10px;
+  border-radius: 10px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.acct-badge.primary   { background: #e8f0fe; color: var(--today-color); }
+.acct-badge.secondary { background: #f1f3f4; color: var(--text-muted); }
+
+.acct-signout {
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; color: var(--text-muted); padding: 0; white-space: nowrap;
+}
+.acct-signout:hover { color: var(--text); }
+
+.acct-remove {
+  background: none; border: none; cursor: pointer;
+  font-size: 16px; color: var(--text-muted); padding: 0 3px;
+  line-height: 1; border-radius: 4px; flex-shrink: 0;
+}
+.acct-remove:hover { background: #f1f3f4; color: var(--text); }
+
+.acct-add {
+  background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--today-color); padding: 2px 0;
+  text-align: left; width: 100%;
+}
+.acct-add:hover { text-decoration: underline; }
+
+.acct-sweep-config { display: flex; flex-direction: column; gap: 6px; }
+
+.acct-sweep-label {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+.acct-sweep-select {
+  font-size: 12px; border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 6px; outline: none; font-family: inherit; background: var(--bg);
+  color: var(--text);
+}
+.acct-sweep-select:focus { border-color: var(--today-color); }
+
+.sweep-btn {
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+  color: var(--text-muted); white-space: nowrap;
+}
+.sweep-btn:hover { border-color: var(--today-color); color: var(--today-color); }
+.sweep-btn.sweeping { opacity: 0.5; cursor: default; pointer-events: none; }
+
 /* ── Calendar picker ─────────────────────── */
 
 #cal-picker-wrap {

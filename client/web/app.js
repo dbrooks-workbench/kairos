@@ -1,11 +1,12 @@
-import { getToken, isAuthenticated, logout, loginUrl } from './auth.js'
+import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
+import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.4.1'
+const VERSION   = '0.5.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -154,6 +155,7 @@ function startPolling(ms) {
   stopPolling()
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
+    await runSweepAndRefresh()
     if (state.view === 'board') {
       await loadBoardData()
     } else {
@@ -171,10 +173,12 @@ function stopPolling() {
 // Resume immediately when the user returns to the tab
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
-  if (state.view === 'board') loadBoardData()
-  else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
-    state.items = items
-    renderItems(getVisibleItems())
+  runSweepAndRefresh().then(() => {
+    if (state.view === 'board') loadBoardData()
+    else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
+      state.items = items
+      renderItems(getVisibleItems())
+    })
   })
 })
 
@@ -275,20 +279,133 @@ document.getElementById('cal-picker-panel').addEventListener('click', e => {
   e.stopPropagation()
 })
 
-// ── Auth UI ──────────────────────────────────────────────────────────────────
+// ── Auth + sweep UI ───────────────────────────────────────────────────────────
+
+const escHtml = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 async function renderAccountStatus() {
-  const authed = await isAuthenticated()
+  const accounts = await getTokens()
   const statusEl = document.getElementById('account-status')
   const bannerEl = document.getElementById('connect-banner')
+  const sweepBtn = document.getElementById('btn-sweep')
 
-  if (!authed) {
+  if (!accounts.length) {
     statusEl.innerHTML = `<a href="${loginUrl()}">Sign in</a>`
     bannerEl.style.display = 'flex'
-  } else {
-    bannerEl.style.display = 'none'
+    sweepBtn.hidden = true
+    return
+  }
+
+  bannerEl.style.display = 'none'
+  sweepBtn.hidden = !accounts.some(a => !a.primary)
+
+  if (accounts.length === 1) {
     statusEl.innerHTML = `<button id="btn-signout">Sign out</button>`
     document.getElementById('btn-signout').addEventListener('click', logout)
+  } else {
+    statusEl.innerHTML = `<button id="btn-accounts-toggle">Accounts ▾</button>`
+    document.getElementById('btn-accounts-toggle').addEventListener('click', e => {
+      e.stopPropagation()
+      const panel = document.getElementById('account-panel')
+      if (!panel.hidden) { panel.hidden = true; return }
+      renderAccountPanel(accounts)
+      panel.hidden = false
+    })
+  }
+}
+
+function renderAccountPanel(accounts) {
+  const panel     = document.getElementById('account-panel')
+  const primary   = accounts.find(a => a.primary)
+  const secondaries = accounts.filter(a => !a.primary)
+  const configListId = getSweepTargetListId()
+
+  panel.innerHTML = ''
+
+  // Primary account
+  const primarySec = el('div', 'acct-section')
+  primarySec.innerHTML = `
+    <div class="acct-row">
+      <span class="acct-email" title="${escHtml(primary?.email)}">${escHtml(primary?.email ?? 'Primary account')}</span>
+      <span class="acct-badge primary">Primary</span>
+      <button class="acct-signout" id="btn-panel-signout">Sign out</button>
+    </div>`
+  panel.appendChild(primarySec)
+
+  // Secondary accounts
+  if (secondaries.length) {
+    const secSec = el('div', 'acct-section acct-section-border')
+    secondaries.forEach(a => {
+      const row = el('div', 'acct-row')
+      row.innerHTML = `
+        <span class="acct-email" title="${escHtml(a.email ?? a.id)}">${escHtml(a.email ?? a.id)}</span>
+        <span class="acct-badge secondary">Secondary</span>
+        <button class="acct-remove" data-id="${escHtml(a.id)}" title="Remove">×</button>`
+      secSec.appendChild(row)
+    })
+    panel.appendChild(secSec)
+  }
+
+  // Add secondary
+  const addSec = el('div', 'acct-section acct-section-border')
+  addSec.innerHTML = `<button class="acct-add" id="btn-add-secondary">+ Add secondary account</button>`
+  panel.appendChild(addSec)
+
+  // Sweep destination
+  if (state.taskLists.length) {
+    const sweepSec = el('div', 'acct-section acct-section-border')
+    sweepSec.innerHTML = `
+      <div class="acct-sweep-config">
+        <label class="acct-sweep-label">Sweep tasks to</label>
+        <select id="sweep-target-list" class="acct-sweep-select">
+          ${state.taskLists.map(l =>
+            `<option value="${escHtml(l.id)}"${l.id === configListId ? ' selected' : ''}>${escHtml(l.title)}</option>`
+          ).join('')}
+        </select>
+      </div>`
+    panel.appendChild(sweepSec)
+  }
+
+  panel.querySelector('#btn-panel-signout')?.addEventListener('click', logout)
+  panel.querySelector('#btn-add-secondary')?.addEventListener('click', addAccount)
+  panel.querySelectorAll('.acct-remove').forEach(btn => {
+    btn.addEventListener('click', () => logoutAccount(btn.dataset.id))
+  })
+  panel.querySelector('#sweep-target-list')?.addEventListener('change', e => {
+    setSweepTargetListId(e.target.value)
+  })
+}
+
+function el(tag, className) {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  return node
+}
+
+// ── Sweep ─────────────────────────────────────────────────────────────────────
+
+async function runSweepAndRefresh() {
+  const accounts    = await getTokens()
+  const secondaries = accounts.filter(a => !a.primary)
+  if (!secondaries.length) return
+
+  const sweepBtn = document.getElementById('btn-sweep')
+  sweepBtn?.classList.add('sweeping')
+
+  try {
+    const { moved } = await runSweep(accounts, state.taskLists)
+    if (moved > 0) {
+      if (state.view === 'board') {
+        await loadBoardData()
+      } else {
+        state.items = await fetchItems(state.weekStart, addDays(state.weekStart, 7))
+        renderItems(getVisibleItems())
+      }
+    }
+  } catch (err) {
+    console.error('Sweep error:', err)
+  } finally {
+    sweepBtn?.classList.remove('sweeping')
   }
 }
 
@@ -614,11 +731,21 @@ document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 initModal()
 initSnooze()
 
+// Close account panel on outside click
+document.addEventListener('click', () => {
+  document.getElementById('account-panel').hidden = true
+})
+document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
+
+// Manual sweep trigger
+document.getElementById('btn-sweep').addEventListener('click', () => runSweepAndRefresh())
+
 render().then(() => {
   // #pinned-top (col-headers + allday-row) is sticky so it always occupies
   // the top of the visible area. Scroll the timed grid to 8am.
   const timedScroll = document.getElementById('timed-scroll')
   const pinnedTop   = document.getElementById('pinned-top')
   timedScroll.scrollTop = pinnedTop.offsetHeight + 8 * 60
+  runSweepAndRefresh()
   startPolling(120_000)
 })
