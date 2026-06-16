@@ -86,11 +86,13 @@ export async function onRequestGet(context) {
 
 // Extract email from Google's id_token (JWT) without full signature verification —
 // the token arrived directly over HTTPS from Google's token endpoint so trust is established.
+// JWT uses base64url (no padding); atob requires standard base64 with = padding.
 function extractEmail(idToken) {
   if (!idToken) return null
   try {
-    const b64 = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    const payload = JSON.parse(atob(b64))
+    const b64url  = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded  = b64url + '='.repeat((4 - b64url.length % 4) % 4)
+    const payload = JSON.parse(atob(padded))
     return payload.email ?? null
   } catch { return null }
 }

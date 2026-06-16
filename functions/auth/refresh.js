@@ -17,6 +17,21 @@ export async function onRequestGet(context) {
 
   for (const account of accounts) {
     if (account.accessToken && account.expiresAt > Date.now()) {
+      // Token still valid. Backfill email if missing (e.g. migrated legacy session,
+      // or newly-added account where extractEmail failed due to base64 padding bug).
+      if (!account.email) {
+        try {
+          const ui    = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+            headers: { Authorization: `Bearer ${account.accessToken}` }
+          })
+          const email = (await ui.json()).email ?? null
+          if (email) {
+            account.email = email
+            account.id    = email
+            dirty = true
+          }
+        } catch {}
+      }
       refreshed.push(account)
       continue
     }

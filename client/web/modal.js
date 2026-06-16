@@ -89,7 +89,7 @@ function populate() {
   acctRow.hidden = _accounts.length <= 1
   if (_accounts.length > 1) {
     el('modal-account').innerHTML = _accounts
-      .map(a => `<option value="${esc(a.id)}"${a.id === _accountId ? ' selected' : ''}>${esc(a.email ?? a.id)}</option>`)
+      .map((a, i) => `<option value="${esc(a.id)}"${a.id === _accountId ? ' selected' : ''}>${esc(a.email ?? a.id ?? `Account ${i + 1}`)}</option>`)
       .join('')
   }
 

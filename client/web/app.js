@@ -5,7 +5,7 @@ import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './boar
 import { initModal, openModal, openCreateModal } from './modal.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.5.1'
+const VERSION   = '0.5.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
