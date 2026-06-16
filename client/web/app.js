@@ -8,7 +8,7 @@ import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.7.1'
+const VERSION   = '0.7.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -109,8 +109,8 @@ async function handleToggleTask(item) {
 // ── Loading indicator ─────────────────────────────────────────────────────────
 // Ref-counted: bar shows whenever any fetch is in-flight, hides when all settle.
 
-function showLoading() { document.getElementById('loading-bar').hidden = false }
-function hideLoading() { document.getElementById('loading-bar').hidden = true  }
+function showLoading() { document.getElementById('loading-bar').classList.add('active') }
+function hideLoading() { document.getElementById('loading-bar').classList.remove('active') }
 
 let _pending = 0
 const _origFetch = window.fetch.bind(window)
