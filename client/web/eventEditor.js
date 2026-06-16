@@ -6,6 +6,7 @@ let _callbacks     = {}
 let _spawns        = []     // [{ key, title, triggerDays, dueDays, loe, checklist, _autoKey }]
 let _editItem      = null   // CalendarItem being edited; null = create mode
 let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-configured
+let _pendingBody   = null   // body held while scope-picker modal is open
 
 const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
@@ -227,6 +228,16 @@ export function initEventEditor() {
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
 
+  // Recurring-event scope picker
+  el('recur-scope-cancel').addEventListener('click', () => {
+    el('recur-scope-modal').hidden = true
+    _pendingBody = null
+    el('event-modal-save').disabled = false
+  })
+  el('recur-scope-ok').addEventListener('click', () => executeWithScope(
+    document.querySelector('input[name="recur-scope"]:checked')?.value ?? 'this'
+  ))
+
   initCustomRecur()
 }
 
@@ -258,7 +269,6 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   el('event-modal-recur').value    = ''
   el('custom-recur-panel').hidden  = true
   el('event-spawn-section').open   = false
-  el('event-recur-scope-row').hidden = true
   renderSpawnList()
   resetCustomRecur(today)
 
@@ -330,11 +340,6 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   }))
   renderSpawnList()
   el('event-spawn-section').open = _spawns.length > 0
-
-  // Show scope selector only for recurring event instances
-  const isRecurring = !!item.metadata?.recurring_event_id
-  el('event-recur-scope-row').hidden = !isRecurring
-  el('event-recur-scope').value = 'this'
 
   // Populate calendar list
   const calSelect = el('event-modal-calendar')
@@ -439,20 +444,42 @@ async function save() {
 
   const saveBtn = el('event-modal-save')
   saveBtn.disabled = true
+
+  // For recurring event instances, pause and show the scope picker
+  if (_editItem?.metadata?.recurring_event_id) {
+    _pendingBody = body
+    document.querySelector('input[name="recur-scope"][value="this"]').checked = true
+    el('recur-scope-modal').hidden = false
+    return  // executeWithScope() will finish the save after the user picks
+  }
+
+  // Non-recurring edit or new event — save immediately
   try {
-    if (!_editItem) {
-      await createEvent(token, calendarId, body)
+    if (_editItem) {
+      await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
     } else {
-      const scope = el('event-recur-scope').value  // 'this' | 'following' | 'all'
-      if (scope === 'all') {
-        await saveAllEvents(token, body)
-      } else if (scope === 'following') {
-        await saveThisAndFollowing(token, body)
-      } else {
-        // 'this' — patch just this instance (default, existing behavior)
-        await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
-      }
+      await createEvent(token, calendarId, body)
     }
+    close()
+    _callbacks.onSaved?.()
+  } catch (err) {
+    console.error('Event save failed:', err)
+  } finally {
+    saveBtn.disabled = false
+  }
+}
+
+async function executeWithScope(scope) {
+  el('recur-scope-modal').hidden = true
+  const body    = _pendingBody
+  _pendingBody  = null
+  const saveBtn = el('event-modal-save')
+  const token   = await getToken()
+  if (!token || !body) { saveBtn.disabled = false; return }
+  try {
+    if (scope === 'all')           await saveAllEvents(token, body)
+    else if (scope === 'following') await saveThisAndFollowing(token, body)
+    else await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
     close()
     _callbacks.onSaved?.()
   } catch (err) {

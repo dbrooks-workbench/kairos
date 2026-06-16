@@ -662,6 +662,59 @@ body {
   background: #ea4335;
 }
 
+/* ── Recurring-event scope picker ───────────────────────── */
+
+#recur-scope-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#recur-scope-modal[hidden] { display: none; }
+
+.recur-scope-panel {
+  background: var(--bg);
+  border-radius: 10px;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.22);
+  padding: 24px 24px 16px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+}
+
+.recur-scope-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+
+.recur-scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.recur-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.recur-scope-option input[type="radio"] { accent-color: var(--today-color); }
+
+.recur-scope-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── Add button ──────────────────────────────────────────── */
 
 .btn-add {

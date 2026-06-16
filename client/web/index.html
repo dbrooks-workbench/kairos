@@ -222,15 +222,6 @@
           <div class="modal-field">
             <textarea id="event-modal-desc" class="modal-notes" placeholder="Description…" rows="4"></textarea>
           </div>
-          <!-- Only shown when editing a recurring event -->
-          <div class="modal-field-row" id="event-recur-scope-row" hidden>
-            <label class="modal-label">Apply to</label>
-            <select id="event-recur-scope" class="modal-select">
-              <option value="this">This event</option>
-              <option value="following">This and following events</option>
-              <option value="all">All events</option>
-            </select>
-          </div>
           <details class="modal-section" id="event-spawn-section">
             <summary>
               <span class="modal-chevron">›</span>
@@ -249,6 +240,31 @@
             <button id="event-modal-cancel" class="btn-ghost">Cancel</button>
             <button id="event-modal-save" class="btn-primary">Save</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recurring-event scope picker — shown after Save on a recurring event -->
+    <div id="recur-scope-modal" hidden>
+      <div class="recur-scope-panel">
+        <div class="recur-scope-title">Edit recurring event</div>
+        <div class="recur-scope-options">
+          <label class="recur-scope-option">
+            <input type="radio" name="recur-scope" value="this" checked>
+            <span>This event</span>
+          </label>
+          <label class="recur-scope-option">
+            <input type="radio" name="recur-scope" value="following">
+            <span>This and following events</span>
+          </label>
+          <label class="recur-scope-option">
+            <input type="radio" name="recur-scope" value="all">
+            <span>All events</span>
+          </label>
+        </div>
+        <div class="recur-scope-footer">
+          <button id="recur-scope-cancel" class="btn-ghost">Cancel</button>
+          <button id="recur-scope-ok"     class="btn-primary">Ok</button>
         </div>
       </div>
     </div>
