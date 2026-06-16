@@ -94,6 +94,21 @@ export function displayTimestamp(ts) {
     + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
+// ── Event description serializer ─────────────────────────────────────────────
+// Inverse of parseEventDescription.
+// Format: prose → blank line → JSON config → blank line → @timestamp log entries
+
+export function serializeEventDescription(prose, config, comments) {
+  const parts = []
+  if (prose?.trim()) parts.push(prose.trim())
+  if (config && Object.keys(config).length > 0) parts.push(JSON.stringify(config))
+  if (comments?.length) {
+    const sorted = [...comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    parts.push(sorted.map(c => `@${c.timestamp} ${c.text}`).join('\n'))
+  }
+  return parts.join('\n\n')
+}
+
 // ── Event description parser ──────────────────────────────────────────────────
 // Format: prose → JSON config block → @timestamp log entries
 

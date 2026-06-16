@@ -1,5 +1,6 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
+import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -7,7 +8,7 @@ import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.6.4'
+const VERSION   = '0.7.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -170,6 +171,7 @@ function startPolling(ms) {
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
     await runSweepAndRefresh()
+    await runSpawnScan()
     if (state.view === 'board') {
       await loadBoardData()
     } else {
@@ -187,13 +189,15 @@ function stopPolling() {
 // Resume immediately when the user returns to the tab
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
-  runSweepAndRefresh().then(() => {
-    if (state.view === 'board') loadBoardData()
-    else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
-      state.items = items
-      renderItems(getVisibleItems())
+  runSweepAndRefresh()
+    .then(() => runSpawnScan())
+    .then(() => {
+      if (state.view === 'board') loadBoardData()
+      else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
+        state.items = items
+        renderItems(getVisibleItems())
+      })
     })
-  })
 })
 
 // ── Board data + callbacks ────────────────────────────────────────────────────
@@ -410,6 +414,28 @@ async function runSweepAndRefresh() {
     }
   } catch (err) {
     console.error('Sweep error:', err)
+  }
+}
+
+// ── Spawn scan ────────────────────────────────────────────────────────────────
+// Fetches the next 90 days of calendar events and processes any spawn directives
+// whose trigger windows have opened. Idempotent — safe to run on every poll.
+
+async function runSpawnScan() {
+  const token = await getToken()
+  if (!token || !state.taskLists.length) return
+
+  try {
+    const today  = new Date()
+    const future = addDays(today, 90)
+    const items  = await fetchItems(today, future)
+    const { spawned } = await processSpawnDirectives(items, state.taskLists)
+    if (spawned > 0) {
+      if (state.view === 'board') loadBoardData()
+      else refreshCalendarItems()
+    }
+  } catch (err) {
+    console.error('Spawn scan error:', err)
   }
 }
 
@@ -938,6 +964,6 @@ render().then(() => {
     ? Math.max(0, minsNow - 120)
     : 8 * 60
   timedScroll.scrollTop = scrollMins
-  runSweepAndRefresh()
+  runSweepAndRefresh().then(() => runSpawnScan())
   startPolling(120_000)
 })

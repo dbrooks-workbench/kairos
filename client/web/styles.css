@@ -727,6 +727,60 @@ body {
 /* When all-day is active, hide both time inputs */
 #event-modal-panel.all-day .event-time-input { display: none; }
 
+/* ── Spawn entries ───────────────────────────────────────── */
+
+.spawn-entry {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 4px 12px 6px;
+  overflow: hidden;
+}
+
+.spawn-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #f8f9fa;
+  border-bottom: 1px solid var(--border);
+}
+
+.spawn-entry-header .modal-input { flex: 1; font-weight: 500; }
+
+.spawn-fields {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spawn-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spawn-cl-row { align-items: flex-start; }
+
+.spawn-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.spawn-suffix {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.spawn-fields .modal-input  { flex: 1; }
+.spawn-fields .modal-notes  { flex: 1; resize: vertical; }
+.spawn-fields .crp-interval { width: 56px; flex: none; }
+
 /* ── Custom recurrence panel ─────────────────────────────── */
 
 .custom-recur-panel {
