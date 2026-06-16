@@ -221,6 +221,15 @@
           <div class="modal-field">
             <textarea id="event-modal-desc" class="modal-notes" placeholder="Description…" rows="4"></textarea>
           </div>
+          <!-- Only shown when editing a recurring event -->
+          <div class="modal-field-row" id="event-recur-scope-row" hidden>
+            <label class="modal-label">Apply to</label>
+            <select id="event-recur-scope" class="modal-select">
+              <option value="this">This event</option>
+              <option value="following">This and following events</option>
+              <option value="all">All events</option>
+            </select>
+          </div>
           <details class="modal-section" id="event-spawn-section">
             <summary>
               <span class="modal-chevron">›</span>

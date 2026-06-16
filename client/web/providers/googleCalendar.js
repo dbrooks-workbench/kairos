@@ -84,6 +84,10 @@ function resolveColor(colorId) {
   return GCal_COLORS[colorId] ?? null
 }
 
+export async function getEvent(token, calendarId, eventId) {
+  return get(token, `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`)
+}
+
 export async function updateEvent(token, calendarId, eventId, body) {
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,

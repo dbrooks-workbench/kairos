@@ -1,5 +1,5 @@
 import { getToken } from './auth.js'
-import { createEvent, updateEvent } from './providers/googleCalendar.js'
+import { createEvent, updateEvent, getEvent } from './providers/googleCalendar.js'
 import { serializeNotes, serializeEventDescription } from './providers/parsers.js'
 
 let _callbacks     = {}
@@ -258,6 +258,7 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   el('event-modal-recur').value    = ''
   el('custom-recur-panel').hidden  = true
   el('event-spawn-section').open   = false
+  el('event-recur-scope-row').hidden = true
   renderSpawnList()
   resetCustomRecur(today)
 
@@ -329,6 +330,11 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   }))
   renderSpawnList()
   el('event-spawn-section').open = _spawns.length > 0
+
+  // Show scope selector only for recurring event instances
+  const isRecurring = !!item.metadata?.recurring_event_id
+  el('event-recur-scope-row').hidden = !isRecurring
+  el('event-recur-scope').value = 'this'
 
   // Populate calendar list
   const calSelect = el('event-modal-calendar')
@@ -434,16 +440,61 @@ async function save() {
   const saveBtn = el('event-modal-save')
   saveBtn.disabled = true
   try {
-    if (_editItem) {
-      await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
-    } else {
+    if (!_editItem) {
       await createEvent(token, calendarId, body)
+    } else {
+      const scope = el('event-recur-scope').value  // 'this' | 'following' | 'all'
+      if (scope === 'all') {
+        await saveAllEvents(token, body)
+      } else if (scope === 'following') {
+        await saveThisAndFollowing(token, body)
+      } else {
+        // 'this' — patch just this instance (default, existing behavior)
+        await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
+      }
     }
     close()
     _callbacks.onSaved?.()
   } catch (err) {
-    console.error('Event creation failed:', err)
+    console.error('Event save failed:', err)
   } finally {
     saveBtn.disabled = false
   }
+}
+
+// ── Recurring save helpers ────────────────────────────────────────────────────
+
+async function saveAllEvents(token, body) {
+  const calId   = _editItem.source.account_id
+  const masterId = _editItem.metadata.recurring_event_id
+  // Patch the master event; all instances inherit the changes
+  await updateEvent(token, calId, masterId, body)
+}
+
+async function saveThisAndFollowing(token, body) {
+  const calId    = _editItem.source.account_id
+  const masterId = _editItem.metadata.recurring_event_id
+
+  // Fetch master to get its current RRULE
+  const master      = await getEvent(token, calId, masterId)
+  const masterRrule = master.recurrence?.[0]
+
+  // Truncate master: UNTIL = day before this instance's original start (UTC)
+  if (masterRrule) {
+    const cutoff = new Date(_editItem.start)
+    cutoff.setUTCDate(cutoff.getUTCDate() - 1)
+    cutoff.setUTCHours(23, 59, 59, 0)
+    const pad = v => String(v).padStart(2, '0')
+    const untilStr = `${cutoff.getUTCFullYear()}${pad(cutoff.getUTCMonth()+1)}${pad(cutoff.getUTCDate())}` +
+                     `T${pad(cutoff.getUTCHours())}${pad(cutoff.getUTCMinutes())}${pad(cutoff.getUTCSeconds())}Z`
+    const truncated = masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '') + `;UNTIL=${untilStr}`
+    await updateEvent(token, calId, masterId, { recurrence: [truncated] })
+  }
+
+  // Create new forward series starting at this instance's (possibly edited) date
+  // Carry forward the master's RRULE (stripped of UNTIL/COUNT) if user didn't set one
+  if (!body.recurrence && masterRrule) {
+    body.recurrence = [masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '')]
+  }
+  await createEvent(token, calId, body)
 }
