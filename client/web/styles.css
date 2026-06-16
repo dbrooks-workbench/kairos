@@ -135,19 +135,62 @@ body {
 }
 
 #account-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   color: var(--text-muted);
 }
 
-#account-status a, #account-status button {
+#account-status a {
   color: var(--today-color);
   text-decoration: none;
+  font-size: 13px;
+}
+
+.account-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #f1f3f4;
+  border-radius: 12px;
+  padding: 3px 4px 3px 8px;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.account-email {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-remove {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 13px;
-  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 0 3px;
+  border-radius: 50%;
 }
+
+.account-remove:hover { background: #ddd; color: var(--text); }
+
+.btn-add-account {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.btn-add-account:hover { border-color: var(--today-color); color: var(--today-color); }
 
 /* ── Calendar picker ─────────────────────── */
 
@@ -492,6 +535,7 @@ body {
 }
 
 .allday-event.type-task span {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1075,7 +1119,7 @@ body {
 
 .snooze-ok:hover { opacity: 0.9; }
 
-/* Snooze button on calendar all-day task chips */
+/* Snooze button on calendar all-day task chips — always visible, pushed far right */
 .task-snooze {
   flex-shrink: 0;
   background: none;
@@ -1084,16 +1128,11 @@ body {
   font-size: 10px;
   line-height: 1;
   padding: 0;
-  opacity: 0;
-  transition: opacity 0.12s;
   display: flex;
   align-items: center;
 }
 
-.allday-event.type-task:hover .task-snooze { opacity: 0.85; }
-.task-snooze:hover { opacity: 1 !important; }
-
-/* Snooze button on board cards */
+/* Snooze button on board cards — always visible */
 .board-card-header {
   display: flex;
   align-items: flex-start;
@@ -1111,9 +1150,4 @@ body {
   font-size: 13px;
   line-height: 1;
   padding: 0 1px;
-  opacity: 0;
-  transition: opacity 0.12s;
 }
-
-.board-card:hover .card-snooze { opacity: 0.55; }
-.card-snooze:hover { opacity: 1 !important; }
