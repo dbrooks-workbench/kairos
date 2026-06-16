@@ -7,7 +7,7 @@ import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor } from './eventEditor.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.6.1'
+const VERSION   = '0.6.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -923,16 +923,17 @@ document.addEventListener('click', () => {
 document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
 
 render().then(() => {
-  // Scroll so current time is visible ~2 hours from the top of the timed grid.
-  // Falls back to 8am when viewing a past/future week.
+  // #timed-scroll is a flex column container; scrollTop = M shows timed-area
+  // minute M at the top of the visible area below the sticky header.
+  // No pinnedTop.offsetHeight offset needed — that caused the indicator to land
+  // behind the sticky header by exactly pinnedTop.offsetHeight pixels.
   const timedScroll = document.getElementById('timed-scroll')
-  const pinnedTop   = document.getElementById('pinned-top')
   const now         = new Date()
   const minsNow     = now.getHours() * 60 + now.getMinutes()
   const scrollMins  = getWeekStart(now).getTime() === state.weekStart.getTime()
     ? Math.max(0, minsNow - 120)
     : 8 * 60
-  timedScroll.scrollTop = pinnedTop.offsetHeight + scrollMins
+  timedScroll.scrollTop = scrollMins
   runSweepAndRefresh()
   startPolling(120_000)
 })
