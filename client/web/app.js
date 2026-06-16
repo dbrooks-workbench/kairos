@@ -299,19 +299,14 @@ async function renderAccountStatus() {
   bannerEl.style.display = 'none'
   sweepBtn.hidden = !accounts.some(a => !a.primary)
 
-  if (accounts.length === 1) {
-    statusEl.innerHTML = `<button id="btn-signout">Sign out</button>`
-    document.getElementById('btn-signout').addEventListener('click', logout)
-  } else {
-    statusEl.innerHTML = `<button id="btn-accounts-toggle">Accounts ▾</button>`
-    document.getElementById('btn-accounts-toggle').addEventListener('click', e => {
-      e.stopPropagation()
-      const panel = document.getElementById('account-panel')
-      if (!panel.hidden) { panel.hidden = true; return }
-      renderAccountPanel(accounts)
-      panel.hidden = false
-    })
-  }
+  statusEl.innerHTML = `<button id="btn-accounts-toggle">Accounts ▾</button>`
+  document.getElementById('btn-accounts-toggle').addEventListener('click', e => {
+    e.stopPropagation()
+    const panel = document.getElementById('account-panel')
+    if (!panel.hidden) { panel.hidden = true; return }
+    renderAccountPanel(accounts)
+    panel.hidden = false
+  })
 }
 
 function renderAccountPanel(accounts) {
