@@ -17,6 +17,7 @@ const state = {
   view: 'calendar',        // 'calendar' | 'board'
   taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
   boardItems: [],          // CalendarItem[] — all tasks, no date filter
+  doneWindow: 30,          // days of completed tasks to show in Done column
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -192,7 +193,8 @@ function boardCallbacks() {
       onDeleted:    loadBoardData,
       onToggleDone: loadBoardData,
     }),
-    onRefresh: loadBoardData,
+    onRefresh:          loadBoardData,
+    onDoneWindowChange: days => { state.doneWindow = days; loadBoardData() },
   }
 }
 
@@ -201,10 +203,10 @@ async function loadBoardData() {
   if (!token) return
   showLoading()
   try {
-    const { lists, tasks } = await getAllTasks(token)
+    const { lists, tasks } = await getAllTasks(token, state.doneWindow)
     state.taskLists  = lists
     state.boardItems = tasks
-    renderBoard(state.taskLists, state.boardItems, boardCallbacks())
+    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow)
   } catch (err) {
     console.error('Board data load failed:', err)
   } finally {

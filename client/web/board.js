@@ -113,7 +113,7 @@ export function destroyBoard() {
   document.getElementById('board').innerHTML = ''
 }
 
-export function renderBoard(taskLists, boardItems, callbacks) {
+export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
   destroyBoard()
   _callbacks = callbacks
 
@@ -135,7 +135,7 @@ export function renderBoard(taskLists, boardItems, callbacks) {
 
   // One column per task list
   for (const list of taskLists) {
-    const col = buildCol(list, activeByList[list.id] ?? [], false)
+    const col = buildCol(list, activeByList[list.id] ?? [], false, doneWindow)
     board.appendChild(col)
     _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
       group: 'tasks',
@@ -146,8 +146,8 @@ export function renderBoard(taskLists, boardItems, callbacks) {
     }))
   }
 
-  // Done column — cap at 50 to keep the list manageable
-  const doneCol = buildCol({ id: DONE_COL_ID, title: 'Done' }, doneItems.slice(0, 50), true)
+  // Done column — cap at 100 to keep the list manageable
+  const doneCol = buildCol({ id: DONE_COL_ID, title: 'Done' }, doneItems.slice(0, 100), true, doneWindow)
   board.appendChild(doneCol)
   _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
     group: 'tasks',
@@ -159,7 +159,7 @@ export function renderBoard(taskLists, boardItems, callbacks) {
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
-function buildCol(list, items, isDone) {
+function buildCol(list, items, isDone, doneWindow) {
   const col = document.createElement('div')
   col.className = `board-col${isDone ? ' board-col-done' : ''}`
 
@@ -177,7 +177,18 @@ function buildCol(list, items, isDone) {
 
   hdr.append(titleEl, countEl)
 
-  if (!isDone) {
+  if (isDone) {
+    const toggle = document.createElement('div')
+    toggle.className = 'done-window-toggle'
+    for (const days of [7, 30, 90]) {
+      const btn = document.createElement('button')
+      btn.className = `done-window-btn${days === doneWindow ? ' active' : ''}`
+      btn.textContent = `${days}d`
+      btn.addEventListener('click', () => _callbacks.onDoneWindowChange?.(days))
+      toggle.appendChild(btn)
+    }
+    hdr.appendChild(toggle)
+  } else {
     const addBtn = document.createElement('button')
     addBtn.className = 'board-add-btn'
     addBtn.title     = 'New task'

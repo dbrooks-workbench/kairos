@@ -113,12 +113,12 @@ export async function moveTask(token, fromListId, taskId, toListId, overrides = 
 
 // Fetch all tasks for the board view using two separate queries per list:
 // 1. Active (needsAction) tasks — no date constraint, typically a small set
-// 2. Completed tasks from the last 30 days — Google purges beyond that anyway
+// 2. Completed tasks from the last N days (completedDays, default 30)
 // completedMin only filters the completed field; active tasks have no completed
 // field so a single query with completedMin would silently drop all active tasks.
-export async function getAllTasks(token) {
+export async function getAllTasks(token, completedDays = 30) {
   const lists        = await getTaskLists(token)
-  const completedMin = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const completedMin = new Date(Date.now() - completedDays * 86_400_000).toISOString()
 
   const results = await Promise.allSettled(
     lists.map(async list => {

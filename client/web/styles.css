@@ -716,6 +716,26 @@ body {
 
 .board-add-btn:hover { color: var(--text); }
 
+.done-window-toggle {
+  display: flex;
+  gap: 2px;
+}
+
+.done-window-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+
+.done-window-btn:hover { border-color: var(--today-color); color: var(--today-color); }
+.done-window-btn.active { background: var(--today-color); border-color: var(--today-color); color: #fff; }
+
 .board-task-list {
   flex: 1;
   overflow-y: auto;
@@ -950,6 +970,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 .modal-add-row {
