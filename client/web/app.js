@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.8.6'
+const VERSION   = '0.8.7'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -618,13 +618,19 @@ function renderItems(items) {
     const dayIdx = localDayIndex(start, state.weekStart)
 
     if (item.all_day) {
-      // Collect all all-day items regardless of start day — multi-day events may
-      // start before the week; the spanning renderer clamps and filters them.
+      // Collect regardless of start day — multi-day events may start before the week.
       allDayItems.push(item)
     } else {
-      if (dayIdx < 0 || dayIdx >= 7) continue
       const end = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
-      timedByDay[dayIdx].push({ item, start, end })
+      if (end - start >= 86_400_000) {
+        // Timed events ≥ 24 h (e.g. multi-night bookings from ICS feeds) span
+        // multiple calendar days and render as banners in the all-day row.
+        const endDayIdx = localDayIndex(end, state.weekStart)
+        if (endDayIdx >= 0 && dayIdx <= 6) allDayItems.push(item)
+      } else {
+        if (dayIdx < 0 || dayIdx >= 7) continue
+        timedByDay[dayIdx].push({ item, start, end })
+      }
     }
   }
 
@@ -637,11 +643,14 @@ function renderItems(items) {
     const spans = []
     for (const item of allDayItems) {
       const start = new Date(item.start)
-      // Google all-day end dates are exclusive (Tue event ends at Wed midnight)
       const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 86_400_000)
 
       const s = localDayIndex(start, state.weekStart)
-      const e = localDayIndex(end,   state.weekStart) - 1  // convert exclusive → inclusive
+      // Google all-day end dates are exclusive (a Tue all-day event has end.date = Wed).
+      // Timed event end times are inclusive — the day they fall on is the last display day.
+      const e = item.all_day
+        ? localDayIndex(end, state.weekStart) - 1
+        : localDayIndex(end, state.weekStart)
 
       const clampS = Math.max(0, s)
       const clampE = Math.min(6, e)
