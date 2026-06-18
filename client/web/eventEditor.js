@@ -350,19 +350,18 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
 
   // Populate calendar list and, for recurring instances, load master RRULE
   const calSelect = el('event-modal-calendar')
-  calSelect.disabled  = false
-  calSelect.innerHTML = item.editable ? '<option value="">Loading…</option>'
-    : `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Loading…')}</option>`
+  // Calendar is always locked in edit mode — moving requires a separate API call
+  calSelect.disabled  = true
+  calSelect.innerHTML = `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Loading…')}</option>`
   const token = await getToken()
   if (token) {
     const calendarPromise = (async () => {
       try {
         const { getCalendars } = await import('./providers/googleCalendar.js')
-        populateCalendars(calSelect, await getCalendars(token), item.source.account_id, item.editable)
-      } catch {
-        calSelect.innerHTML = `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Current calendar')}</option>`
-        if (!item.editable) calSelect.disabled = true
-      }
+        const cals = await getCalendars(token)
+        const cal  = cals.find(c => c.id === item.source.account_id)
+        if (cal) calSelect.innerHTML = `<option value="${esc(cal.id)}" selected>${esc(cal.summary)}</option>`
+      } catch { /* keep the metadata name already shown */ }
     })()
 
     // Instances don't carry recurrence — fetch the master to show the correct RRULE
@@ -386,15 +385,7 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   el('event-modal-title').focus()
 }
 
-function populateCalendars(select, calendars, preferredId, editable = true) {
-  if (!editable) {
-    // Read-only calendar — show the name but lock the picker
-    const cal  = calendars.find(c => c.id === preferredId)
-    const name = cal?.summary ?? preferredId ?? 'Unknown calendar'
-    select.innerHTML = `<option value="${esc(preferredId)}" selected>${esc(name)}</option>`
-    select.disabled  = true
-    return
-  }
+function populateCalendars(select, calendars, preferredId) {
   select.disabled  = false
   const writable = calendars.filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')
   select.innerHTML = writable
