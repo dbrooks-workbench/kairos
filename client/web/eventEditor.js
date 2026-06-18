@@ -1,5 +1,5 @@
 import { getToken } from './auth.js'
-import { createEvent, updateEvent, getEvent } from './providers/googleCalendar.js'
+import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
 import { serializeNotes, serializeEventDescription } from './providers/parsers.js'
 
 let _callbacks     = {}
@@ -7,6 +7,7 @@ let _spawns        = []     // [{ key, title, triggerDays, dueDays, loe, checkli
 let _editItem      = null   // CalendarItem being edited; null = create mode
 let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-configured
 let _pendingBody   = null   // body held while scope-picker modal is open
+let _pendingAction = null   // 'save' | 'delete' — which action the scope modal is responding to
 
 const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
@@ -225,14 +226,18 @@ export function initEventEditor() {
 
   el('event-spawn-add').addEventListener('click', addSpawn)
 
+  el('event-modal-delete')?.addEventListener('click', confirmDelete)
+
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
 
   // Recurring-event scope picker (guard against stale-cache HTML/JS mismatch)
   el('recur-scope-cancel')?.addEventListener('click', () => {
     el('recur-scope-modal').hidden = true
-    _pendingBody = null
-    el('event-modal-save').disabled = false
+    _pendingBody   = null
+    _pendingAction = null
+    el('event-modal-save').disabled   = false
+    el('event-modal-delete').disabled = false
   })
   el('recur-scope-ok')?.addEventListener('click', () => executeWithScope(
     document.querySelector('input[name="recur-scope"]:checked')?.value ?? 'this'
@@ -269,6 +274,7 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   el('event-modal-recur').value    = ''
   el('custom-recur-panel').hidden  = true
   el('event-spawn-section').open   = false
+  el('event-modal-delete').hidden  = true
   renderSpawnList()
   resetCustomRecur(today)
 
@@ -370,6 +376,8 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
     }
   }
 
+  el('event-modal-delete').hidden  = false
+  el('event-modal-delete').disabled = false
   el('event-modal').hidden = false
   el('event-modal-title').focus()
 }
@@ -489,9 +497,59 @@ async function save() {
   }
 }
 
+async function confirmDelete() {
+  const deleteBtn = el('event-modal-delete')
+  deleteBtn.disabled = true
+  _pendingAction = 'delete'
+
+  if (_editItem?.metadata?.recurring_event_id) {
+    const scopeModal = el('recur-scope-modal')
+    if (scopeModal) {
+      el('recur-scope-title').textContent = 'Delete recurring event'
+      document.querySelector('input[name="recur-scope"][value="this"]').checked = true
+      scopeModal.hidden = false
+      return
+    }
+  }
+
+  // Non-recurring event — delete immediately
+  const token = await getToken()
+  if (!token) { deleteBtn.disabled = false; _pendingAction = null; return }
+  try {
+    await deleteEvent(token, _editItem.source.account_id, _editItem.source.external_id)
+    close()
+    _callbacks.onDeleted?.()
+  } catch (err) {
+    console.error('Event delete failed:', err)
+    deleteBtn.disabled = false
+  }
+  _pendingAction = null
+}
+
 async function executeWithScope(scope) {
   const scopeModal = el('recur-scope-modal')
   if (scopeModal) scopeModal.hidden = true
+
+  const action   = _pendingAction
+  _pendingAction = null
+  el('recur-scope-title').textContent = 'Edit recurring event'
+
+  if (action === 'delete') {
+    const token = await getToken()
+    if (!token) { el('event-modal-delete').disabled = false; return }
+    try {
+      if (scope === 'all')            await deleteAllEvents(token)
+      else if (scope === 'following') await deleteThisAndFollowing(token)
+      else                            await deleteEvent(token, _editItem.source.account_id, _editItem.source.external_id)
+      close()
+      _callbacks.onDeleted?.()
+    } catch (err) {
+      console.error('Event delete failed:', err)
+      el('event-modal-delete').disabled = false
+    }
+    return
+  }
+
   const body    = _pendingBody
   _pendingBody  = null
   const saveBtn = el('event-modal-save')
@@ -569,4 +627,33 @@ async function saveThisAndFollowing(token, body) {
     body.recurrence = [masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '')]
   }
   await createEvent(token, calId, body)
+}
+
+// ── Recurring delete helpers ──────────────────────────────────────────────────
+
+async function deleteAllEvents(token) {
+  const calId    = _editItem.source.account_id
+  const masterId = _editItem.metadata.recurring_event_id
+  await deleteEvent(token, calId, masterId)
+}
+
+async function deleteThisAndFollowing(token) {
+  const calId    = _editItem.source.account_id
+  const masterId = _editItem.metadata.recurring_event_id
+
+  const master      = await getEvent(token, calId, masterId)
+  const masterRrule = master.recurrence?.[0]
+
+  if (masterRrule) {
+    const cutoff = new Date(_editItem.start)
+    cutoff.setUTCDate(cutoff.getUTCDate() - 1)
+    cutoff.setUTCHours(23, 59, 59, 0)
+    const pad = v => String(v).padStart(2, '0')
+    const untilStr = `${cutoff.getUTCFullYear()}${pad(cutoff.getUTCMonth()+1)}${pad(cutoff.getUTCDate())}` +
+                     `T${pad(cutoff.getUTCHours())}${pad(cutoff.getUTCMinutes())}${pad(cutoff.getUTCSeconds())}Z`
+    const truncated = masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '') + `;UNTIL=${untilStr}`
+    await updateEvent(token, calId, masterId, { recurrence: [truncated] })
+  } else {
+    await deleteEvent(token, calId, _editItem.source.external_id)
+  }
 }

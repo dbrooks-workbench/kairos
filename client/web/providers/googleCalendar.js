@@ -101,6 +101,14 @@ export async function updateEvent(token, calendarId, eventId, body) {
   return res.json()
 }
 
+export async function deleteEvent(token, calendarId, eventId) {
+  const res = await fetch(
+    `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }
+  )
+  if (!res.ok) throw new Error(`deleteEvent: ${res.status} ${res.statusText}`)
+}
+
 export async function createEvent(token, calendarId, body) {
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events`,

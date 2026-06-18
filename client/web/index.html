@@ -235,7 +235,9 @@
           </details>
         </div>
         <div class="modal-footer">
-          <div></div>
+          <div class="modal-footer-left">
+            <button id="event-modal-delete" class="btn-danger" hidden>Delete</button>
+          </div>
           <div class="modal-footer-right">
             <button id="event-modal-cancel" class="btn-ghost">Cancel</button>
             <button id="event-modal-save" class="btn-primary">Save</button>
@@ -247,7 +249,7 @@
     <!-- Recurring-event scope picker — shown after Save on a recurring event -->
     <div id="recur-scope-modal" hidden>
       <div class="recur-scope-panel">
-        <div class="recur-scope-title">Edit recurring event</div>
+        <div class="recur-scope-title" id="recur-scope-title">Edit recurring event</div>
         <div class="recur-scope-options">
           <label class="recur-scope-option">
             <input type="radio" name="recur-scope" value="this" checked>
