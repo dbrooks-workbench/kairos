@@ -9,6 +9,40 @@ let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-co
 let _pendingBody   = null   // body held while scope-picker modal is open
 let _pendingAction = null   // 'save' | 'delete' — which action the scope modal is responding to
 
+// DOM nodes created once in initEventEditor, reused on every open
+let _locLink     = null
+let _descPreview = null
+
+// ── URL linkification ─────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+const _URL_RE = /https?:\/\/[^\s<>"']+/g
+
+function linkify(text) {
+  _URL_RE.lastIndex = 0
+  let out = '', last = 0, m
+  while ((m = _URL_RE.exec(text)) !== null) {
+    out += escHtml(text.slice(last, m.index))
+    out += `<a href="${escHtml(m[0])}" target="_blank" rel="noopener noreferrer">${escHtml(m[0])}</a>`
+    last = _URL_RE.lastIndex
+  }
+  return (out + escHtml(text.slice(last))).replace(/\n/g, '<br>')
+}
+
+function _refreshDescPreview() {
+  if (!_descPreview) return
+  const ta = el('event-modal-desc')
+  if (!/https?:\/\//.test(ta.value) || document.activeElement === ta) {
+    _descPreview.hidden = true
+  } else {
+    _descPreview.innerHTML = linkify(ta.value)
+    _descPreview.hidden = false
+  }
+}
+
 const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
 // ── Recurrence helpers ────────────────────────────────────────────────────────
@@ -229,6 +263,31 @@ export function initEventEditor() {
   el('event-modal-delete')?.addEventListener('click', confirmDelete)
 
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
+
+  // ── Location link ──────────────────────────────────────────────────────────
+  _locLink = document.createElement('a')
+  _locLink.className = 'field-url-link'
+  _locLink.target    = '_blank'
+  _locLink.rel       = 'noopener noreferrer'
+  _locLink.textContent = '↗'
+  _locLink.hidden    = true
+  el('event-modal-location').parentNode.appendChild(_locLink)
+
+  el('event-modal-location').addEventListener('input', e => {
+    const v = e.target.value.trim()
+    _locLink.hidden = !/^https?:\/\//i.test(v)
+    _locLink.href   = v
+  })
+
+  // ── Description URL preview ────────────────────────────────────────────────
+  _descPreview = document.createElement('div')
+  _descPreview.className = 'notes-preview'
+  _descPreview.hidden    = true
+  el('event-modal-desc').closest('.modal-field').after(_descPreview)
+
+  el('event-modal-desc').addEventListener('input', _refreshDescPreview)
+  el('event-modal-desc').addEventListener('focus', () => { if (_descPreview) _descPreview.hidden = true })
+  el('event-modal-desc').addEventListener('blur',  _refreshDescPreview)
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
 
   // Recurring-event scope picker (guard against stale-cache HTML/JS mismatch)
@@ -295,6 +354,9 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
       }
     }
   }
+
+  if (_locLink) { _locLink.hidden = true }
+  if (_descPreview) { _descPreview.hidden = true }
 
   el('event-modal').hidden = false
   el('event-modal-title').focus()
@@ -381,6 +443,15 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
 
   el('event-modal-delete').hidden  = false
   el('event-modal-delete').disabled = false
+
+  // Refresh location link and description preview for the loaded values
+  const locVal = (item.metadata?.location ?? '').trim()
+  if (_locLink) {
+    _locLink.hidden = !/^https?:\/\//i.test(locVal)
+    _locLink.href   = locVal
+  }
+  _refreshDescPreview()
+
   el('event-modal').hidden = false
   el('event-modal-title').focus()
 }

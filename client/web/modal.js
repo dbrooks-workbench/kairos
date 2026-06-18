@@ -4,13 +4,44 @@ import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTa
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _item       = null   // null → create mode
-let _listId     = null
-let _taskLists  = []
-let _checklist  = []
-let _comments   = []
-let _callbacks  = {}
-let _defaultDue = null   // 'yyyy-mm-dd' pre-fill for create mode
+let _item         = null   // null → create mode
+let _listId       = null
+let _taskLists    = []
+let _checklist    = []
+let _comments     = []
+let _callbacks    = {}
+let _defaultDue   = null   // 'yyyy-mm-dd' pre-fill for create mode
+let _notesPreview = null   // created once in initModal
+
+// ── URL linkification ─────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+const _URL_RE = /https?:\/\/[^\s<>"']+/g
+
+function linkify(text) {
+  _URL_RE.lastIndex = 0
+  let out = '', last = 0, m
+  while ((m = _URL_RE.exec(text)) !== null) {
+    out += escHtml(text.slice(last, m.index))
+    out += `<a href="${escHtml(m[0])}" target="_blank" rel="noopener noreferrer">${escHtml(m[0])}</a>`
+    last = _URL_RE.lastIndex
+  }
+  return (out + escHtml(text.slice(last))).replace(/\n/g, '<br>')
+}
+
+function _refreshNotesPreview() {
+  if (!_notesPreview) return
+  const ta = el('modal-notes')
+  if (!/https?:\/\//.test(ta.value) || document.activeElement === ta) {
+    _notesPreview.hidden = true
+  } else {
+    _notesPreview.innerHTML = linkify(ta.value)
+    _notesPreview.hidden = false
+  }
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -31,6 +62,16 @@ export function initModal() {
 
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('task-modal').hidden) close() })
+
+  // ── Notes URL preview ──────────────────────────────────────────────────────
+  _notesPreview = document.createElement('div')
+  _notesPreview.className = 'notes-preview'
+  _notesPreview.hidden    = true
+  el('modal-notes').closest('.modal-field').after(_notesPreview)
+
+  el('modal-notes').addEventListener('input', _refreshNotesPreview)
+  el('modal-notes').addEventListener('focus', () => { if (_notesPreview) _notesPreview.hidden = true })
+  el('modal-notes').addEventListener('blur',  _refreshNotesPreview)
 }
 
 export function openModal(item, taskLists, callbacks) {
@@ -85,6 +126,7 @@ function populate() {
   el('modal-loe').value     = _item?.metadata?.loe ?? ''
   el('modal-loe-error').hidden = true
   el('modal-notes').value   = _item?.metadata?.body ?? ''
+  _refreshNotesPreview()
 
   el('modal-checklist-input').value = ''
   el('modal-comment-input').value   = ''

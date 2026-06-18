@@ -1558,6 +1558,38 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .btn-danger:hover { background: #fce8e6; }
 
+/* ── URL linkification ───────────────────────────────── */
+
+.field-url-link {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--today-color);
+  text-decoration: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.field-url-link:hover { background: #e8f0fe; }
+
+.notes-preview {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #f8f9fa;
+  word-break: break-all;
+}
+
+.notes-preview a {
+  color: var(--today-color);
+  text-decoration: underline;
+}
+
+.notes-preview a:hover { opacity: 0.8; }
+
 /* ── Snooze popover ──────────────────────────────────── */
 
 #snooze-popover {
