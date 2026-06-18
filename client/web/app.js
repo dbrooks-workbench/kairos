@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.8.5'
+const VERSION   = '0.8.6'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -610,17 +610,19 @@ let _calDragItem = null  // task being dragged in the calendar all-day area
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
-  const timedByDay  = Array.from({ length: 7 }, () => [])
-  const allDayByDay = Array.from({ length: 7 }, () => [])
+  const timedByDay = Array.from({ length: 7 }, () => [])
+  const allDayItems = []
 
   for (const item of items) {
     const start  = new Date(item.start)
     const dayIdx = localDayIndex(start, state.weekStart)
-    if (dayIdx < 0 || dayIdx >= 7) continue
 
     if (item.all_day) {
-      allDayByDay[dayIdx].push(item)
+      // Collect all all-day items regardless of start day — multi-day events may
+      // start before the week; the spanning renderer clamps and filters them.
+      allDayItems.push(item)
     } else {
+      if (dayIdx < 0 || dayIdx >= 7) continue
       const end = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
       timedByDay[dayIdx].push({ item, start, end })
     }
@@ -633,7 +635,7 @@ function renderItems(items) {
 
     // Build week-clamped spans for every all-day item
     const spans = []
-    for (const item of allDayByDay.flat()) {
+    for (const item of allDayItems) {
       const start = new Date(item.start)
       // Google all-day end dates are exclusive (Tue event ends at Wed midnight)
       const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 86_400_000)
@@ -673,8 +675,10 @@ function renderItems(items) {
     const visibleRows = state.allDayExpanded ? totalRows : Math.min(totalRows, LIMIT)
     const container   = document.getElementById('allday-cols')
 
-    // Drive container height; grid cells stretch to fill it automatically
-    container.style.height = `${Math.max(28, visibleRows * ROW_H + 4)}px`
+    // Drive container height; grid cells stretch to fill it automatically.
+    // Add a full extra row when "+N more" chips are present so they don't overflow.
+    const hasMore = !state.allDayExpanded && totalRows > visibleRows
+    container.style.height = `${Math.max(28, visibleRows * ROW_H + (hasMore ? ROW_H : 4))}px`
 
     // Render visible event chips as absolutely-positioned children of #allday-cols
     for (const span of spans) {
