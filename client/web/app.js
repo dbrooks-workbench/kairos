@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.8.3'
+const VERSION   = '0.8.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -731,12 +731,19 @@ function renderItems(items) {
       el.style.height = `${durMin - 2}px`
       if (numCols === 1) {
         el.style.left  = '2px'
-        el.style.right = '14px'   // right gutter: leaves space to draw/click behind event
+        el.style.right = '14px'
       } else {
-        const pct      = 100 / numCols
-        el.style.left  = `calc(${colIdx * pct}% + 2px)`
-        el.style.width = `calc(${pct}% - 4px)`
-        el.style.right = 'auto'
+        const pct = 100 / numCols
+        el.style.left = `calc(${colIdx * pct}% + 2px)`
+        if (colIdx === numCols - 1) {
+          // Last column in cluster gets the right gutter so there's always open
+          // space on the column edge to draw/click a new event behind overlaps.
+          el.style.right = '14px'
+          el.style.width = 'auto'
+        } else {
+          el.style.width = `calc(${pct}% - 4px)`
+          el.style.right = 'auto'
+        }
       }
       const titleEl = document.createElement('div')
       titleEl.className   = 'event-title'
