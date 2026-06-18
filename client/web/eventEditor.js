@@ -262,7 +262,7 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
 
   if (opts.startTime) {
     el('event-modal-start-time').value = opts.startTime
-    el('event-modal-end-time').value   = minutesToTime(timeToMinutes(opts.startTime) + 30)
+    el('event-modal-end-time').value   = opts.endTime ?? minutesToTime(timeToMinutes(opts.startTime) + 30)
   } else {
     el('event-modal-start-time').value = '09:00'
     el('event-modal-end-time').value   = '09:30'

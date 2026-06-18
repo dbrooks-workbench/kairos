@@ -559,13 +559,71 @@ body {
   padding: 2px 4px;
   font-size: 11px;
   overflow: hidden;
-  cursor: pointer;
+  cursor: grab;
   color: #fff;
   z-index: 1;
   filter: saturate(0.33) brightness(1);
+  user-select: none;
 }
 
-.cal-event.type-task { background: var(--task-color); }
+.cal-event.type-task { background: var(--task-color); cursor: pointer; }
+
+/* Drag-to-move */
+.cal-event.drag-placeholder { opacity: 0.25; pointer-events: none; }
+
+.drag-ghost {
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: #fff;
+  z-index: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  filter: saturate(0.33) brightness(1);
+  overflow: hidden;
+}
+
+body.drag-active   { cursor: grabbing !important; user-select: none; }
+body.drag-active * { cursor: grabbing !important; }
+body.resize-active   { cursor: ns-resize !important; user-select: none; }
+body.resize-active * { cursor: ns-resize !important; }
+
+/* Resize handle */
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resize-handle::after {
+  content: '';
+  display: block;
+  width: 24px;
+  height: 2px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 1px;
+}
+
+/* Draw-to-create selection */
+.draw-selection {
+  position: absolute;
+  background: rgba(26, 115, 232, 0.15);
+  border: 1.5px solid var(--today-color);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 10;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--today-color);
+  padding: 2px 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
 
 .event-title {
   font-weight: 600;

@@ -6,9 +6,10 @@ import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTask
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
+import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.8.2'
+const VERSION   = '0.8.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -724,12 +725,13 @@ function renderItems(items) {
       const durMin = Math.max((end - start) / 60_000, 15)
       const el     = document.createElement('div')
       el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      el.dataset.itemId = item.id
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
       el.style.height = `${durMin - 2}px`
       if (numCols === 1) {
         el.style.left  = '2px'
-        el.style.right = '2px'
+        el.style.right = '14px'   // right gutter: leaves space to draw/click behind event
       } else {
         const pct      = 100 / numCols
         el.style.left  = `calc(${colIdx * pct}% + 2px)`
@@ -750,14 +752,29 @@ function renderItems(items) {
           openModal(item, state.taskLists, calendarModalCallbacks())
         })
       } else {
-        el.style.cursor = 'pointer'
         el.addEventListener('click', () => {
-          openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
+          openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
         })
+        if (item.editable) {
+          const handle = document.createElement('div')
+          handle.className = 'resize-handle'
+          el.appendChild(handle)
+        }
       }
       dayCol.appendChild(el)
     }
   }
+
+  // (Re-)initialise timed drag after every render so item references stay fresh
+  destroyTimedDrag()
+  initTimedDrag(state.weekStart, items, {
+    onRefresh:    refreshCalendarItems,
+    onDrawCreate: ({ date, startTime, endTime }) =>
+      openEventEditor(
+        { date, startTime, endTime, allDay: false, calendars: state.calendars },
+        { onSaved: refreshCalendarItems }
+      ),
+  })
 }
 
 // ── Calendar drag-to-move ────────────────────────────────────────────────────
