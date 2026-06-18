@@ -475,12 +475,16 @@ body {
 #btn-allday-toggle:hover { color: var(--text); }
 
 .allday-more {
+  position: absolute;
+  height: 18px;
+  line-height: 18px;
   font-size: 11px;
   color: var(--text-muted);
-  padding: 1px 4px;
+  padding: 0 4px;
   cursor: pointer;
   border-radius: 3px;
-  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .allday-more:hover { background: #f1f3f4; }
@@ -488,13 +492,12 @@ body {
 #allday-cols {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
+  position: relative;  /* containing block for absolutely-positioned event chips */
 }
 
 .allday-col {
   border-right: 1px solid var(--border);
-  padding: 2px;
-  min-height: 30px;
-  overflow: hidden;  /* clips chips to their grid column */
+  min-height: 28px;
 }
 
 .allday-col:last-child { border-right: none; }
@@ -637,6 +640,9 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 
 .allday-event {
+  position: absolute;
+  height: 22px;
+  line-height: 20px;
   border-radius: 3px;
   padding: 1px 4px;
   font-size: 12px;
@@ -645,9 +651,12 @@ body.resize-active * { cursor: ns-resize !important; }
   color: #fff;
   white-space: nowrap;
   text-overflow: ellipsis;
-  margin-bottom: 2px;
   filter: saturate(0.33) brightness(1);
 }
+
+/* Sharp edge on the side where the event continues beyond the week boundary */
+.allday-event.continues-left  { border-radius: 0 3px 3px 0; }
+.allday-event.continues-right { border-radius: 3px 0 0 3px; }
 
 .allday-event.type-task {
   background: var(--task-color);

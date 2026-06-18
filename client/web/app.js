@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.8.4'
+const VERSION   = '0.8.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -626,91 +626,154 @@ function renderItems(items) {
     }
   }
 
-  // All-day events — top-3 cap or show-all depending on allDayExpanded
+  // ── All-day events (multi-day spanning) ──────────────────────────────────────
   {
-    const LIMIT = 3
-    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
-      const col = document.querySelector(`.allday-col[data-day="${dayIdx}"]`)
-      if (!col) continue
-      const dayItems = allDayByDay[dayIdx]
-      const visible  = state.allDayExpanded ? dayItems : dayItems.slice(0, LIMIT)
-      const overflow = state.allDayExpanded ? 0 : Math.max(0, dayItems.length - LIMIT)
+    const ROW_H = 24   // px per row: 22px chip + 2px gap
+    const LIMIT = 3    // max rows when not expanded
 
-      for (const item of visible) {
-        const isTask = item.item_type === 'TASK'
-        const isDone = item.status === 'COMPLETED'
-        const el = document.createElement('div')
-        el.className = `allday-event${isTask ? ' type-task' : ''}${isDone ? ' completed' : ''}`
-        el.title = item.title
+    // Build week-clamped spans for every all-day item
+    const spans = []
+    for (const item of allDayByDay.flat()) {
+      const start = new Date(item.start)
+      // Google all-day end dates are exclusive (Tue event ends at Wed midnight)
+      const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 86_400_000)
 
-        if (isTask) {
-          if (isDone) el.style.background = 'transparent'
-          else if (item.color) el.style.background = item.color
+      const s = localDayIndex(start, state.weekStart)
+      const e = localDayIndex(end,   state.weekStart) - 1  // convert exclusive → inclusive
 
-          const check = document.createElement('button')
-          check.className = `task-check${isDone ? ' done' : ''}`
-          check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
-          if (isDone) check.textContent = '✓'
-          check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
+      const clampS = Math.max(0, s)
+      const clampE = Math.min(6, e)
+      if (clampS > 6 || clampE < 0) continue  // entirely outside this week
 
-          const titleSpan = document.createElement('span')
-          titleSpan.textContent = item.title
+      spans.push({
+        item,
+        startDay:    clampS,
+        endDay:      clampE,
+        startsEarly: s < 0,   // continues from previous week
+        endsLate:    e > 6,   // continues into next week
+        row: 0,
+      })
+    }
 
-          const snoozeBtn = item.due && !isDone ? (() => {
-            const btn = document.createElement('button')
-            btn.className = 'task-snooze'
-            btn.title     = 'Snooze'
-            btn.textContent = '⏰'
-            btn.addEventListener('click', e => {
-              e.stopPropagation()
-              openSnoozePopover(btn, item, refreshCalendarItems)
-            })
-            return btn
-          })() : null
+    // Sort: earlier start first, then longer span first (mirrors Google Calendar)
+    spans.sort((a, b) =>
+      (a.startDay - b.startDay) || ((b.endDay - b.startDay) - (a.endDay - a.startDay))
+    )
 
-          el.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
-          // Clicking the chip body (not the check/snooze button) opens the editor
-          el.style.cursor = 'pointer'
-          el.addEventListener('click', async () => {
-            await ensureTaskLists()
-            openModal(item, state.taskLists, calendarModalCallbacks())
+    // Greedy row assignment: find the earliest row that doesn't overlap this span
+    const rowEnds = []  // rowEnds[r] = last endDay used in row r
+    for (const span of spans) {
+      let row = rowEnds.findIndex(end => end < span.startDay)
+      if (row === -1) row = rowEnds.length
+      rowEnds[row] = span.endDay
+      span.row = row
+    }
+
+    const totalRows   = rowEnds.length
+    const visibleRows = state.allDayExpanded ? totalRows : Math.min(totalRows, LIMIT)
+    const container   = document.getElementById('allday-cols')
+
+    // Drive container height; grid cells stretch to fill it automatically
+    container.style.height = `${Math.max(28, visibleRows * ROW_H + 4)}px`
+
+    // Render visible event chips as absolutely-positioned children of #allday-cols
+    for (const span of spans) {
+      if (span.row >= visibleRows) continue
+
+      const { item } = span
+      const isTask = item.item_type === 'TASK'
+      const isDone = item.status === 'COMPLETED'
+
+      const chipEl = document.createElement('div')
+      chipEl.className = [
+        'allday-event',
+        isTask          ? 'type-task'       : '',
+        isDone          ? 'completed'       : '',
+        span.startsEarly ? 'continues-left' : '',
+        span.endsLate    ? 'continues-right': '',
+      ].filter(Boolean).join(' ')
+      chipEl.title = item.title
+
+      chipEl.style.left  = `calc(${span.startDay / 7 * 100}% + 2px)`
+      chipEl.style.width = `calc(${(span.endDay - span.startDay + 1) / 7 * 100}% - 4px)`
+      chipEl.style.top   = `${2 + span.row * ROW_H}px`
+
+      if (isTask) {
+        if (isDone) chipEl.style.background = 'transparent'
+        else if (item.color) chipEl.style.background = item.color
+
+        const check = document.createElement('button')
+        check.className = `task-check${isDone ? ' done' : ''}`
+        check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+        if (isDone) check.textContent = '✓'
+        check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
+
+        const titleSpan = document.createElement('span')
+        titleSpan.textContent = item.title
+
+        const snoozeBtn = item.due && !isDone ? (() => {
+          const btn = document.createElement('button')
+          btn.className   = 'task-snooze'
+          btn.title       = 'Snooze'
+          btn.textContent = '⏰'
+          btn.addEventListener('click', e => {
+            e.stopPropagation()
+            openSnoozePopover(btn, item, refreshCalendarItems)
           })
+          return btn
+        })() : null
 
-          if (!isDone) {
-            el.draggable = true
-            el.addEventListener('dragstart', e => {
-              _calDragItem = item
-              e.dataTransfer.effectAllowed = 'move'
-              // Defer adding the class so the drag image captures the normal state
-              requestAnimationFrame(() => el.classList.add('drag-source'))
-            })
-            el.addEventListener('dragend', () => {
-              el.classList.remove('drag-source')
-              _calDragItem = null
-            })
-          }
-        } else {
-          if (item.color) el.style.background = item.color
-          el.textContent = item.title
-          el.style.cursor = 'pointer'
-          el.addEventListener('click', () => {
-            openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
+        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+        chipEl.style.cursor = 'pointer'
+        chipEl.addEventListener('click', async () => {
+          await ensureTaskLists()
+          openModal(item, state.taskLists, calendarModalCallbacks())
+        })
+
+        if (!isDone) {
+          chipEl.draggable = true
+          chipEl.addEventListener('dragstart', e => {
+            _calDragItem = item
+            e.dataTransfer.effectAllowed = 'move'
+            requestAnimationFrame(() => chipEl.classList.add('drag-source'))
+          })
+          chipEl.addEventListener('dragend', () => {
+            chipEl.classList.remove('drag-source')
+            _calDragItem = null
           })
         }
-
-        col.appendChild(el)
+      } else {
+        if (item.color) chipEl.style.background = item.color
+        chipEl.textContent = item.title
+        chipEl.style.cursor = 'pointer'
+        chipEl.addEventListener('click', () => {
+          openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
+        })
       }
 
-      if (overflow > 0) {
+      container.appendChild(chipEl)
+    }
+
+    // Per-day "+N more" chips at the bottom of the visible area
+    if (!state.allDayExpanded && totalRows > visibleRows) {
+      for (let day = 0; day < 7; day++) {
+        const hiddenCount = spans.filter(
+          s => s.row >= visibleRows && s.startDay <= day && s.endDay >= day
+        ).length
+        if (!hiddenCount) continue
+
         const more = document.createElement('div')
         more.className   = 'allday-more'
-        more.textContent = `+${overflow} more`
+        more.textContent = `+${hiddenCount} more`
+        more.style.left  = `calc(${day / 7 * 100}% + 2px)`
+        more.style.width = `calc(${1 / 7 * 100}% - 4px)`
+        more.style.top   = `${2 + visibleRows * ROW_H}px`
         more.addEventListener('click', () => {
           state.allDayExpanded = true
           renderAllDayToggle()
           renderItems(getVisibleItems())
         })
-        col.appendChild(more)
+        container.appendChild(more)
       }
     }
   }
@@ -786,12 +849,22 @@ function renderItems(items) {
 
 // ── Calendar drag-to-move ────────────────────────────────────────────────────
 
+// Event chips are absolutely positioned in #allday-cols, not inside .allday-col,
+// so we find the column by x-coordinate rather than DOM traversal.
+function alldayColAtX(clientX) {
+  for (const col of document.querySelectorAll('.allday-col')) {
+    const r = col.getBoundingClientRect()
+    if (clientX >= r.left && clientX < r.right) return col
+  }
+  return null
+}
+
 function initCalendarDrag() {
   const container = document.getElementById('allday-cols')
 
   container.addEventListener('dragover', e => {
     if (!_calDragItem) return
-    const col = e.target.closest('.allday-col')
+    const col = alldayColAtX(e.clientX)
     if (!col) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
@@ -810,7 +883,7 @@ function initCalendarDrag() {
   container.addEventListener('drop', async e => {
     e.preventDefault()
     container.querySelectorAll('.allday-col.drag-over').forEach(c => c.classList.remove('drag-over'))
-    const col = e.target.closest('.allday-col')
+    const col = alldayColAtX(e.clientX)
     if (!col || !_calDragItem) return
 
     const item   = _calDragItem
