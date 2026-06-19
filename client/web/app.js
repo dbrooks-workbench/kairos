@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.9.0'
+const VERSION   = '0.9.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -21,6 +21,7 @@ const state = {
   taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
   boardItems: [],          // CalendarItem[] — all tasks, no date filter
   doneWindow: 30,          // days of completed tasks to show in Done column
+  mobileDay: new Date(),   // day currently shown in the mobile day view
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -149,8 +150,9 @@ async function ensureTaskLists() {
 
 function setView(v) {
   state.view = v
-  document.getElementById('calendar').hidden = v !== 'calendar'
-  document.getElementById('board').hidden    = v !== 'board'
+  document.getElementById('calendar').hidden   = v !== 'calendar'
+  document.getElementById('mobile-cal').hidden = v !== 'calendar'
+  document.getElementById('board').hidden      = v !== 'board'
   document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
   document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
 
@@ -848,6 +850,8 @@ function renderItems(items) {
     }
   }
 
+  renderMobileDay()
+
   // (Re-)initialise timed drag after every render so item references stay fresh
   destroyTimedDrag()
   initTimedDrag(state.weekStart, items, {
@@ -858,6 +862,196 @@ function renderItems(items) {
         { onSaved: refreshCalendarItems }
       ),
   })
+}
+
+// ── Mobile day view ──────────────────────────────────────────────────────────
+
+function initMobileDayView() {
+  const gutter = document.getElementById('mobile-time-gutter')
+  const col    = document.getElementById('mobile-timed-col')
+  if (!gutter || !col) return
+
+  // Hour labels (reuse .time-label class from desktop)
+  for (let h = 1; h < 24; h++) {
+    const label = document.createElement('div')
+    label.className   = 'time-label'
+    label.style.top   = `${h * 60}px`
+    label.textContent = `${h % 12 || 12} ${h < 12 ? 'am' : 'pm'}`
+    gutter.appendChild(label)
+  }
+
+  // Hour and half-hour grid lines
+  for (let h = 0; h < 24; h++) {
+    const line = document.createElement('div')
+    line.className = 'mobile-hour-line'
+    line.style.top = `${h * 60}px`
+    col.appendChild(line)
+    if (h < 23) {
+      const half = document.createElement('div')
+      half.className = 'mobile-half-line'
+      half.style.top = `${h * 60 + 30}px`
+      col.appendChild(half)
+    }
+  }
+
+  document.getElementById('mobile-btn-prev').addEventListener('click', () => navigateMobileDay(-1))
+  document.getElementById('mobile-btn-next').addEventListener('click', () => navigateMobileDay(1))
+
+  // Swipe left/right to navigate days; vertical scrolling is unaffected
+  let _tx = 0, _ty = 0
+  const scroll = document.getElementById('mobile-timed-scroll')
+  scroll.addEventListener('touchstart', e => {
+    _tx = e.touches[0].clientX
+    _ty = e.touches[0].clientY
+  }, { passive: true })
+  scroll.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - _tx
+    const dy = e.changedTouches[0].clientY - _ty
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) navigateMobileDay(dx < 0 ? 1 : -1)
+  }, { passive: true })
+}
+
+function renderMobileDay() {
+  if (window.innerWidth > 768) return  // desktop — skip
+
+  const day      = state.mobileDay
+  const dayStart = new Date(day); dayStart.setHours(0, 0, 0, 0)
+  const dayEnd   = new Date(dayStart.getTime() + 86_400_000)
+  const today    = new Date()
+  const isToday  = sameDay(day, today)
+
+  // Day label
+  const labelEl = document.getElementById('mobile-day-label')
+  labelEl.textContent = day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  labelEl.classList.toggle('is-today', isToday)
+
+  const items = getVisibleItems()
+
+  // ── All-day / multi-day timed events ──────────────────────────────────────
+  const allDayContainer = document.getElementById('mobile-allday-items')
+  allDayContainer.innerHTML = ''
+
+  for (const item of items) {
+    const start = new Date(item.start)
+    const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 86_400_000)
+
+    let covers = false
+    if (item.all_day) {
+      covers = start < dayEnd && end > dayStart  // Google end is exclusive
+    } else if (end - start >= 86_400_000) {
+      covers = start < dayEnd && end > dayStart
+    }
+    if (!covers) continue
+
+    const chip = document.createElement('div')
+    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}`
+    if (item.color) chip.style.background = item.color
+    chip.textContent = item.title
+    chip.title       = item.title
+    chip.addEventListener('click', () => {
+      if (item.item_type === 'TASK') {
+        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+      } else {
+        openEventEditorForEdit(item, calendarModalCallbacks())
+      }
+    })
+    allDayContainer.appendChild(chip)
+  }
+
+  // ── Timed events ──────────────────────────────────────────────────────────
+  const col = document.getElementById('mobile-timed-col')
+  col.querySelectorAll('.mobile-cal-event, .mobile-time-indicator').forEach(e => e.remove())
+
+  const timedItems = []
+  for (const item of items) {
+    if (item.all_day) continue
+    const start = new Date(item.start)
+    const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
+    if (end - start >= 86_400_000) continue  // multi-day → shown above
+    if (!sameDay(start, day)) continue
+    timedItems.push({ item, start, end })
+  }
+
+  for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedItems)) {
+    const topMin = start.getHours() * 60 + start.getMinutes()
+    const durMin = Math.max((end - start) / 60_000, 15)
+
+    const eventEl = document.createElement('div')
+    eventEl.className = `mobile-cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+    if (item.color) eventEl.style.background = item.color
+    eventEl.style.top    = `${topMin}px`
+    eventEl.style.height = `${durMin - 2}px`
+
+    if (numCols === 1) {
+      eventEl.style.left  = '2px'
+      eventEl.style.right = '2px'
+    } else {
+      const pct = 100 / numCols
+      eventEl.style.left = `calc(${colIdx * pct}% + 2px)`
+      if (colIdx === numCols - 1) {
+        eventEl.style.right = '2px'
+        eventEl.style.width = 'auto'
+      } else {
+        eventEl.style.width = `calc(${pct}% - 4px)`
+        eventEl.style.right = 'auto'
+      }
+    }
+
+    const titleEl = document.createElement('div')
+    titleEl.className   = 'mobile-event-title'
+    titleEl.textContent = item.title
+    const timeEl = document.createElement('div')
+    timeEl.className   = 'mobile-event-time'
+    timeEl.textContent = formatTimeRange(start, end)
+    eventEl.append(titleEl, timeEl)
+    eventEl.title = item.title
+
+    eventEl.addEventListener('click', () => {
+      if (item.item_type === 'TASK') {
+        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+      } else {
+        openEventEditorForEdit(item, calendarModalCallbacks())
+      }
+    })
+    col.appendChild(eventEl)
+  }
+
+  // Current-time indicator
+  if (isToday) {
+    const topMin = today.getHours() * 60 + today.getMinutes()
+    const ind = document.createElement('div')
+    ind.className = 'mobile-time-indicator'
+    ind.style.top = `${topMin}px`
+    ind.innerHTML = '<div class="mobile-time-indicator-dot"></div><div class="mobile-time-indicator-line"></div>'
+    col.appendChild(ind)
+  }
+}
+
+async function navigateMobileDay(delta) {
+  const newDay = addDays(state.mobileDay, delta)
+  state.mobileDay = newDay
+
+  // If the new day falls outside the currently fetched week, refetch
+  const newWeekStart = getWeekStart(newDay)
+  if (newWeekStart.getTime() !== state.weekStart.getTime()) {
+    state.weekStart = newWeekStart
+    const end = addDays(state.weekStart, 7)
+    state.items = await fetchItems(state.weekStart, end)
+    renderWeekLabel()
+    renderColumnHeaders()
+    renderItems(getVisibleItems())  // also re-renders mobile via the hook at the end
+    return
+  }
+
+  renderMobileDay()
+
+  // Scroll to a sensible position for the new day
+  const scroll = document.getElementById('mobile-timed-scroll')
+  if (scroll) {
+    const now      = new Date()
+    const scrollTo = sameDay(newDay, now) ? Math.max(0, now.getHours() * 60 + now.getMinutes() - 120) : 8 * 60
+    requestAnimationFrame(() => { scroll.scrollTop = scrollTo })
+  }
 }
 
 // ── Calendar drag-to-move ────────────────────────────────────────────────────
@@ -1042,6 +1236,7 @@ document.getElementById('btn-next').addEventListener('click', () => {
 })
 document.getElementById('btn-today').addEventListener('click', () => {
   state.weekStart = getWeekStart(new Date())
+  state.mobileDay = new Date()
   render()
 })
 
@@ -1066,6 +1261,7 @@ initCalendarDrag()
 initEventEditor()
 initContextMenu()
 initTimeIndicator()
+initMobileDayView()
 
 // Close account panel on outside click
 document.addEventListener('click', () => {
@@ -1085,6 +1281,10 @@ render().then(() => {
     ? Math.max(0, minsNow - 120)
     : 8 * 60
   timedScroll.scrollTop = scrollMins
+
+  const mobileScroll = document.getElementById('mobile-timed-scroll')
+  if (mobileScroll) mobileScroll.scrollTop = Math.max(0, minsNow - 120)
+
   runSweepAndRefresh().then(() => runSpawnScan())
   startPolling(120_000)
 })
