@@ -1717,9 +1717,25 @@ body.resize-active * { cursor: ns-resize !important; }
   #mobile-cal { display: none !important; }
 }
 
-/* Hide desktop calendar on mobile; make modals full-screen */
+/* Hide desktop calendar on mobile; slim header; full-screen modals */
 @media (max-width: 768px) {
   #calendar { display: none !important; }
+
+  /* Week nav arrows and label are irrelevant on mobile (day view has its own) */
+  #btn-prev, #btn-next, #week-label { display: none !important; }
+  /* Calendars picker is a secondary feature; reclaim the space */
+  #cal-picker-wrap { display: none !important; }
+  /* Shrink app name slightly so header fits */
+  #app-name { font-size: 15px; }
+
+  /* Modals: full-screen on mobile.
+     Override max-height from .modal-panel and re-anchor the overlay
+     so the panel sits flush against all edges. */
+  #task-modal,
+  #event-modal {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
 
   #task-modal .modal-panel,
   #event-modal .modal-panel {
