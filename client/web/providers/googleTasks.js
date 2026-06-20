@@ -1,4 +1,4 @@
-import { parseTaskNotes } from './parsers.js'
+import { parseTaskNotes, expandRruleInWindow } from './parsers.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -29,7 +29,7 @@ function normalizeTask(task, list) {
   // shifts the date back by one day in any timezone west of UTC. Instead, extract
   // the date portion and parse as local midnight so the day matches the due date.
   const due = task.due ? new Date(task.due.slice(0, 10) + 'T00:00:00') : null
-  const { body, loe, checklist, comments } = parseTaskNotes(task.notes ?? '')
+  const { body, loe, recurrence, checklist, comments } = parseTaskNotes(task.notes ?? '')
 
   return {
     id: `gtasks:${list.id}:${task.id}`,
@@ -46,7 +46,7 @@ function normalizeTask(task, list) {
     all_day: true,
     status: task.status === 'completed' ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
-    metadata: { body, loe, checklist, comments, list_title: list.title },
+    metadata: { body, loe, recurrence, checklist, comments, list_title: list.title },
     color: null,
     editable: true,
   }
@@ -160,6 +160,7 @@ export async function getTasks(token, start, end) {
   const lists = await getTaskLists(token)
   const results = await Promise.allSettled(
     lists.map(async list => {
+      const enc    = encodeURIComponent(list.id)
       const params = new URLSearchParams({
         maxResults:    '100',
         showCompleted: 'true',
@@ -167,17 +168,38 @@ export async function getTasks(token, start, end) {
         dueMin: start.toISOString(),
         dueMax: end.toISOString(),
       })
-      const tasks = await paginate(
-        token,
-        `${BASE}/lists/${encodeURIComponent(list.id)}/tasks?${params}`
-      )
-      return tasks.map(t => normalizeTask(t, list))
+
+      // Also fetch all active (non-completed) tasks to find recurring tasks
+      // whose real instance sits outside the window but has virtual instances within it.
+      const [windowRaw, activeRaw] = await Promise.all([
+        paginate(token, `${BASE}/lists/${enc}/tasks?${params}`),
+        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=false&showHidden=false`),
+      ])
+
+      const windowItems = windowRaw.map(t => normalizeTask(t, list))
+
+      // Find active recurring tasks whose due date falls outside this window
+      const windowIds    = new Set(windowItems.map(i => i.source.external_id))
+      const outerRecurring = activeRaw
+        .filter(t => !windowIds.has(t.id))
+        .map(t => normalizeTask(t, list))
+        .filter(i => i.metadata?.recurrence)
+
+      // Generate virtual instances from:
+      //  • Active recurring tasks already in the window (e.g. DAILY task due Mon → virtual Tue–Sat)
+      //  • Active recurring tasks outside the window whose schedule lands this week
+      const activeRecurring = [
+        ...windowItems.filter(i => i.metadata?.recurrence && i.status !== 'COMPLETED'),
+        ...outerRecurring,
+      ]
+      const virtual = activeRecurring.flatMap(item => expandRruleInWindow(item, start, end))
+
+      return [...windowItems, ...virtual]
     })
   )
 
-  return results
-    .flatMap(r => {
-      if (r.status === 'rejected') { console.warn('Tasks fetch error:', r.reason); return [] }
-      return r.value
-    })
+  return results.flatMap(r => {
+    if (r.status === 'rejected') { console.warn('Tasks fetch error:', r.reason); return [] }
+    return r.value
+  })
 }

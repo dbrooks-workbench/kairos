@@ -1707,6 +1707,20 @@ body.resize-active * { cursor: ns-resize !important; }
   padding: 0 1px;
 }
 
+/* ── Virtual (future) recurring task instances ───────────────────────────── */
+
+.allday-event.virtual,
+.mobile-allday-chip.virtual {
+  opacity: 0.45;
+  cursor: default !important;
+}
+
+.cal-event.virtual,
+.mobile-cal-event.virtual {
+  opacity: 0.45;
+  cursor: default !important;
+}
+
 /* ── Mobile day view ─────────────────────────────────────────────────────────
    Shown on narrow screens; desktop calendar hidden via media query.
    No changes to desktop layout — purely additive.

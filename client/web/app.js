@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.9.2'
+const VERSION   = '0.10.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -699,13 +699,15 @@ function renderItems(items) {
       const isTask = item.item_type === 'TASK'
       const isDone = item.status === 'COMPLETED'
 
+      const isVirtual = !!item.metadata?.virtual
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
-        isTask          ? 'type-task'       : '',
-        isDone          ? 'completed'       : '',
-        span.startsEarly ? 'continues-left' : '',
-        span.endsLate    ? 'continues-right': '',
+        isTask           ? 'type-task'       : '',
+        isDone           ? 'completed'       : '',
+        isVirtual        ? 'virtual'         : '',
+        span.startsEarly ? 'continues-left'  : '',
+        span.endsLate    ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
       chipEl.title = item.title
 
@@ -717,35 +719,35 @@ function renderItems(items) {
         if (isDone) chipEl.style.background = 'transparent'
         else if (item.color) chipEl.style.background = item.color
 
-        const check = document.createElement('button')
-        check.className = `task-check${isDone ? ' done' : ''}`
-        check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
-        if (isDone) check.textContent = '✓'
-        check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
+        if (!isVirtual) {
+          const check = document.createElement('button')
+          check.className = `task-check${isDone ? ' done' : ''}`
+          check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+          if (isDone) check.textContent = '✓'
+          check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
 
-        const titleSpan = document.createElement('span')
-        titleSpan.textContent = item.title
+          const titleSpan = document.createElement('span')
+          titleSpan.textContent = item.title
 
-        const snoozeBtn = item.due && !isDone ? (() => {
-          const btn = document.createElement('button')
-          btn.className   = 'task-snooze'
-          btn.title       = 'Snooze'
-          btn.textContent = '⏰'
-          btn.addEventListener('click', e => {
-            e.stopPropagation()
-            openSnoozePopover(btn, item, refreshCalendarItems)
+          const snoozeBtn = item.due && !isDone ? (() => {
+            const btn = document.createElement('button')
+            btn.className   = 'task-snooze'
+            btn.title       = 'Snooze'
+            btn.textContent = '⏰'
+            btn.addEventListener('click', e => {
+              e.stopPropagation()
+              openSnoozePopover(btn, item, refreshCalendarItems)
+            })
+            return btn
+          })() : null
+
+          chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+          chipEl.style.cursor = 'pointer'
+          chipEl.addEventListener('click', async () => {
+            await ensureTaskLists()
+            openModal(item, state.taskLists, calendarModalCallbacks())
           })
-          return btn
-        })() : null
 
-        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
-        chipEl.style.cursor = 'pointer'
-        chipEl.addEventListener('click', async () => {
-          await ensureTaskLists()
-          openModal(item, state.taskLists, calendarModalCallbacks())
-        })
-
-        if (!isDone) {
           chipEl.draggable = true
           chipEl.addEventListener('dragstart', e => {
             _calDragItem = item
@@ -756,6 +758,11 @@ function renderItems(items) {
             chipEl.classList.remove('drag-source')
             _calDragItem = null
           })
+        } else {
+          // Virtual instance: show title only, no interaction
+          const titleSpan = document.createElement('span')
+          titleSpan.textContent = item.title
+          chipEl.appendChild(titleSpan)
         }
       } else {
         if (item.color) chipEl.style.background = item.color
@@ -801,8 +808,9 @@ function renderItems(items) {
     for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
+      const isVirtual = !!item.metadata?.virtual
       const el     = document.createElement('div')
-      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}${isVirtual ? ' virtual' : ''}`
       el.dataset.itemId = item.id
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
@@ -831,19 +839,21 @@ function renderItems(items) {
       timeEl.textContent = formatTimeRange(start, end)
       el.append(titleEl, timeEl)
       el.title = item.title
-      if (item.item_type === 'TASK') {
-        el.addEventListener('click', async () => {
-          await ensureTaskLists()
-          openModal(item, state.taskLists, calendarModalCallbacks())
-        })
-      } else {
-        el.addEventListener('click', () => {
-          openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
-        })
-        if (item.editable) {
-          const handle = document.createElement('div')
-          handle.className = 'resize-handle'
-          el.appendChild(handle)
+      if (!isVirtual) {
+        if (item.item_type === 'TASK') {
+          el.addEventListener('click', async () => {
+            await ensureTaskLists()
+            openModal(item, state.taskLists, calendarModalCallbacks())
+          })
+        } else {
+          el.addEventListener('click', () => {
+            openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
+          })
+          if (item.editable) {
+            const handle = document.createElement('div')
+            handle.className = 'resize-handle'
+            el.appendChild(handle)
+          }
         }
       }
       dayCol.appendChild(el)
@@ -944,17 +954,19 @@ function renderMobileDay() {
     if (!covers) continue
 
     const chip = document.createElement('div')
-    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}`
+    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}${item.metadata?.virtual ? ' virtual' : ''}`
     if (item.color) chip.style.background = item.color
     chip.textContent = item.title
     chip.title       = item.title
-    chip.addEventListener('click', () => {
-      if (item.item_type === 'TASK') {
-        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
-      } else {
-        openEventEditorForEdit(item, calendarModalCallbacks())
-      }
-    })
+    if (!item.metadata?.virtual) {
+      chip.addEventListener('click', () => {
+        if (item.item_type === 'TASK') {
+          ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+        } else {
+          openEventEditorForEdit(item, calendarModalCallbacks())
+        }
+      })
+    }
     allDayContainer.appendChild(chip)
   }
 
@@ -1006,13 +1018,15 @@ function renderMobileDay() {
     eventEl.append(titleEl, timeEl)
     eventEl.title = item.title
 
-    eventEl.addEventListener('click', () => {
-      if (item.item_type === 'TASK') {
-        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
-      } else {
-        openEventEditorForEdit(item, calendarModalCallbacks())
-      }
-    })
+    if (!item.metadata?.virtual) {
+      eventEl.addEventListener('click', () => {
+        if (item.item_type === 'TASK') {
+          ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+        } else {
+          openEventEditorForEdit(item, calendarModalCallbacks())
+        }
+      })
+    }
     col.appendChild(eventEl)
   }
 
