@@ -159,7 +159,6 @@
         </div>
         <div id="modal-recur-preview-wrap" hidden>
           <button type="button" id="modal-recur-preview-btn" class="recur-preview-btn">▸ Preview upcoming dates</button>
-          <div id="modal-recur-preview-list" class="recur-preview-list" hidden></div>
         </div>
         <div class="modal-field-row">
           <label class="modal-label">LOE</label>
@@ -368,6 +367,15 @@
           <button id="task-delete-scope-ok"     class="btn-danger">Delete</button>
         </div>
       </div>
+    </div>
+
+    <!-- Recurrence preview popover (shared, positioned via JS) -->
+    <div id="recur-preview-popover" hidden>
+      <div class="recur-preview-popover-header">
+        <span class="recur-preview-popover-title">Upcoming occurrences</span>
+        <button id="recur-preview-popover-close" class="recur-preview-popover-close">×</button>
+      </div>
+      <div id="recur-preview-popover-list" class="recur-preview-popover-list"></div>
     </div>
 
     <!-- Snooze popover (shared, positioned via JS) -->

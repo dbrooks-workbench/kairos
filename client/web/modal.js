@@ -104,40 +104,41 @@ function _buildCurrentRecurrence() {
   return null
 }
 
-function _showRecurPreview() {
-  const rrule    = _buildCurrentRecurrence()
-  const dueStr   = el('modal-due').value
-  const listEl   = el('modal-recur-preview-list')
-  const btn      = el('modal-recur-preview-btn')
+function _hideRecurPreview() {
+  document.getElementById('recur-preview-popover').hidden = true
+  el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
+}
+
+function _showRecurPreview(triggerBtn) {
+  const rrule   = _buildCurrentRecurrence()
+  const dueStr  = el('modal-due').value
+  const listEl  = document.getElementById('recur-preview-popover-list')
+  const popover = document.getElementById('recur-preview-popover')
 
   if (!rrule) {
     listEl.textContent = 'No recurrence configured.'
-    listEl.hidden = false
-    btn.textContent = '▾ Preview upcoming dates'
-    return
-  }
-
-  const start = dueStr ? new Date(dueStr + 'T00:00:00') : new Date()
-  start.setHours(0, 0, 0, 0)
-
-  const dates = []
-  let cur = start
-  for (let i = 0; i < 10; i++) {
-    const next = nextOccurrenceAfter(rrule, cur)
-    if (!next) break
-    dates.push(next)
-    cur = next
-  }
-
-  if (!dates.length) {
-    listEl.textContent = 'No upcoming occurrences — series may have ended.'
   } else {
-    listEl.innerHTML = dates.map(d =>
-      d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-    ).join('<br>')
+    const start = dueStr ? new Date(dueStr + 'T00:00:00') : new Date()
+    start.setHours(0, 0, 0, 0)
+    const dates = []
+    let cur = start
+    for (let i = 0; i < 10; i++) {
+      const next = nextOccurrenceAfter(rrule, cur)
+      if (!next) break
+      dates.push(next)
+      cur = next
+    }
+    listEl.innerHTML = dates.length
+      ? dates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })).join('<br>')
+      : 'No upcoming occurrences — series may have ended.'
   }
-  listEl.hidden = false
-  btn.textContent = '▾ Preview upcoming dates'
+
+  const rect = triggerBtn.getBoundingClientRect()
+  const popW = 230
+  popover.style.top  = `${rect.bottom + 6}px`
+  popover.style.left = `${Math.min(rect.left, window.innerWidth - popW - 8)}px`
+  popover.hidden = false
+  el('modal-recur-preview-btn').textContent = '▾ Preview upcoming dates'
 }
 
 // ── URL linkification ─────────────────────────────────────────────────────────
@@ -193,9 +194,8 @@ export function initModal() {
     const isCustom = freq === 'CUSTOM'
     el('modal-recur-until-row').hidden     = !freq
     el('modal-custom-interval-row').hidden = !isCustom
-    el('modal-recur-preview-wrap').hidden  = !freq
-    el('modal-recur-preview-list').hidden  = true
-    el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
+    el('modal-recur-preview-wrap').hidden = !freq
+    _hideRecurPreview()
     if (!isCustom) {
       el('modal-recur-days-row').hidden      = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
       el('modal-custom-monthday-row').hidden  = true
@@ -213,8 +213,7 @@ export function initModal() {
   })
   el('modal-custom-freq').addEventListener('change', () => {
     _syncCustomSubRows()
-    el('modal-recur-preview-list').hidden = true
-    el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
+    _hideRecurPreview()
     const cfreq = el('modal-custom-freq').value
     if (cfreq === 'WEEKLY' && _recurDays.size === 0) _inferDayFromDue()
     if (cfreq === 'MONTHLY') _inferMonthDayFromDue()
@@ -229,12 +228,17 @@ export function initModal() {
   })
 
   el('modal-recur-preview-btn').addEventListener('click', () => {
-    const listEl = el('modal-recur-preview-list')
-    if (!listEl.hidden) {
-      listEl.hidden = true
-      el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
-    } else {
-      _showRecurPreview()
+    const popover = document.getElementById('recur-preview-popover')
+    if (!popover.hidden) { _hideRecurPreview() }
+    else                 { _showRecurPreview(el('modal-recur-preview-btn')) }
+  })
+  document.getElementById('recur-preview-popover-close').addEventListener('click', _hideRecurPreview)
+  document.addEventListener('mousedown', e => {
+    const popover = document.getElementById('recur-preview-popover')
+    if (!popover.hidden
+        && !popover.contains(e.target)
+        && e.target !== el('modal-recur-preview-btn')) {
+      _hideRecurPreview()
     }
   })
 
@@ -287,7 +291,7 @@ export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
 
 function el(id) { return document.getElementById(id) }
 function show()  { el('task-modal').hidden = false; el('modal-title').focus() }
-function close() { el('task-modal').hidden = true }
+function close() { el('task-modal').hidden = true; _hideRecurPreview() }
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -362,9 +366,8 @@ function populate() {
   const isCustom = curFreq === 'CUSTOM'
   el('modal-custom-interval-row').hidden    = !isCustom
   el('modal-recur-until-row').hidden        = !curFreq
-  el('modal-recur-preview-wrap').hidden     = !curFreq
-  el('modal-recur-preview-list').hidden     = true
-  el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
+  el('modal-recur-preview-wrap').hidden = !curFreq
+  _hideRecurPreview()
   if (isCustom) {
     _syncCustomSubRows()
   } else {
