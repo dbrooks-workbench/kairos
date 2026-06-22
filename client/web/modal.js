@@ -1,5 +1,5 @@
 import { getToken } from './auth.js'
-import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil } from './providers/parsers.js'
+import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, MONTH_NAMES } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -28,6 +28,28 @@ function _inferDayFromDue() {
   if (!dueStr) return
   const inferred = _DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]
   _recurDays = new Set([inferred])
+  _syncDayBtns()
+}
+
+function _inferMonthDayFromDue() {
+  const dueStr = el('modal-due').value
+  if (!dueStr) return
+  el('modal-custom-monthday').value = new Date(dueStr + 'T00:00:00').getDate()
+}
+
+function _inferYearMonthDayFromDue() {
+  const dueStr = el('modal-due').value
+  if (!dueStr) return
+  const d = new Date(dueStr + 'T00:00:00')
+  el('modal-custom-month').value   = d.getMonth() + 1
+  el('modal-custom-yearday').value = d.getDate()
+}
+
+function _syncCustomSubRows() {
+  const customFreq = el('modal-custom-freq').value
+  el('modal-recur-days-row').hidden      = customFreq !== 'WEEKLY'
+  el('modal-custom-monthday-row').hidden  = customFreq !== 'MONTHLY'
+  el('modal-custom-yearmonth-row').hidden = customFreq !== 'YEARLY'
   _syncDayBtns()
 }
 
@@ -80,12 +102,32 @@ export function initModal() {
 
   // Recurrence
   el('modal-recur').addEventListener('change', () => {
-    const freq = el('modal-recur').value
-    el('modal-recur-days-row').hidden  = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
-    el('modal-recur-until-row').hidden = !freq
+    const freq     = el('modal-recur').value
+    const isCustom = freq === 'CUSTOM'
+    el('modal-recur-until-row').hidden     = !freq
+    el('modal-custom-interval-row').hidden = !isCustom
+    if (!isCustom) {
+      el('modal-recur-days-row').hidden      = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
+      el('modal-custom-monthday-row').hidden  = true
+      el('modal-custom-yearmonth-row').hidden = true
+    }
     if (!freq) { el('modal-recur-until').value = ''; _recurDays = new Set(); _syncDayBtns() }
-    // Auto-infer day from due date when switching to weekly and no days selected yet
-    if ((freq === 'WEEKLY' || freq === 'BIWEEKLY') && _recurDays.size === 0) _inferDayFromDue()
+    if (!isCustom && (freq === 'WEEKLY' || freq === 'BIWEEKLY') && _recurDays.size === 0) _inferDayFromDue()
+    if (isCustom) {
+      _syncCustomSubRows()
+      // Auto-infer date fields for a newly chosen custom recurrence
+      const cfreq = el('modal-custom-freq').value
+      if (cfreq === 'WEEKLY' && _recurDays.size === 0) _inferDayFromDue()
+      if (cfreq === 'MONTHLY') _inferMonthDayFromDue()
+      if (cfreq === 'YEARLY')  _inferYearMonthDayFromDue()
+    }
+  })
+  el('modal-custom-freq').addEventListener('change', () => {
+    _syncCustomSubRows()
+    const cfreq = el('modal-custom-freq').value
+    if (cfreq === 'WEEKLY' && _recurDays.size === 0) _inferDayFromDue()
+    if (cfreq === 'MONTHLY') _inferMonthDayFromDue()
+    if (cfreq === 'YEARLY')  _inferYearMonthDayFromDue()
   })
   document.querySelectorAll('#modal-recur-days-row .crp-day').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -178,22 +220,54 @@ function populate() {
     const freq     = rrule.match(/FREQ=(\w+)/)?.[1]
     const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? '1', 10)
     const byday    = rrule.match(/BYDAY=([^;]+)/)?.[1]?.split(',') ?? []
+    const bymonth  = parseInt(rrule.match(/BYMONTH=(\d+)/)?.[1] ?? '0', 10)
     const untilM   = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
-    if      (freq === 'DAILY')                   el('modal-recur').value = 'DAILY'
-    else if (freq === 'YEARLY')                  el('modal-recur').value = 'ANNUALLY'
-    else if (freq === 'MONTHLY')                 el('modal-recur').value = 'MONTHLY'
-    else if (freq === 'WEEKLY' && interval === 2) el('modal-recur').value = 'BIWEEKLY'
-    else if (freq === 'WEEKLY')                  el('modal-recur').value = 'WEEKLY'
-    else                                         el('modal-recur').value = ''
-    byday.forEach(d => _recurDays.add(_SHORT_TO_LONG[d] ?? d))
     el('modal-recur-until').value = untilM ? `${untilM[1]}-${untilM[2]}-${untilM[3]}` : ''
+
+    // Determine if this is a custom recurrence (doesn't map to a simple dropdown option)
+    const useCustom =
+      (freq === 'DAILY'   && interval > 1) ||
+      (freq === 'WEEKLY'  && interval > 2) ||
+      (freq === 'MONTHLY' && interval > 1) ||
+      (freq === 'YEARLY'  && (interval > 1 || bymonth > 0))
+
+    if (useCustom) {
+      el('modal-recur').value = 'CUSTOM'
+      el('modal-custom-interval').value = interval
+      const freqMap = { DAILY:'DAILY', WEEKLY:'WEEKLY', MONTHLY:'MONTHLY', YEARLY:'YEARLY' }
+      el('modal-custom-freq').value = freqMap[freq] ?? 'YEARLY'
+      if (freq === 'YEARLY') {
+        el('modal-custom-month').value   = bymonth || 7
+        el('modal-custom-yearday').value = parseInt(rrule.match(/BYMONTHDAY=(\d+)/)?.[1] ?? '1', 10)
+      } else if (freq === 'MONTHLY') {
+        el('modal-custom-monthday').value = parseInt(rrule.match(/BYMONTHDAY=(\d+)/)?.[1] ?? '1', 10)
+      } else if (freq === 'WEEKLY') {
+        byday.forEach(d => _recurDays.add(_SHORT_TO_LONG[d] ?? d))
+      }
+    } else {
+      if      (freq === 'DAILY')                    el('modal-recur').value = 'DAILY'
+      else if (freq === 'YEARLY')                   el('modal-recur').value = 'ANNUALLY'
+      else if (freq === 'MONTHLY')                  el('modal-recur').value = 'MONTHLY'
+      else if (freq === 'WEEKLY' && interval === 2) el('modal-recur').value = 'BIWEEKLY'
+      else if (freq === 'WEEKLY')                   el('modal-recur').value = 'WEEKLY'
+      else                                          el('modal-recur').value = ''
+      byday.forEach(d => _recurDays.add(_SHORT_TO_LONG[d] ?? d))
+    }
   } else {
     el('modal-recur').value       = ''
     el('modal-recur-until').value = ''
   }
-  const curFreq = el('modal-recur').value
-  el('modal-recur-days-row').hidden  = curFreq !== 'WEEKLY' && curFreq !== 'BIWEEKLY'
-  el('modal-recur-until-row').hidden = !curFreq
+  const curFreq  = el('modal-recur').value
+  const isCustom = curFreq === 'CUSTOM'
+  el('modal-custom-interval-row').hidden = !isCustom
+  el('modal-recur-until-row').hidden     = !curFreq
+  if (isCustom) {
+    _syncCustomSubRows()
+  } else {
+    el('modal-recur-days-row').hidden      = curFreq !== 'WEEKLY' && curFreq !== 'BIWEEKLY'
+    el('modal-custom-monthday-row').hidden  = true
+    el('modal-custom-yearmonth-row').hidden = true
+  }
   _syncDayBtns()
 
   el('modal-checklist-input').value = ''
@@ -329,7 +403,32 @@ async function save() {
   const recurFreq  = el('modal-recur').value
   const recurUntil = el('modal-recur-until').value  // 'YYYY-MM-DD' or ''
   let recurrence = null
-  if (recurFreq) {
+  if (recurFreq === 'CUSTOM') {
+    const n         = Math.max(1, parseInt(el('modal-custom-interval').value, 10) || 1)
+    const cfreq     = el('modal-custom-freq').value
+    const untilSfx  = recurUntil ? ` UNTIL ${recurUntil}` : ''
+    let sigil = ''
+    if (cfreq === 'DAILY') {
+      sigil = n === 1 ? '&DAILY' : `&EVERY ${n} DAYS`
+    } else if (cfreq === 'WEEKLY') {
+      const days = _recurDays.size > 0 ? [..._recurDays]
+        : (dueStr ? [_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]] : [])
+      const dayStr = days.length ? ',' + days.join(',') : ''
+      if      (n === 1) sigil = `&WEEKLY${dayStr}`
+      else if (n === 2) sigil = `&BIWEEKLY${dayStr}`
+      else              sigil = `&EVERY ${n} WEEKS${dayStr}`
+    } else if (cfreq === 'MONTHLY') {
+      const mday = parseInt(el('modal-custom-monthday').value, 10)
+        || (dueStr ? new Date(dueStr + 'T00:00:00').getDate() : 1)
+      sigil = n === 1 ? `&MONTHLY,${mday}` : `&EVERY ${n} MONTHS,${mday}`
+    } else if (cfreq === 'YEARLY') {
+      const month     = parseInt(el('modal-custom-month').value, 10) || 7
+      const day       = parseInt(el('modal-custom-yearday').value, 10) || 1
+      const monthName = MONTH_NAMES[month - 1]
+      sigil = n === 1 ? `&ANNUALLY,${monthName} ${day}` : `&EVERY ${n} YEARS,${monthName} ${day}`
+    }
+    if (sigil) recurrence = parseRecurSigil(sigil + untilSfx)
+  } else if (recurFreq) {
     let sigil = `&${recurFreq}`
     if (recurFreq === 'WEEKLY' || recurFreq === 'BIWEEKLY') {
       // Auto-infer day from due date if no days were explicitly selected

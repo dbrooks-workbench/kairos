@@ -112,6 +112,17 @@
             <option value="BIWEEKLY">Every 2 weeks</option>
             <option value="MONTHLY">Monthly</option>
             <option value="ANNUALLY">Annually</option>
+            <option value="CUSTOM">Custom…</option>
+          </select>
+        </div>
+        <div id="modal-custom-interval-row" class="modal-field-row" hidden>
+          <label class="modal-label">Every</label>
+          <input id="modal-custom-interval" class="crp-interval" type="number" min="1" max="99" value="2">
+          <select id="modal-custom-freq" class="crp-select">
+            <option value="DAILY">day(s)</option>
+            <option value="WEEKLY">week(s)</option>
+            <option value="MONTHLY">month(s)</option>
+            <option value="YEARLY" selected>year(s)</option>
           </select>
         </div>
         <div id="modal-recur-days-row" class="modal-field-row" hidden>
@@ -125,6 +136,22 @@
             <button type="button" class="crp-day" data-rday="FRIDAY">F</button>
             <button type="button" class="crp-day" data-rday="SATURDAY">S</button>
           </div>
+        </div>
+        <div id="modal-custom-monthday-row" class="modal-field-row" hidden>
+          <label class="modal-label">On day</label>
+          <input id="modal-custom-monthday" class="crp-interval" type="number" min="1" max="31" value="1">
+        </div>
+        <div id="modal-custom-yearmonth-row" class="modal-field-row" hidden>
+          <label class="modal-label">On</label>
+          <select id="modal-custom-month" class="crp-select">
+            <option value="1">January</option><option value="2">February</option>
+            <option value="3">March</option><option value="4">April</option>
+            <option value="5">May</option><option value="6">June</option>
+            <option value="7">July</option><option value="8">August</option>
+            <option value="9">September</option><option value="10">October</option>
+            <option value="11">November</option><option value="12">December</option>
+          </select>
+          <input id="modal-custom-yearday" class="crp-interval" type="number" min="1" max="31" value="1">
         </div>
         <div id="modal-recur-until-row" class="modal-field-row" hidden>
           <label class="modal-label">Ends on</label>

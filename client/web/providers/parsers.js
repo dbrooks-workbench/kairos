@@ -13,8 +13,12 @@ const _FREQ_KEYS = new Set(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY', 'ANNUALLY'
 const _DAY_LONG  = { SUNDAY:'SU', MONDAY:'MO', TUESDAY:'TU', WEDNESDAY:'WE', THURSDAY:'TH', FRIDAY:'FR', SATURDAY:'SA' }
 const _DAY_SHORT = ['SU','MO','TU','WE','TH','FR','SA']
 const _DAY_LONG_FROM_SHORT = { SU:'SUNDAY', MO:'MONDAY', TU:'TUESDAY', WE:'WEDNESDAY', TH:'THURSDAY', FR:'FRIDAY', SA:'SATURDAY' }
+export const MONTH_NAMES = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER']
 
 // Parse &WEEKLY,FRIDAY → canonical RRULE:FREQ=WEEKLY;BYDAY=FR
+// Supports simple shorthands and the extended &EVERY N FREQ[,...] format.
+// Examples: &DAILY  &WEEKLY,FRIDAY  &MONTHLY,15  &ANNUALLY,JULY 1
+//           &EVERY 2 YEARS,JULY 1   &EVERY 3 MONTHS,15  &EVERY 10 DAYS
 // Optional UNTIL suffix: &WEEKLY,FRIDAY UNTIL 2026-12-31
 // Returns null if the content after & isn't a recognized recurrence pattern.
 export function parseRecurSigil(raw) {
@@ -27,13 +31,23 @@ export function parseRecurSigil(raw) {
   const main       = stripped.replace(/\s*UNTIL\s+\S+\s*$/i, '').trim().toUpperCase()
 
   const parts = main.split(/[,;\s]+/).map(p => p.trim()).filter(Boolean)
-  const freq  = parts[0]
-  if (!_FREQ_KEYS.has(freq)) return null
-
   const _u = until ? `;UNTIL=${until.replace(/-/g, '')}T235959Z` : ''
 
+  // &EVERY N FREQ[,...] — e.g. &EVERY 2 YEARS,JULY 1
+  if (parts[0] === 'EVERY') {
+    const n = parseInt(parts[1], 10)
+    if (isNaN(n) || n < 1) return null
+    const freqMap = { DAYS:'DAILY', WEEKS:'WEEKLY', MONTHS:'MONTHLY', YEARS:'YEARLY' }
+    const resolvedFreq = freqMap[parts[2]]
+    if (!resolvedFreq) return null
+    return _buildRruleFromParts(resolvedFreq, n > 1 ? `;INTERVAL=${n}` : '', parts.slice(3), _u)
+  }
+
+  const freq = parts[0]
+  if (!_FREQ_KEYS.has(freq)) return null
+
   if (freq === 'DAILY')    return `RRULE:FREQ=DAILY${_u}`
-  if (freq === 'ANNUALLY') return `RRULE:FREQ=YEARLY${_u}`
+  if (freq === 'ANNUALLY') return _buildRruleFromParts('YEARLY', '', parts.slice(1), _u)
 
   if (freq === 'MONTHLY') {
     const n = parseInt(parts[1] ?? '', 10)
@@ -42,35 +56,90 @@ export function parseRecurSigil(raw) {
   }
 
   // WEEKLY / BIWEEKLY
-  const interval = freq === 'BIWEEKLY' ? ';INTERVAL=2' : ''
+  const intStr = freq === 'BIWEEKLY' ? ';INTERVAL=2' : ''
   const days = parts.slice(1)
     .map(d => _DAY_LONG[d] ?? (Object.values(_DAY_LONG).includes(d) ? d : null))
     .filter(Boolean)
   const base = days.length
-    ? `RRULE:FREQ=WEEKLY${interval};BYDAY=${days.join(',')}`
-    : `RRULE:FREQ=WEEKLY${interval}`
+    ? `RRULE:FREQ=WEEKLY${intStr};BYDAY=${days.join(',')}`
+    : `RRULE:FREQ=WEEKLY${intStr}`
   return base + _u
+}
+
+// Build canonical RRULE from freq + interval string + extra parts (month/day/byday).
+function _buildRruleFromParts(freq, intStr, extras, _u) {
+  if (freq === 'DAILY')   return `RRULE:FREQ=DAILY${intStr}${_u}`
+
+  if (freq === 'YEARLY') {
+    let bymonth = '', bymdd = ''
+    if (extras.length >= 1) {
+      const idx = MONTH_NAMES.indexOf(extras[0])
+      if (idx >= 0) {
+        bymonth = `;BYMONTH=${idx + 1}`
+        const day = parseInt(extras[1] ?? '', 10)
+        if (!isNaN(day) && day >= 1 && day <= 31) bymdd = `;BYMONTHDAY=${day}`
+      }
+    }
+    return `RRULE:FREQ=YEARLY${intStr}${bymonth}${bymdd}${_u}`
+  }
+
+  if (freq === 'MONTHLY') {
+    const n = parseInt(extras[0] ?? '', 10)
+    return `RRULE:FREQ=MONTHLY${intStr}${isNaN(n) ? '' : `;BYMONTHDAY=${n}`}${_u}`
+  }
+
+  if (freq === 'WEEKLY') {
+    const days = extras
+      .map(d => _DAY_LONG[d] ?? (Object.values(_DAY_LONG).includes(d) ? d : null))
+      .filter(Boolean)
+    const byday = days.length ? `;BYDAY=${days.join(',')}` : ''
+    return `RRULE:FREQ=WEEKLY${intStr}${byday}${_u}`
+  }
+
+  return null
 }
 
 // Convert RRULE:FREQ=WEEKLY;BYDAY=FR → &WEEKLY,FRIDAY (for storage in notes)
 // With UNTIL: &WEEKLY,FRIDAY UNTIL 2026-12-31
+// Custom intervals use the &EVERY N FREQ form; BYMONTH emits the month name.
 export function recurSigilFromRrule(rrule) {
   if (!rrule) return ''
   const freq     = rrule.match(/FREQ=(\w+)/)?.[1]
   const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? '1', 10)
   const byday    = rrule.match(/BYDAY=([^;]+)/)?.[1]?.split(',') ?? []
   const bymd     = rrule.match(/BYMONTHDAY=(\d+)/)?.[1]
-  const untilRaw = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)?.[0]
+  const bymonth  = parseInt(rrule.match(/BYMONTH=(\d+)/)?.[1] ?? '0', 10)
+  const untilM   = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
+  const untilStr = untilM ? ` UNTIL ${untilM[1]}-${untilM[2]}-${untilM[3]}` : ''
 
-  const freqSig = { DAILY:'DAILY', WEEKLY: interval===2 ? 'BIWEEKLY':'WEEKLY', MONTHLY:'MONTHLY', YEARLY:'ANNUALLY' }[freq] ?? freq
-  let sig = `&${freqSig}`
-  if (byday.length) sig += ',' + byday.map(d => _DAY_LONG_FROM_SHORT[d] ?? d).join(',')
-  else if (bymd)    sig += ',' + bymd
-  if (untilRaw) {
-    const m = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
-    sig += ` UNTIL ${m[1]}-${m[2]}-${m[3]}`
+  // BIWEEKLY special case
+  if (freq === 'WEEKLY' && interval === 2) {
+    let sig = '&BIWEEKLY'
+    if (byday.length) sig += ',' + byday.map(d => _DAY_LONG_FROM_SHORT[d] ?? d).join(',')
+    return sig + untilStr
   }
-  return sig
+
+  let sig
+  if (interval === 1) {
+    const freqSig = { DAILY:'DAILY', WEEKLY:'WEEKLY', MONTHLY:'MONTHLY', YEARLY:'ANNUALLY' }[freq] ?? freq
+    sig = `&${freqSig}`
+  } else {
+    const freqWord = { DAILY:'DAYS', WEEKLY:'WEEKS', MONTHLY:'MONTHS', YEARLY:'YEARS' }[freq] ?? freq
+    sig = `&EVERY ${interval} ${freqWord}`
+  }
+
+  if (freq === 'YEARLY') {
+    if (bymonth > 0) {
+      sig += ',' + MONTH_NAMES[bymonth - 1]
+      if (bymd) sig += ' ' + bymd
+    }
+  } else if (freq === 'WEEKLY') {
+    if (byday.length) sig += ',' + byday.map(d => _DAY_LONG_FROM_SHORT[d] ?? d).join(',')
+  } else if (freq === 'MONTHLY') {
+    if (bymd) sig += ',' + bymd
+  }
+
+  return sig + untilStr
 }
 
 // Given an RRULE and the task's due date, return the next scheduled occurrence.
@@ -85,6 +154,8 @@ export function nextOccurrenceAfter(rrule, dueDate) {
   const bymd     = parseInt(rrule.match(/BYMONTHDAY=(\d+)/)?.[1] ?? '0', 10)
   const untilM   = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
   const until    = untilM ? new Date(`${untilM[1]}-${untilM[2]}-${untilM[3]}T00:00:00`) : null
+
+  const bymonth = parseInt(rrule.match(/BYMONTH=(\d+)/)?.[1] ?? '0', 10)
 
   const d = new Date(dueDate); d.setHours(0,0,0,0)
   let next = null
@@ -108,7 +179,15 @@ export function nextOccurrenceAfter(rrule, dueDate) {
     if (bymd) d.setDate(bymd)
     next = d
   } else if (freq === 'YEARLY') {
-    d.setFullYear(d.getFullYear() + interval); next = d
+    d.setFullYear(d.getFullYear() + interval)
+    if (bymonth) {
+      d.setDate(1)               // reset day first to prevent month overflow
+      d.setMonth(bymonth - 1)
+      if (bymd) d.setDate(bymd)
+    } else if (bymd) {
+      d.setDate(bymd)
+    }
+    next = d
   }
 
   if (!next) return null
