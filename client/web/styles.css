@@ -1808,6 +1808,16 @@ body.resize-active * { cursor: ns-resize !important; }
   cursor: default !important;
 }
 
+/* Orphaned-driver virtuals: chain broken externally, click to recreate */
+.allday-event.orphaned,
+.mobile-allday-chip.orphaned,
+.cal-event.orphaned {
+  opacity: 0.7;
+  cursor: pointer !important;
+  outline: 1px dashed currentColor;
+  outline-offset: -2px;
+}
+
 /* ── Mobile day view ─────────────────────────────────────────────────────────
    Shown on narrow screens; desktop calendar hidden via media query.
    No changes to desktop layout — purely additive.

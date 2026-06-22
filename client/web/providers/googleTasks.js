@@ -157,6 +157,26 @@ export async function getAllTasks(token, completedDays = 30) {
   }
 }
 
+// Recreate a real Google Task for an orphaned-driver virtual (series whose chain
+// was broken externally and whose real tasks have been GC'd by Google).
+export async function recreateOrphanedTask(token, item) {
+  const due = item.due
+  if (!due) return
+  const p = v => String(v).padStart(2, '0')
+  const notes = serializeNotes({
+    body:       '',
+    loe:        null,
+    recurrence: item.metadata.recurrence,
+    checklist:  [],
+    comments:   [],
+  })
+  await createTask(token, item.source.account_id, {
+    title: item.title,
+    notes,
+    due:   `${due.getFullYear()}-${p(due.getMonth()+1)}-${p(due.getDate())}T00:00:00.000Z`,
+  })
+}
+
 export async function spawnNextRecurrence(token, item, listId) {
   const rrule = item.metadata?.recurrence
   if (!rrule) return
@@ -254,7 +274,7 @@ export async function getTasks(token, start, end) {
           all_day:    true,
           status:     'NEEDS_ACTION',
           recurrence: null,
-          metadata:   { recurrence: s.rrule, body: '', loe: null, checklist: [], comments: [], list_title: list.title },
+          metadata:   { recurrence: s.rrule, orphaned: true, body: '', loe: null, checklist: [], comments: [], list_title: list.title },
           color:      null,
           editable:   false,
         })

@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask } from './providers/googleTasks.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -10,7 +10,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.11.0'
+const VERSION   = '0.11.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -87,6 +87,17 @@ async function fetchItems(start, end) {
       .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
   ])
   return [...events, ...tasks]
+}
+
+async function handleRecreateOrphaned(item) {
+  const token = await getToken()
+  if (!token) return
+  try {
+    await recreateOrphanedTask(token, item)
+    await refreshCalendarItems()
+  } catch (err) {
+    console.error('Failed to recreate orphaned task:', err)
+  }
 }
 
 async function handleToggleTask(item) {
@@ -701,15 +712,17 @@ function renderItems(items) {
       const isTask = item.item_type === 'TASK'
       const isDone = item.status === 'COMPLETED'
 
-      const isVirtual = !!item.metadata?.virtual
+      const isVirtual  = !!item.metadata?.virtual
+      const isOrphaned = isVirtual && !!item.metadata?.orphaned
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
-        isTask           ? 'type-task'       : '',
-        isDone           ? 'completed'       : '',
-        isVirtual        ? 'virtual'         : '',
-        span.startsEarly ? 'continues-left'  : '',
-        span.endsLate    ? 'continues-right' : '',
+        isTask                      ? 'type-task'      : '',
+        isDone                      ? 'completed'      : '',
+        isVirtual && !isOrphaned    ? 'virtual'        : '',
+        isOrphaned                  ? 'orphaned'       : '',
+        span.startsEarly            ? 'continues-left' : '',
+        span.endsLate               ? 'continues-right': '',
       ].filter(Boolean).join(' ')
       chipEl.title = item.title
 
@@ -767,8 +780,19 @@ function renderItems(items) {
             chipEl.classList.remove('drag-source')
             _calDragItem = null
           })
+        } else if (isOrphaned) {
+          // Orphaned-driver virtual: chain broken externally, click to recreate
+          const titleSpan = document.createElement('span')
+          titleSpan.textContent = item.title
+          const icon = document.createElement('span')
+          icon.className   = 'task-recur-icon'
+          icon.textContent = '↺'
+          icon.title       = 'Recurring task — chain broken. Click to recreate.'
+          chipEl.append(titleSpan, icon)
+          chipEl.style.cursor = 'pointer'
+          chipEl.addEventListener('click', () => handleRecreateOrphaned(item))
         } else {
-          // Virtual instance: show title only, no interaction
+          // Normal virtual instance: show title only, no interaction
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
           chipEl.appendChild(titleSpan)
@@ -817,9 +841,10 @@ function renderItems(items) {
     for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
-      const isVirtual = !!item.metadata?.virtual
+      const isVirtual  = !!item.metadata?.virtual
+      const isOrphaned = isVirtual && !!item.metadata?.orphaned
       const el     = document.createElement('div')
-      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}${isVirtual ? ' virtual' : ''}`
+      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}${isVirtual && !isOrphaned ? ' virtual' : ''}${isOrphaned ? ' orphaned' : ''}`
       el.dataset.itemId = item.id
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
@@ -848,7 +873,11 @@ function renderItems(items) {
       timeEl.textContent = formatTimeRange(start, end)
       el.append(titleEl, timeEl)
       el.title = item.title
-      if (!isVirtual) {
+      if (isOrphaned) {
+        el.style.cursor = 'pointer'
+        el.title = (el.title ? el.title + ' — ' : '') + 'Recurring task — chain broken. Click to recreate.'
+        el.addEventListener('click', () => handleRecreateOrphaned(item))
+      } else if (!isVirtual) {
         if (item.item_type === 'TASK') {
           el.addEventListener('click', async () => {
             await ensureTaskLists()
@@ -962,12 +991,15 @@ function renderMobileDay() {
     }
     if (!covers) continue
 
+    const isOrphanedChip = !!item.metadata?.virtual && !!item.metadata?.orphaned
     const chip = document.createElement('div')
-    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}${item.metadata?.virtual ? ' virtual' : ''}`
+    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}${item.metadata?.virtual && !isOrphanedChip ? ' virtual' : ''}${isOrphanedChip ? ' orphaned' : ''}`
     if (item.color) chip.style.background = item.color
-    chip.textContent = item.title
-    chip.title       = item.title
-    if (!item.metadata?.virtual) {
+    chip.textContent = item.title + (isOrphanedChip ? ' ↺' : '')
+    chip.title       = isOrphanedChip ? `${item.title} — Recurring task — chain broken. Tap to recreate.` : item.title
+    if (isOrphanedChip) {
+      chip.addEventListener('click', () => handleRecreateOrphaned(item))
+    } else if (!item.metadata?.virtual) {
       chip.addEventListener('click', () => {
         if (item.item_type === 'TASK') {
           ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
