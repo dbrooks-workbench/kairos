@@ -304,12 +304,16 @@ function buildCard(item) {
   titleEl.textContent = item.title
   hdr.appendChild(titleEl)
 
+  // Right-aligned icon group — recur indicator + snooze button
+  const iconGroup = document.createElement('div')
+  iconGroup.className = 'card-icon-group'
+
   if (item.metadata?.recurrence && !isDone) {
     const recurIcon = document.createElement('span')
     recurIcon.className   = 'card-recur-icon'
     recurIcon.title       = 'Recurring task'
     recurIcon.textContent = '↻'
-    hdr.appendChild(recurIcon)
+    iconGroup.appendChild(recurIcon)
   }
 
   if (item.due && !isDone) {
@@ -321,8 +325,10 @@ function buildCard(item) {
       e.stopPropagation()
       openSnoozePopover(snoozeBtn, item, () => _callbacks.onRefresh?.())
     })
-    hdr.appendChild(snoozeBtn)
+    iconGroup.appendChild(snoozeBtn)
   }
+
+  if (iconGroup.children.length) hdr.appendChild(iconGroup)
 
   card.appendChild(hdr)
 

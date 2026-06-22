@@ -1674,13 +1674,19 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .snooze-ok:hover { opacity: 0.9; }
 
-/* Recurring indicator on calendar all-day task chips */
+/* Recurring indicator on calendar all-day task chips.
+   Override the blanket .allday-event.type-task span { flex: 1 } rule so the
+   icon doesn't steal half the available space from the title span. */
 .task-recur-icon {
+  flex: none;
   flex-shrink: 0;
   font-size: 10px;
   line-height: 1;
   opacity: 0.75;
   user-select: none;
+}
+.allday-event.type-task .task-recur-icon {
+  flex: none;   /* higher specificity (3 classes) beats span rule (2 classes + element) */
 }
 
 /* Snooze button on calendar all-day task chips — always visible, pushed far right */
@@ -1696,10 +1702,17 @@ body.resize-active * { cursor: ns-resize !important; }
   align-items: center;
 }
 
+/* Right-aligned icon group on board cards (recur + snooze) */
+.card-icon-group {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 /* Recurring indicator on board cards */
 .card-recur-icon {
   flex-shrink: 0;
-  align-self: flex-start;
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1;
