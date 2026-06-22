@@ -98,6 +98,14 @@ export function initModal() {
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('task-modal').hidden) close() })
 
+  // ── Task delete scope picker ───────────────────────────────────────────────
+  el('task-delete-scope-cancel').addEventListener('click', () => { el('task-delete-scope-modal').hidden = true })
+  el('task-delete-scope-ok').addEventListener('click', async () => {
+    const scope = document.querySelector('input[name="task-delete-scope"]:checked')?.value ?? 'this'
+    el('task-delete-scope-modal').hidden = true
+    await _executeDeleteRecur(scope)
+  })
+
   // ── Notes URL preview ──────────────────────────────────────────────────────
   _notesPreview = document.createElement('div')
   _notesPreview.className = 'notes-preview'
@@ -372,17 +380,42 @@ async function save() {
 
 async function doDelete() {
   if (!_item) return
-  if (!confirm(`Delete "${_item.title}"?`)) return
 
+  if (_item.metadata?.recurrence) {
+    // Reset radio to default and show scope picker
+    const radio = document.querySelector('input[name="task-delete-scope"][value="this"]')
+    if (radio) radio.checked = true
+    el('task-delete-scope-modal').hidden = false
+    return
+  }
+
+  if (!confirm(`Delete "${_item.title}"?`)) return
   const token = await getToken()
   if (!token) return
-
   try {
     await deleteTask(token, _listId, _item.source.external_id)
     close()
     _callbacks.onDeleted?.()
   } catch (err) {
     console.error('Delete failed:', err)
+  }
+}
+
+async function _executeDeleteRecur(scope) {
+  if (!_item) return
+  const token = await getToken()
+  if (!token) return
+  try {
+    if (scope === 'this') {
+      // Spawn next so the series continues, then delete this instance
+      await spawnNextRecurrence(token, _item, _listId)
+    }
+    // scope === 'following': delete without spawning — series ends here
+    await deleteTask(token, _listId, _item.source.external_id)
+    close()
+    _callbacks.onDeleted?.()
+  } catch (err) {
+    console.error('Delete recurring failed:', err)
   }
 }
 
