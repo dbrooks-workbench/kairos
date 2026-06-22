@@ -747,16 +747,18 @@ body.resize-active * { cursor: ns-resize !important; }
 
 /* ── Recurring-event scope picker ───────────────────────── */
 
-#recur-scope-modal {
+#recur-scope-modal,
+#task-delete-scope-modal {
   position: fixed;
   inset: 0;
-  z-index: 250;
+  z-index: 500;
   background: rgba(0,0,0,0.45);
   display: flex;
   align-items: center;
   justify-content: center;
 }
-#recur-scope-modal[hidden] { display: none; }
+#recur-scope-modal[hidden],
+#task-delete-scope-modal[hidden] { display: none; }
 
 .recur-scope-panel {
   background: var(--bg);
