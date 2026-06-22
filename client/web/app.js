@@ -7,9 +7,10 @@ import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './boar
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
+import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.10.2'
+const VERSION   = '0.10.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -98,6 +99,7 @@ async function handleToggleTask(item) {
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'NEEDS_ACTION'
     } else {
+      if (item.metadata?.recurrence) await spawnNextRecurrence(token, item, item.source.account_id)
       await completeTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'COMPLETED'

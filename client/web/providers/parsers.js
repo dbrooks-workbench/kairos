@@ -15,20 +15,30 @@ const _DAY_SHORT = ['SU','MO','TU','WE','TH','FR','SA']
 const _DAY_LONG_FROM_SHORT = { SU:'SUNDAY', MO:'MONDAY', TU:'TUESDAY', WE:'WEDNESDAY', TH:'THURSDAY', FR:'FRIDAY', SA:'SATURDAY' }
 
 // Parse &WEEKLY,FRIDAY → canonical RRULE:FREQ=WEEKLY;BYDAY=FR
+// Optional UNTIL suffix: &WEEKLY,FRIDAY UNTIL 2026-12-31
 // Returns null if the content after & isn't a recognized recurrence pattern.
 export function parseRecurSigil(raw) {
   if (!raw) return null
-  const content = raw.replace(/^&\s*/, '').trim().toUpperCase()
-  const parts   = content.split(/[,;]+/).map(p => p.trim()).filter(Boolean)
-  const freq    = parts[0]
+  const stripped = raw.replace(/^&\s*/, '').trim()
+
+  // Extract optional UNTIL date before upcasing everything
+  const untilMatch = stripped.match(/\bUNTIL\s+(\d{4}-\d{2}-\d{2})\s*$/i)
+  const until      = untilMatch ? untilMatch[1] : null
+  const main       = stripped.replace(/\s*UNTIL\s+\S+\s*$/i, '').trim().toUpperCase()
+
+  const parts = main.split(/[,;\s]+/).map(p => p.trim()).filter(Boolean)
+  const freq  = parts[0]
   if (!_FREQ_KEYS.has(freq)) return null
 
-  if (freq === 'DAILY')    return 'RRULE:FREQ=DAILY'
-  if (freq === 'ANNUALLY') return 'RRULE:FREQ=YEARLY'
+  const _u = until ? `;UNTIL=${until.replace(/-/g, '')}T235959Z` : ''
+
+  if (freq === 'DAILY')    return `RRULE:FREQ=DAILY${_u}`
+  if (freq === 'ANNUALLY') return `RRULE:FREQ=YEARLY${_u}`
 
   if (freq === 'MONTHLY') {
     const n = parseInt(parts[1] ?? '', 10)
-    return isNaN(n) ? 'RRULE:FREQ=MONTHLY' : `RRULE:FREQ=MONTHLY;BYMONTHDAY=${n}`
+    const base = isNaN(n) ? 'RRULE:FREQ=MONTHLY' : `RRULE:FREQ=MONTHLY;BYMONTHDAY=${n}`
+    return base + _u
   }
 
   // WEEKLY / BIWEEKLY
@@ -36,27 +46,35 @@ export function parseRecurSigil(raw) {
   const days = parts.slice(1)
     .map(d => _DAY_LONG[d] ?? (Object.values(_DAY_LONG).includes(d) ? d : null))
     .filter(Boolean)
-  return days.length
+  const base = days.length
     ? `RRULE:FREQ=WEEKLY${interval};BYDAY=${days.join(',')}`
     : `RRULE:FREQ=WEEKLY${interval}`
+  return base + _u
 }
 
 // Convert RRULE:FREQ=WEEKLY;BYDAY=FR → &WEEKLY,FRIDAY (for storage in notes)
+// With UNTIL: &WEEKLY,FRIDAY UNTIL 2026-12-31
 export function recurSigilFromRrule(rrule) {
   if (!rrule) return ''
   const freq     = rrule.match(/FREQ=(\w+)/)?.[1]
   const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? '1', 10)
   const byday    = rrule.match(/BYDAY=([^;]+)/)?.[1]?.split(',') ?? []
   const bymd     = rrule.match(/BYMONTHDAY=(\d+)/)?.[1]
+  const untilRaw = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)?.[0]
 
   const freqSig = { DAILY:'DAILY', WEEKLY: interval===2 ? 'BIWEEKLY':'WEEKLY', MONTHLY:'MONTHLY', YEARLY:'ANNUALLY' }[freq] ?? freq
   let sig = `&${freqSig}`
   if (byday.length) sig += ',' + byday.map(d => _DAY_LONG_FROM_SHORT[d] ?? d).join(',')
   else if (bymd)    sig += ',' + bymd
+  if (untilRaw) {
+    const m = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
+    sig += ` UNTIL ${m[1]}-${m[2]}-${m[3]}`
+  }
   return sig
 }
 
 // Given an RRULE and the task's due date, return the next scheduled occurrence.
+// Returns null if the series has ended (UNTIL reached) or the rule is unrecognised.
 // Schedule-based: snaps snoozed due dates back to the nearest prior schedule day
 // before advancing, so the cadence stays anchored to the rule, not the due field.
 export function nextOccurrenceAfter(rrule, dueDate) {
@@ -65,33 +83,37 @@ export function nextOccurrenceAfter(rrule, dueDate) {
   const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? '1', 10)
   const byday    = rrule.match(/BYDAY=([^;]+)/)?.[1]?.split(',') ?? []
   const bymd     = parseInt(rrule.match(/BYMONTHDAY=(\d+)/)?.[1] ?? '0', 10)
+  const untilM   = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
+  const until    = untilM ? new Date(`${untilM[1]}-${untilM[2]}-${untilM[3]}T00:00:00`) : null
 
   const d = new Date(dueDate); d.setHours(0,0,0,0)
+  let next = null
 
-  if (freq === 'DAILY') { d.setDate(d.getDate() + interval); return d }
-
-  if (freq === 'WEEKLY') {
-    if (!byday.length) { d.setDate(d.getDate() + 7*interval); return d }
-    // Snap back to nearest prior BYDAY, then advance by interval weeks
-    const targets = byday.map(b => _DAY_SHORT.indexOf(b))
-    const cur = d.getDay()
-    let snapBack = 0
-    for (let i = 0; i <= 6; i++) {
-      if (targets.includes((cur - i + 7) % 7)) { snapBack = i; break }
+  if (freq === 'DAILY') {
+    d.setDate(d.getDate() + interval); next = d
+  } else if (freq === 'WEEKLY') {
+    if (!byday.length) {
+      d.setDate(d.getDate() + 7*interval); next = d
+    } else {
+      const targets = byday.map(b => _DAY_SHORT.indexOf(b))
+      const cur = d.getDay()
+      let snapBack = 0
+      for (let i = 0; i <= 6; i++) {
+        if (targets.includes((cur - i + 7) % 7)) { snapBack = i; break }
+      }
+      d.setDate(d.getDate() - snapBack + 7*interval); next = d
     }
-    d.setDate(d.getDate() - snapBack + 7*interval)
-    return d
-  }
-
-  if (freq === 'MONTHLY') {
+  } else if (freq === 'MONTHLY') {
     d.setMonth(d.getMonth() + interval)
     if (bymd) d.setDate(bymd)
-    return d
+    next = d
+  } else if (freq === 'YEARLY') {
+    d.setFullYear(d.getFullYear() + interval); next = d
   }
 
-  if (freq === 'YEARLY') { d.setFullYear(d.getFullYear() + interval); return d }
-
-  return null
+  if (!next) return null
+  if (until && next > until) return null
+  return next
 }
 
 // Expand a recurring task into virtual CalendarItem instances within [windowStart, windowEnd].

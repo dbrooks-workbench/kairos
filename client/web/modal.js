@@ -1,6 +1,6 @@
 import { getToken } from './auth.js'
-import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, nextOccurrenceAfter } from './providers/parsers.js'
-import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask } from './providers/googleTasks.js'
+import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil } from './providers/parsers.js'
+import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -14,7 +14,22 @@ let _defaultDue   = null   // 'yyyy-mm-dd' pre-fill for create mode
 let _notesPreview = null   // created once in initModal
 let _recurDays    = new Set()  // selected weekdays when freq is WEEKLY/BIWEEKLY
 
-const _SHORT_TO_LONG = { SU:'SUNDAY', MO:'MONDAY', TU:'TUESDAY', WE:'WEDNESDAY', TH:'THURSDAY', FR:'FRIDAY', SA:'SATURDAY' }
+const _SHORT_TO_LONG  = { SU:'SUNDAY', MO:'MONDAY', TU:'TUESDAY', WE:'WEDNESDAY', TH:'THURSDAY', FR:'FRIDAY', SA:'SATURDAY' }
+const _DAY_LONG_NAMES = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY']
+
+function _syncDayBtns() {
+  document.querySelectorAll('#modal-recur-days-row .crp-day').forEach(b => {
+    b.classList.toggle('active', _recurDays.has(b.dataset.rday))
+  })
+}
+
+function _inferDayFromDue() {
+  const dueStr = el('modal-due').value
+  if (!dueStr) return
+  const inferred = _DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]
+  _recurDays = new Set([inferred])
+  _syncDayBtns()
+}
 
 // ── URL linkification ─────────────────────────────────────────────────────────
 
@@ -66,7 +81,11 @@ export function initModal() {
   // Recurrence
   el('modal-recur').addEventListener('change', () => {
     const freq = el('modal-recur').value
-    el('modal-recur-days-row').hidden = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
+    el('modal-recur-days-row').hidden  = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
+    el('modal-recur-until-row').hidden = !freq
+    if (!freq) { el('modal-recur-until').value = ''; _recurDays = new Set(); _syncDayBtns() }
+    // Auto-infer day from due date when switching to weekly and no days selected yet
+    if ((freq === 'WEEKLY' || freq === 'BIWEEKLY') && _recurDays.size === 0) _inferDayFromDue()
   })
   document.querySelectorAll('#modal-recur-days-row .crp-day').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -151,20 +170,23 @@ function populate() {
     const freq     = rrule.match(/FREQ=(\w+)/)?.[1]
     const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? '1', 10)
     const byday    = rrule.match(/BYDAY=([^;]+)/)?.[1]?.split(',') ?? []
-    if      (freq === 'DAILY')              el('modal-recur').value = 'DAILY'
-    else if (freq === 'YEARLY')             el('modal-recur').value = 'ANNUALLY'
-    else if (freq === 'MONTHLY')            el('modal-recur').value = 'MONTHLY'
+    const untilM   = rrule.match(/UNTIL=(\d{4})(\d{2})(\d{2})/)
+    if      (freq === 'DAILY')                   el('modal-recur').value = 'DAILY'
+    else if (freq === 'YEARLY')                  el('modal-recur').value = 'ANNUALLY'
+    else if (freq === 'MONTHLY')                 el('modal-recur').value = 'MONTHLY'
     else if (freq === 'WEEKLY' && interval === 2) el('modal-recur').value = 'BIWEEKLY'
-    else if (freq === 'WEEKLY')             el('modal-recur').value = 'WEEKLY'
-    else                                    el('modal-recur').value = ''
+    else if (freq === 'WEEKLY')                  el('modal-recur').value = 'WEEKLY'
+    else                                         el('modal-recur').value = ''
     byday.forEach(d => _recurDays.add(_SHORT_TO_LONG[d] ?? d))
+    el('modal-recur-until').value = untilM ? `${untilM[1]}-${untilM[2]}-${untilM[3]}` : ''
   } else {
-    el('modal-recur').value = ''
+    el('modal-recur').value       = ''
+    el('modal-recur-until').value = ''
   }
-  el('modal-recur-days-row').hidden = !['WEEKLY','BIWEEKLY'].includes(el('modal-recur').value)
-  document.querySelectorAll('#modal-recur-days-row .crp-day').forEach(btn => {
-    btn.classList.toggle('active', _recurDays.has(btn.dataset.rday))
-  })
+  const curFreq = el('modal-recur').value
+  el('modal-recur-days-row').hidden  = curFreq !== 'WEEKLY' && curFreq !== 'BIWEEKLY'
+  el('modal-recur-until-row').hidden = !curFreq
+  _syncDayBtns()
 
   el('modal-checklist-input').value = ''
   el('modal-comment-input').value   = ''
@@ -295,16 +317,23 @@ async function save() {
   const dueStr = el('modal-due').value              // 'yyyy-mm-dd' or ''
   const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-  // Build recurrence RRULE from the UI selector + optional day picker
-  const recurFreq = el('modal-recur').value
+  // Build recurrence RRULE from the UI selector + optional day picker + optional UNTIL
+  const recurFreq  = el('modal-recur').value
+  const recurUntil = el('modal-recur-until').value  // 'YYYY-MM-DD' or ''
   let recurrence = null
   if (recurFreq) {
     let sigil = `&${recurFreq}`
-    if ((recurFreq === 'WEEKLY' || recurFreq === 'BIWEEKLY') && _recurDays.size > 0) {
-      sigil += ',' + [..._recurDays].join(',')
+    if (recurFreq === 'WEEKLY' || recurFreq === 'BIWEEKLY') {
+      // Auto-infer day from due date if no days were explicitly selected
+      const days = _recurDays.size > 0 ? _recurDays : (() => {
+        if (!dueStr) return new Set()
+        return new Set([_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]])
+      })()
+      if (days.size > 0) sigil += ',' + [...days].join(',')
     } else if (recurFreq === 'MONTHLY' && dueStr) {
       sigil += ',' + new Date(dueStr + 'T00:00:00').getDate()
     }
+    if (recurUntil) sigil += ` UNTIL ${recurUntil}`
     recurrence = parseRecurSigil(sigil)
   }
 
@@ -369,7 +398,7 @@ async function toggleComplete() {
     if (isDone) {
       await uncompleteTask(token, _listId, _item.source.external_id)
     } else {
-      if (_item.metadata?.recurrence) await _spawnNextRecurrence(token)
+      if (_item.metadata?.recurrence) await spawnNextRecurrence(token, _item, _listId)
       await completeTask(token, _listId, _item.source.external_id)
     }
     close()
@@ -377,27 +406,4 @@ async function toggleComplete() {
   } catch (err) {
     console.error('Toggle complete failed:', err)
   }
-}
-
-async function _spawnNextRecurrence(token) {
-  const rrule   = _item.metadata.recurrence
-  const nextDue = nextOccurrenceAfter(rrule, _item.due ?? new Date())
-  if (!nextDue) return
-
-  const p = v => String(v).padStart(2, '0')
-  const nextDueStr = `${nextDue.getFullYear()}-${p(nextDue.getMonth()+1)}-${p(nextDue.getDate())}`
-
-  const notes = serializeNotes({
-    body:       _item.metadata?.body ?? '',
-    loe:        _item.metadata?.loe ?? null,
-    recurrence: rrule,
-    checklist:  (_item.metadata?.checklist ?? []).map(i => ({ ...i, checked: false })),
-    comments:   [],  // new instance starts with a clean log
-  })
-
-  await createTask(token, _listId, {
-    title: _item.title,
-    notes,
-    due:   `${nextDueStr}T00:00:00.000Z`,
-  })
 }

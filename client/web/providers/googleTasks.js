@@ -1,4 +1,4 @@
-import { parseTaskNotes, expandRruleInWindow } from './parsers.js'
+import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -156,6 +156,27 @@ export async function getAllTasks(token, completedDays = 30) {
   }
 }
 
+export async function spawnNextRecurrence(token, item, listId) {
+  const rrule = item.metadata?.recurrence
+  if (!rrule) return
+  const nextDue = nextOccurrenceAfter(rrule, item.due ?? new Date())
+  if (!nextDue) return  // UNTIL reached — series is done
+
+  const p = v => String(v).padStart(2, '0')
+  const notes = serializeNotes({
+    body:       item.metadata?.body      ?? '',
+    loe:        item.metadata?.loe       ?? null,
+    recurrence: rrule,
+    checklist:  (item.metadata?.checklist ?? []).map(c => ({ ...c, checked: false })),
+    comments:   [],
+  })
+  await createTask(token, listId, {
+    title: item.title,
+    notes,
+    due:   `${nextDue.getFullYear()}-${p(nextDue.getMonth()+1)}-${p(nextDue.getDate())}T00:00:00.000Z`,
+  })
+}
+
 export async function getTasks(token, start, end) {
   const lists = await getTaskLists(token)
   const results = await Promise.allSettled(
@@ -169,8 +190,6 @@ export async function getTasks(token, start, end) {
         dueMax: end.toISOString(),
       })
 
-      // Also fetch all active (non-completed) tasks to find recurring tasks
-      // whose real instance sits outside the window but has virtual instances within it.
       const [windowRaw, activeRaw] = await Promise.all([
         paginate(token, `${BASE}/lists/${enc}/tasks?${params}`),
         paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=false&showHidden=false`),
@@ -178,23 +197,46 @@ export async function getTasks(token, start, end) {
 
       const windowItems = windowRaw.map(t => normalizeTask(t, list))
 
-      // Find active recurring tasks whose due date falls outside this window
-      const windowIds    = new Set(windowItems.map(i => i.source.external_id))
+      // Outer active recurring tasks (due outside the window)
+      const windowIds = new Set(windowItems.map(i => i.source.external_id))
       const outerRecurring = activeRaw
         .filter(t => !windowIds.has(t.id))
         .map(t => normalizeTask(t, list))
         .filter(i => i.metadata?.recurrence)
 
-      // Generate virtual instances from:
-      //  • Active recurring tasks already in the window (e.g. DAILY task due Mon → virtual Tue–Sat)
-      //  • Active recurring tasks outside the window whose schedule lands this week
-      const activeRecurring = [
-        ...windowItems.filter(i => i.metadata?.recurrence && i.status !== 'COMPLETED'),
+      // Build virtual instances from ALL recurring tasks (active + completed).
+      // De-duplicate by series: group by (title + rrule) and only expand from the
+      // LATEST task in each series. This prevents cascading duplicates when Google
+      // GCs old completed instances while newer spawned ones are still alive.
+      const allRecurring = [
+        ...windowItems.filter(i => i.metadata?.recurrence),
         ...outerRecurring,
       ]
-      const virtual = activeRecurring.flatMap(item => expandRruleInWindow(item, start, end))
+      const seriesLatest = new Map()  // `${title}::${rrule}` → item with highest due
+      for (const item of allRecurring) {
+        const key = `${item.title}::${item.metadata.recurrence}`
+        const cur = seriesLatest.get(key)
+        if (!cur || (item.due && (!cur.due || item.due > cur.due))) seriesLatest.set(key, item)
+      }
 
-      return [...windowItems, ...virtual]
+      const virtual = [...seriesLatest.values()].flatMap(item => expandRruleInWindow(item, start, end))
+
+      // Suppress virtuals that land on a date already occupied by a real task
+      // in the same list (either a spawned next-instance or any other real task).
+      const realDateKeys = new Set(
+        windowItems
+          .filter(i => i.due)
+          .map(i => i.due.toLocaleDateString('en-CA'))
+      )
+      const seenVirtual = new Set()
+      const dedupedVirtual = virtual.filter(v => {
+        const dk = v.due?.toLocaleDateString('en-CA')
+        if (!dk || realDateKeys.has(dk) || seenVirtual.has(dk)) return false
+        seenVirtual.add(dk)
+        return true
+      })
+
+      return [...windowItems, ...dedupedVirtual]
     })
   )
 

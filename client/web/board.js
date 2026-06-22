@@ -1,6 +1,6 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 
 const DONE_COL_ID    = '__done__'
@@ -420,7 +420,9 @@ async function handleDrop(evt) {
     if (!token) { _callbacks.onRefresh?.(); return }
 
     if (toColId === DONE_COL_ID) {
-      // Dropped into Done → complete
+      // Dropped into Done → complete (spawn next if recurring)
+      const item = _boardItems.find(i => i.source.external_id === extId && i.source.account_id === listId)
+      if (item?.metadata?.recurrence) await spawnNextRecurrence(token, item, listId)
       await completeTask(token, listId, extId)
     } else if (fromColId === DONE_COL_ID) {
       // Dragged out of Done → uncomplete (then move if to a different list)
