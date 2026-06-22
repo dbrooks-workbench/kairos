@@ -55,10 +55,11 @@ async function executeSnooze(daysOverride) {
   const dateLabel = newDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   const newNotes = serializeNotes({
-    body:      item.metadata.body      ?? '',
-    loe:       item.metadata.loe       ?? null,
-    checklist: item.metadata.checklist ?? [],
-    comments:  [...(item.metadata.comments ?? []), {
+    body:       item.metadata.body       ?? '',
+    loe:        item.metadata.loe        ?? null,
+    recurrence: item.metadata.recurrence ?? null,
+    checklist:  item.metadata.checklist  ?? [],
+    comments:   [...(item.metadata.comments ?? []), {
       timestamp: nowTimestamp(),
       text: `Snoozed — follow up on ${dateLabel}`,
     }],
@@ -302,6 +303,14 @@ function buildCard(item) {
   titleEl.className   = 'board-card-title'
   titleEl.textContent = item.title
   hdr.appendChild(titleEl)
+
+  if (item.metadata?.recurrence && !isDone) {
+    const recurIcon = document.createElement('span')
+    recurIcon.className   = 'card-recur-icon'
+    recurIcon.title       = 'Recurring task'
+    recurIcon.textContent = '↻'
+    hdr.appendChild(recurIcon)
+  }
 
   if (item.due && !isDone) {
     const snoozeBtn = document.createElement('button')

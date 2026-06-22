@@ -1674,6 +1674,15 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .snooze-ok:hover { opacity: 0.9; }
 
+/* Recurring indicator on calendar all-day task chips */
+.task-recur-icon {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.75;
+  user-select: none;
+}
+
 /* Snooze button on calendar all-day task chips — always visible, pushed far right */
 .task-snooze {
   flex-shrink: 0;
@@ -1685,6 +1694,17 @@ body.resize-active * { cursor: ns-resize !important; }
   padding: 0;
   display: flex;
   align-items: center;
+}
+
+/* Recurring indicator on board cards */
+.card-recur-icon {
+  flex-shrink: 0;
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1;
+  padding: 0 1px;
+  user-select: none;
 }
 
 /* Snooze button on board cards — always visible */

@@ -155,8 +155,9 @@ export function parseTaskNotes(notes) {
       continue
     }
     if (!recurrence && RECUR_RE.test(line)) {
-      recurrence = parseRecurSigil(line) ?? null
-      continue
+      const parsed = parseRecurSigil(line)
+      if (parsed) { recurrence = parsed; continue }
+      // & line that doesn't match a known frequency → treat as prose
     }
     bodyLines.push(line)
   }

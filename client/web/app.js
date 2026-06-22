@@ -9,7 +9,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.10.0'
+const VERSION   = '0.10.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -741,7 +741,14 @@ function renderItems(items) {
             return btn
           })() : null
 
-          chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+          const recurIcon = item.metadata?.recurrence && !isDone ? (() => {
+            const s = document.createElement('span')
+            s.className   = 'task-recur-icon'
+            s.title       = 'Recurring task'
+            s.textContent = '↻'
+            return s
+          })() : null
+          chipEl.append(check, titleSpan, ...(recurIcon ? [recurIcon] : []), ...(snoozeBtn ? [snoozeBtn] : []))
           chipEl.style.cursor = 'pointer'
           chipEl.addEventListener('click', async () => {
             await ensureTaskLists()
