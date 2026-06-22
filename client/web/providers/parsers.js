@@ -290,7 +290,7 @@ export function serializeNotes({ body, loe, recurrence, checklist, comments }) {
     const sorted = [...comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     parts.push(sorted.map(c => `@${c.timestamp} ${c.text}`).join('\n'))
   }
-  return parts.join('\n')
+  return parts.join('\n\n')
 }
 
 // ── LOE helpers ───────────────────────────────────────────────────────────────
