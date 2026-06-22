@@ -190,9 +190,14 @@ export async function getTasks(token, start, end) {
         dueMax: end.toISOString(),
       })
 
-      const [windowRaw, activeRaw] = await Promise.all([
+      // completedMin window for fetching recently-completed tasks as series drivers.
+      // Needed so tasks completed outside Kairos (no spawn) still generate virtuals.
+      const completedMin = new Date(Date.now() - 30 * 86_400_000).toISOString()
+
+      const [windowRaw, activeRaw, recentDoneRaw] = await Promise.all([
         paginate(token, `${BASE}/lists/${enc}/tasks?${params}`),
         paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=false&showHidden=false`),
+        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=true&showHidden=true&completedMin=${encodeURIComponent(completedMin)}`),
       ])
 
       const windowItems = windowRaw.map(t => normalizeTask(t, list))
@@ -204,6 +209,16 @@ export async function getTasks(token, start, end) {
         .map(t => normalizeTask(t, list))
         .filter(i => i.metadata?.recurrence)
 
+      // Recently-completed recurring tasks that fall outside the window.
+      // When a task is completed via Google Tasks directly (bypassing Kairos),
+      // no successor is spawned. Including these here lets them drive virtual
+      // expansion so the series stays visible. seriesLatest de-dup ensures that
+      // if a real successor was spawned (higher due date), it wins instead.
+      const outerDoneRecurring = recentDoneRaw
+        .filter(t => !windowIds.has(t.id))
+        .map(t => normalizeTask(t, list))
+        .filter(i => i.metadata?.recurrence && i.status === 'COMPLETED')
+
       // Build virtual instances from ALL recurring tasks (active + completed).
       // De-duplicate by series: group by (title + rrule) and only expand from the
       // LATEST task in each series. This prevents cascading duplicates when Google
@@ -211,6 +226,7 @@ export async function getTasks(token, start, end) {
       const allRecurring = [
         ...windowItems.filter(i => i.metadata?.recurrence),
         ...outerRecurring,
+        ...outerDoneRecurring,
       ]
       const seriesLatest = new Map()  // `${title}::${rrule}` → item with highest due
       for (const item of allRecurring) {
