@@ -1,4 +1,5 @@
 import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
+import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -178,7 +179,9 @@ export async function spawnNextRecurrence(token, item, listId) {
 }
 
 export async function getTasks(token, start, end) {
-  const lists = await getTaskLists(token)
+  const lists    = await getTaskLists(token)
+  const registry = await loadRegistry(token)
+
   const results = await Promise.allSettled(
     lists.map(async list => {
       const enc    = encodeURIComponent(list.id)
@@ -228,6 +231,35 @@ export async function getTasks(token, start, end) {
         ...outerRecurring,
         ...outerDoneRecurring,
       ]
+
+      // Refresh the Drive registry with every live recurring task we can see.
+      for (const item of allRecurring) {
+        if (item.due) upsertSeries(token, item.title, item.metadata.recurrence, list.id, item.due)
+      }
+
+      // Add registry entries for series with no live task driver. These are
+      // series whose real tasks have been GC'd by Google (>30 days after completion
+      // without a Kairos-spawned successor). The registry anchor keeps the series
+      // visible as virtual instances indefinitely.
+      const liveSeriesKeys = new Set(allRecurring.map(i => `${i.title}::${i.metadata.recurrence}`))
+      for (const s of orphanedDrivers(liveSeriesKeys, list.id)) {
+        allRecurring.push({
+          id:         `registry:${list.id}:${s.title}`,
+          title:      s.title,
+          item_type:  'TASK',
+          source:     { provider: 'google-tasks', account_id: list.id, external_id: null },
+          due:        new Date(s.lastDue + 'T00:00:00'),
+          start:      new Date(s.lastDue + 'T00:00:00'),
+          end:        null,
+          all_day:    true,
+          status:     'NEEDS_ACTION',
+          recurrence: null,
+          metadata:   { recurrence: s.rrule, body: '', loe: null, checklist: [], comments: [], list_title: list.title },
+          color:      null,
+          editable:   false,
+        })
+      }
+
       const seriesLatest = new Map()  // `${title}::${rrule}` → item with highest due
       for (const item of allRecurring) {
         const key = `${item.title}::${item.metadata.recurrence}`
