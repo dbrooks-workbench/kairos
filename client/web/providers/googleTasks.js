@@ -221,19 +221,17 @@ export async function getTasks(token, start, end) {
 
       const virtual = [...seriesLatest.values()].flatMap(item => expandRruleInWindow(item, start, end))
 
-      // Suppress virtuals that land on a date already occupied by a real task
-      // in the same list (either a spawned next-instance or any other real task).
-      const realDateKeys = new Set(
+      // Suppress virtuals only where a real task from the SAME series (title + rrule)
+      // already occupies that date. Different recurring series may share dates freely.
+      const realSeriesDateKeys = new Set(
         windowItems
-          .filter(i => i.due)
-          .map(i => i.due.toLocaleDateString('en-CA'))
+          .filter(i => i.due && i.metadata?.recurrence)
+          .map(i => `${i.title}::${i.metadata.recurrence}::${i.due.toLocaleDateString('en-CA')}`)
       )
-      const seenVirtual = new Set()
       const dedupedVirtual = virtual.filter(v => {
         const dk = v.due?.toLocaleDateString('en-CA')
-        if (!dk || realDateKeys.has(dk) || seenVirtual.has(dk)) return false
-        seenVirtual.add(dk)
-        return true
+        if (!dk) return false
+        return !realSeriesDateKeys.has(`${v.title}::${v.metadata.recurrence}::${dk}`)
       })
 
       return [...windowItems, ...dedupedVirtual]
