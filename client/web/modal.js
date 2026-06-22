@@ -1,5 +1,5 @@
 import { getToken } from './auth.js'
-import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, MONTH_NAMES } from './providers/parsers.js'
+import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, MONTH_NAMES, nextOccurrenceAfter } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -51,6 +51,93 @@ function _syncCustomSubRows() {
   el('modal-custom-monthday-row').hidden  = customFreq !== 'MONTHLY'
   el('modal-custom-yearmonth-row').hidden = customFreq !== 'YEARLY'
   _syncDayBtns()
+}
+
+// Build the RRULE string from current modal UI state (used by both save and preview).
+function _buildCurrentRecurrence() {
+  const recurFreq  = el('modal-recur').value
+  const recurUntil = el('modal-recur-until').value
+  const dueStr     = el('modal-due').value
+
+  if (recurFreq === 'CUSTOM') {
+    const n        = Math.max(1, parseInt(el('modal-custom-interval').value, 10) || 1)
+    const cfreq    = el('modal-custom-freq').value
+    const untilSfx = recurUntil ? ` UNTIL ${recurUntil}` : ''
+    let sigil = ''
+    if (cfreq === 'DAILY') {
+      sigil = n === 1 ? '&DAILY' : `&EVERY ${n} DAYS`
+    } else if (cfreq === 'WEEKLY') {
+      const days = _recurDays.size > 0 ? [..._recurDays]
+        : (dueStr ? [_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]] : [])
+      const dayStr = days.length ? ',' + days.join(',') : ''
+      if      (n === 1) sigil = `&WEEKLY${dayStr}`
+      else if (n === 2) sigil = `&BIWEEKLY${dayStr}`
+      else              sigil = `&EVERY ${n} WEEKS${dayStr}`
+    } else if (cfreq === 'MONTHLY') {
+      const mday = parseInt(el('modal-custom-monthday').value, 10)
+        || (dueStr ? new Date(dueStr + 'T00:00:00').getDate() : 1)
+      sigil = n === 1 ? `&MONTHLY,${mday}` : `&EVERY ${n} MONTHS,${mday}`
+    } else if (cfreq === 'YEARLY') {
+      const month     = parseInt(el('modal-custom-month').value, 10) || 7
+      const day       = parseInt(el('modal-custom-yearday').value, 10) || 1
+      const monthName = MONTH_NAMES[month - 1]
+      sigil = n === 1 ? `&ANNUALLY,${monthName} ${day}` : `&EVERY ${n} YEARS,${monthName} ${day}`
+    }
+    return sigil ? parseRecurSigil(sigil + untilSfx) : null
+  }
+
+  if (recurFreq) {
+    let sigil = `&${recurFreq}`
+    if (recurFreq === 'WEEKLY' || recurFreq === 'BIWEEKLY') {
+      const days = _recurDays.size > 0 ? _recurDays : (() => {
+        if (!dueStr) return new Set()
+        return new Set([_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]])
+      })()
+      if (days.size > 0) sigil += ',' + [...days].join(',')
+    } else if (recurFreq === 'MONTHLY' && dueStr) {
+      sigil += ',' + new Date(dueStr + 'T00:00:00').getDate()
+    }
+    if (recurUntil) sigil += ` UNTIL ${recurUntil}`
+    return parseRecurSigil(sigil)
+  }
+
+  return null
+}
+
+function _showRecurPreview() {
+  const rrule    = _buildCurrentRecurrence()
+  const dueStr   = el('modal-due').value
+  const listEl   = el('modal-recur-preview-list')
+  const btn      = el('modal-recur-preview-btn')
+
+  if (!rrule) {
+    listEl.textContent = 'No recurrence configured.'
+    listEl.hidden = false
+    btn.textContent = '▾ Preview upcoming dates'
+    return
+  }
+
+  const start = dueStr ? new Date(dueStr + 'T00:00:00') : new Date()
+  start.setHours(0, 0, 0, 0)
+
+  const dates = []
+  let cur = start
+  for (let i = 0; i < 10; i++) {
+    const next = nextOccurrenceAfter(rrule, cur)
+    if (!next) break
+    dates.push(next)
+    cur = next
+  }
+
+  if (!dates.length) {
+    listEl.textContent = 'No upcoming occurrences — series may have ended.'
+  } else {
+    listEl.innerHTML = dates.map(d =>
+      d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    ).join('<br>')
+  }
+  listEl.hidden = false
+  btn.textContent = '▾ Preview upcoming dates'
 }
 
 // ── URL linkification ─────────────────────────────────────────────────────────
@@ -106,6 +193,9 @@ export function initModal() {
     const isCustom = freq === 'CUSTOM'
     el('modal-recur-until-row').hidden     = !freq
     el('modal-custom-interval-row').hidden = !isCustom
+    el('modal-recur-preview-wrap').hidden  = !freq
+    el('modal-recur-preview-list').hidden  = true
+    el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
     if (!isCustom) {
       el('modal-recur-days-row').hidden      = freq !== 'WEEKLY' && freq !== 'BIWEEKLY'
       el('modal-custom-monthday-row').hidden  = true
@@ -115,7 +205,6 @@ export function initModal() {
     if (!isCustom && (freq === 'WEEKLY' || freq === 'BIWEEKLY') && _recurDays.size === 0) _inferDayFromDue()
     if (isCustom) {
       _syncCustomSubRows()
-      // Auto-infer date fields for a newly chosen custom recurrence
       const cfreq = el('modal-custom-freq').value
       if (cfreq === 'WEEKLY' && _recurDays.size === 0) _inferDayFromDue()
       if (cfreq === 'MONTHLY') _inferMonthDayFromDue()
@@ -124,6 +213,8 @@ export function initModal() {
   })
   el('modal-custom-freq').addEventListener('change', () => {
     _syncCustomSubRows()
+    el('modal-recur-preview-list').hidden = true
+    el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
     const cfreq = el('modal-custom-freq').value
     if (cfreq === 'WEEKLY' && _recurDays.size === 0) _inferDayFromDue()
     if (cfreq === 'MONTHLY') _inferMonthDayFromDue()
@@ -135,6 +226,16 @@ export function initModal() {
       if (_recurDays.has(day)) { _recurDays.delete(day); btn.classList.remove('active') }
       else                     { _recurDays.add(day);    btn.classList.add('active') }
     })
+  })
+
+  el('modal-recur-preview-btn').addEventListener('click', () => {
+    const listEl = el('modal-recur-preview-list')
+    if (!listEl.hidden) {
+      listEl.hidden = true
+      el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
+    } else {
+      _showRecurPreview()
+    }
   })
 
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
@@ -259,8 +360,11 @@ function populate() {
   }
   const curFreq  = el('modal-recur').value
   const isCustom = curFreq === 'CUSTOM'
-  el('modal-custom-interval-row').hidden = !isCustom
-  el('modal-recur-until-row').hidden     = !curFreq
+  el('modal-custom-interval-row').hidden    = !isCustom
+  el('modal-recur-until-row').hidden        = !curFreq
+  el('modal-recur-preview-wrap').hidden     = !curFreq
+  el('modal-recur-preview-list').hidden     = true
+  el('modal-recur-preview-btn').textContent = '▸ Preview upcoming dates'
   if (isCustom) {
     _syncCustomSubRows()
   } else {
@@ -399,50 +503,8 @@ async function save() {
   const dueStr = el('modal-due').value              // 'yyyy-mm-dd' or ''
   const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-  // Build recurrence RRULE from the UI selector + optional day picker + optional UNTIL
-  const recurFreq  = el('modal-recur').value
-  const recurUntil = el('modal-recur-until').value  // 'YYYY-MM-DD' or ''
-  let recurrence = null
-  if (recurFreq === 'CUSTOM') {
-    const n         = Math.max(1, parseInt(el('modal-custom-interval').value, 10) || 1)
-    const cfreq     = el('modal-custom-freq').value
-    const untilSfx  = recurUntil ? ` UNTIL ${recurUntil}` : ''
-    let sigil = ''
-    if (cfreq === 'DAILY') {
-      sigil = n === 1 ? '&DAILY' : `&EVERY ${n} DAYS`
-    } else if (cfreq === 'WEEKLY') {
-      const days = _recurDays.size > 0 ? [..._recurDays]
-        : (dueStr ? [_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]] : [])
-      const dayStr = days.length ? ',' + days.join(',') : ''
-      if      (n === 1) sigil = `&WEEKLY${dayStr}`
-      else if (n === 2) sigil = `&BIWEEKLY${dayStr}`
-      else              sigil = `&EVERY ${n} WEEKS${dayStr}`
-    } else if (cfreq === 'MONTHLY') {
-      const mday = parseInt(el('modal-custom-monthday').value, 10)
-        || (dueStr ? new Date(dueStr + 'T00:00:00').getDate() : 1)
-      sigil = n === 1 ? `&MONTHLY,${mday}` : `&EVERY ${n} MONTHS,${mday}`
-    } else if (cfreq === 'YEARLY') {
-      const month     = parseInt(el('modal-custom-month').value, 10) || 7
-      const day       = parseInt(el('modal-custom-yearday').value, 10) || 1
-      const monthName = MONTH_NAMES[month - 1]
-      sigil = n === 1 ? `&ANNUALLY,${monthName} ${day}` : `&EVERY ${n} YEARS,${monthName} ${day}`
-    }
-    if (sigil) recurrence = parseRecurSigil(sigil + untilSfx)
-  } else if (recurFreq) {
-    let sigil = `&${recurFreq}`
-    if (recurFreq === 'WEEKLY' || recurFreq === 'BIWEEKLY') {
-      // Auto-infer day from due date if no days were explicitly selected
-      const days = _recurDays.size > 0 ? _recurDays : (() => {
-        if (!dueStr) return new Set()
-        return new Set([_DAY_LONG_NAMES[new Date(dueStr + 'T00:00:00').getDay()]])
-      })()
-      if (days.size > 0) sigil += ',' + [...days].join(',')
-    } else if (recurFreq === 'MONTHLY' && dueStr) {
-      sigil += ',' + new Date(dueStr + 'T00:00:00').getDate()
-    }
-    if (recurUntil) sigil += ` UNTIL ${recurUntil}`
-    recurrence = parseRecurSigil(sigil)
-  }
+  // Build recurrence RRULE from the UI state (shared with preview)
+  const recurrence = _buildCurrentRecurrence()
 
   const notes = serializeNotes({
     body:      el('modal-notes').value.trim(),

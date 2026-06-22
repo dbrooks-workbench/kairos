@@ -117,7 +117,7 @@
         </div>
         <div id="modal-custom-interval-row" class="modal-field-row" hidden>
           <label class="modal-label">Every</label>
-          <input id="modal-custom-interval" class="crp-interval" type="number" min="1" max="99" value="2">
+          <input id="modal-custom-interval" class="crp-interval" type="number" min="1" max="99" value="1">
           <select id="modal-custom-freq" class="crp-select">
             <option value="DAILY">day(s)</option>
             <option value="WEEKLY">week(s)</option>
@@ -156,6 +156,10 @@
         <div id="modal-recur-until-row" class="modal-field-row" hidden>
           <label class="modal-label">Ends on</label>
           <input id="modal-recur-until" class="modal-input" type="date">
+        </div>
+        <div id="modal-recur-preview-wrap" hidden>
+          <button type="button" id="modal-recur-preview-btn" class="recur-preview-btn">▸ Preview upcoming dates</button>
+          <div id="modal-recur-preview-list" class="recur-preview-list" hidden></div>
         </div>
         <div class="modal-field-row">
           <label class="modal-label">LOE</label>
