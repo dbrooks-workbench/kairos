@@ -1,6 +1,7 @@
 import { getToken } from './auth.js'
-import { parseTaskNotes, serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, MONTH_NAMES, nextOccurrenceAfter } from './providers/parsers.js'
+import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, parseRecurSigil, MONTH_NAMES, nextOccurrenceAfter } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
+import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -509,16 +510,21 @@ async function save() {
   // Build recurrence RRULE from the UI state (shared with preview)
   const recurrence = _buildCurrentRecurrence()
 
+  // Kid: use existing (from loaded item) or generate new one for create mode
+  const kid = _item?.metadata?.kid ?? generateKid()
+
   const notes = serializeNotes({
     body:      el('modal-notes').value.trim(),
-    loe,
     recurrence,
     checklist: _checklist,
-    comments:  _comments,
+    kid,
   })
 
   const token = await getToken()
   if (!token) return
+
+  // Write loe/comments to Drive — authoritative store for these fields
+  updateTaskMeta(kid, { loe, comments: _comments })
 
   const selectedListId = el('modal-list').value
 

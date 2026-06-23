@@ -1,5 +1,6 @@
 import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
 import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
+import { loadTaskMeta, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid } from './driveTaskMeta.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -29,8 +30,24 @@ function normalizeTask(task, list) {
   // task.due is UTC midnight (e.g. "2026-06-15T00:00:00.000Z"). Parsing directly
   // shifts the date back by one day in any timezone west of UTC. Instead, extract
   // the date portion and parse as local midnight so the day matches the due date.
-  const due = task.due ? new Date(task.due.slice(0, 10) + 'T00:00:00') : null
-  const { body, loe, recurrence, checklist, comments } = parseTaskNotes(task.notes ?? '')
+  const due    = task.due ? new Date(task.due.slice(0, 10) + 'T00:00:00') : null
+  const parsed = parseTaskNotes(task.notes ?? '')
+  const kid    = parsed.kid
+
+  // Drive meta is authoritative for loe/comments when a record exists for this kid.
+  // Fall back to notes-embedded values for tasks not yet saved through the new path.
+  let loe, comments
+  if (kid && hasTaskRecord(kid)) {
+    const meta = getTaskMeta(kid)
+    loe      = meta.loe
+    comments = meta.comments
+  } else {
+    loe      = parsed.loe
+    comments = parsed.comments
+  }
+
+  // Push a history snapshot for any task that has a kid anchor in notes.
+  if (kid) syncTaskSnapshot(kid, task, { loe, comments })
 
   return {
     id: `gtasks:${list.id}:${task.id}`,
@@ -47,7 +64,7 @@ function normalizeTask(task, list) {
     all_day: true,
     status: task.status === 'completed' ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
-    metadata: { body, loe, recurrence, checklist, comments, list_title: list.title },
+    metadata: { body: parsed.body, loe, recurrence: parsed.recurrence, checklist: parsed.checklist, comments, list_title: list.title, kid },
     color: null,
     editable: true,
   }
@@ -128,7 +145,7 @@ export async function moveTask(token, fromListId, taskId, toListId, overrides = 
 // completedMin only filters the completed field; active tasks have no completed
 // field so a single query with completedMin would silently drop all active tasks.
 export async function getAllTasks(token, completedDays = 30) {
-  const lists        = await getTaskLists(token)
+  const [lists] = await Promise.all([getTaskLists(token), loadTaskMeta(token)])
   const completedMin = new Date(Date.now() - completedDays * 86_400_000).toISOString()
 
   const results = await Promise.allSettled(
@@ -162,13 +179,13 @@ export async function getAllTasks(token, completedDays = 30) {
 export async function recreateOrphanedTask(token, item) {
   const due = item.due
   if (!due) return
-  const p = v => String(v).padStart(2, '0')
+  const p   = v => String(v).padStart(2, '0')
+  const kid = generateKid()
   const notes = serializeNotes({
     body:       '',
-    loe:        null,
     recurrence: item.metadata.recurrence,
     checklist:  [],
-    comments:   [],
+    kid,
   })
   await createTask(token, item.source.account_id, {
     title: item.title,
@@ -183,24 +200,27 @@ export async function spawnNextRecurrence(token, item, listId) {
   const nextDue = nextOccurrenceAfter(rrule, item.due ?? new Date())
   if (!nextDue) return  // UNTIL reached — series is done
 
-  const p = v => String(v).padStart(2, '0')
+  const p   = v => String(v).padStart(2, '0')
+  const kid = generateKid()
   const notes = serializeNotes({
     body:       item.metadata?.body      ?? '',
-    loe:        item.metadata?.loe       ?? null,
     recurrence: rrule,
     checklist:  (item.metadata?.checklist ?? []).map(c => ({ ...c, checked: false })),
-    comments:   [],
+    kid,
   })
   await createTask(token, listId, {
     title: item.title,
     notes,
     due:   `${nextDue.getFullYear()}-${p(nextDue.getMonth()+1)}-${p(nextDue.getDate())}T00:00:00.000Z`,
   })
+
+  // Inherit parent's LOE in the new task's Drive meta record
+  const parentLoe = item.metadata?.loe ?? null
+  if (parentLoe) updateTaskMeta(kid, { loe: parentLoe, comments: [] })
 }
 
 export async function getTasks(token, start, end) {
-  const lists    = await getTaskLists(token)
-  const registry = await loadRegistry(token)
+  const [lists] = await Promise.all([getTaskLists(token), loadRegistry(token), loadTaskMeta(token)])
 
   const results = await Promise.allSettled(
     lists.map(async list => {

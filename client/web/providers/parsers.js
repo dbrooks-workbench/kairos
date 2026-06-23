@@ -1,9 +1,10 @@
 // Regexes ported from agile-tasks/src/parsers.js for compatibility with existing task data.
 
-const LOE_RE      = /^~\s*(?:(\d+(?:\.\d+)?)d\s*)?(?:(\d+(?:\.\d+)?)h\s*)?(?:(\d+(?:\.\d+)?)m)?$/
-const COMMENT_RE  = /^@(\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp][Mm])?(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?)\s*(.*)/
+const LOE_RE       = /^~\s*(?:(\d+(?:\.\d+)?)d\s*)?(?:(\d+(?:\.\d+)?)h\s*)?(?:(\d+(?:\.\d+)?)m)?$/
+const COMMENT_RE   = /^@(\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp][Mm])?(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?)\s*(.*)/
 const CHECKLIST_RE = /^- \[([ x])\] (.*)/
-const RECUR_RE    = /^&\s*(\S.*)/  // & followed by non-empty content
+const RECUR_RE     = /^&\s*(\S.*)/  // & followed by non-empty content
+const KID_RE       = /^\[kid:([0-9a-f]+)\]$/
 
 // ── Recurrence helpers ────────────────────────────────────────────────────────
 // Sigil format: &FREQ[,DAY[,DAY…]] — human readable, no "RRULE:" prefix.
@@ -231,16 +232,20 @@ const KNOWN_VERBS = new Set(['spawned', 'cancelled', 'deferred'])
 // Serialization order: prose body → checklist → LOE → comments
 
 export function parseTaskNotes(notes) {
-  if (!notes) return { body: '', loe: null, recurrence: null, checklist: [], comments: [] }
+  if (!notes) return { body: '', loe: null, recurrence: null, checklist: [], comments: [], kid: null }
 
   const lines     = notes.split('\n')
   const bodyLines = []
   let loe        = null
   let recurrence = null
+  let kid        = null
   const checklist = []
   const comments  = []
 
   for (const line of lines) {
+    const kidMatch = line.match(KID_RE)
+    if (kidMatch) { kid = kidMatch[1]; continue }
+
     const commentMatch = line.match(COMMENT_RE)
     if (commentMatch) {
       comments.push({ timestamp: commentMatch[1], text: commentMatch[2].trim() })
@@ -269,28 +274,27 @@ export function parseTaskNotes(notes) {
     recurrence,
     checklist,
     comments: [...comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+    kid,
   }
 }
 
 // ── Serialization ────────────────────────────────────────────────────────────
 // Order: prose body → checklist → LOE line → comments (chronological)
 
-// Serialization order: prose → checklist → ~loe → &recurrence → @comments
-export function serializeNotes({ body, loe, recurrence, checklist, comments }) {
+// Serialization order: prose → checklist → &recurrence → [kid:xxx]
+// LOE and comments are stored in Drive (driveTaskMeta.js), not in notes.
+export function serializeNotes({ body, recurrence, checklist, kid }) {
   const parts = []
   if (body?.trim()) parts.push(body.trim())
   if (checklist?.length)
     parts.push(checklist.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'))
-  if (loe?.trim()) parts.push(`~${loe.trim()}`)
   if (recurrence) {
     const sigil = recurSigilFromRrule(recurrence)
     if (sigil) parts.push(sigil)
   }
-  if (comments?.length) {
-    const sorted = [...comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-    parts.push(sorted.map(c => `@${c.timestamp} ${c.text}`).join('\n'))
-  }
-  return parts.join('\n\n')
+  const body_out = parts.join('\n\n')
+  if (kid) return body_out ? `${body_out}\n\n[kid:${kid}]` : `[kid:${kid}]`
+  return body_out
 }
 
 // ── LOE helpers ───────────────────────────────────────────────────────────────
