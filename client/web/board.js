@@ -329,17 +329,13 @@ function buildCol(list, items, isDone, doneWindow) {
     }
     hdr.appendChild(toggle)
   } else {
-    const sortToggle = document.createElement('div')
-    sortToggle.className = 'col-sort-toggle'
-    const currentMode = colSortMode(list.id)
-    for (const [mode, label] of [['manual', 'My order'], ['date', 'By date']]) {
-      const btn = document.createElement('button')
-      btn.className = `col-sort-btn${currentMode === mode ? ' active' : ''}`
-      btn.textContent = label
-      btn.addEventListener('click', () => setColSort(list.id, mode))
-      sortToggle.appendChild(btn)
-    }
-    hdr.appendChild(sortToggle)
+    const isDate  = colSortMode(list.id) === 'date'
+    const sortBtn = document.createElement('button')
+    sortBtn.className   = `col-sort-date-btn${isDate ? ' active' : ''}`
+    sortBtn.textContent = '📅'
+    sortBtn.title       = isDate ? 'Sorted by date — click for manual order' : 'Sort by date'
+    sortBtn.addEventListener('click', () => setColSort(list.id, isDate ? 'manual' : 'date'))
+    hdr.appendChild(sortBtn)
 
     const addBtn = document.createElement('button')
     addBtn.className   = 'board-add-btn'
