@@ -11,7 +11,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.13.5'
+const VERSION   = '0.13.6'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -24,6 +24,7 @@ const state = {
   boardItems: [],          // CalendarItem[] — all tasks, no date filter
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
+  primaryListId: null,     // Google Tasks default list ID (cannot be deleted)
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -247,10 +248,14 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
-    const { lists, tasks } = await getAllTasks(token, state.doneWindow)
-    state.taskLists  = lists
-    state.boardItems = tasks
-    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow)
+    const [{ lists, tasks }] = await Promise.all([
+      getAllTasks(token, state.doneWindow),
+      loadPrefs(token),   // idempotent; ensures sort prefs are available before render
+    ])
+    state.taskLists     = lists
+    state.boardItems    = tasks
+    state.primaryListId = lists[0]?.id ?? null  // first list from API = "My Tasks" (undeletable)
+    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow, state.primaryListId)
   } catch (err) {
     console.error('Board data load failed:', err)
   }

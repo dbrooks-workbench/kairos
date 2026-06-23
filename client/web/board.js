@@ -7,11 +7,12 @@ import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 
 const DONE_COL_ID = '__done__'
 
-let _sortables  = []
-let _callbacks  = {}
-let _taskLists  = []
-let _boardItems = []
-let _doneWindow = 30
+let _sortables      = []
+let _callbacks      = {}
+let _taskLists      = []
+let _boardItems     = []
+let _doneWindow     = 30
+let _primaryListId  = null
 
 function setColSort(listId, mode) {
   if (getBoardColumnSort()[listId] === mode) return
@@ -181,11 +182,12 @@ export function destroyBoard() {
   document.getElementById('board').innerHTML = ''
 }
 
-export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
-  _taskLists  = taskLists
-  _boardItems = boardItems
-  _doneWindow = doneWindow
-  _callbacks  = callbacks
+export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30, primaryListId = null) {
+  _taskLists     = taskLists
+  _boardItems    = boardItems
+  _doneWindow    = doneWindow
+  _callbacks     = callbacks
+  _primaryListId = primaryListId
 
   destroyBoard()
 
@@ -344,23 +346,25 @@ function buildCol(list, items, isDone, doneWindow) {
     addBtn.addEventListener('click', () => _callbacks.onCreate?.(list.id))
     hdr.appendChild(addBtn)
 
-    const delBtn = document.createElement('button')
-    delBtn.className   = 'board-col-delete-btn'
-    delBtn.title       = 'Delete list'
-    delBtn.textContent = '🗑'
-    delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete "${list.title}" and all its tasks? This cannot be undone.`)) return
-      try {
-        const token = await getToken()
-        if (!token) return
-        await deleteTaskList(token, list.id)
-        setTaskListOrder(getTaskListOrder().filter(id => id !== list.id))
-        _callbacks.onRefresh?.()
-      } catch (err) {
-        console.error('Delete list failed:', err)
-      }
-    })
-    hdr.appendChild(delBtn)
+    if (list.id !== _primaryListId) {
+      const delBtn = document.createElement('button')
+      delBtn.className   = 'board-col-delete-btn'
+      delBtn.title       = 'Delete list'
+      delBtn.textContent = '🗑'
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete "${list.title}" and all its tasks? This cannot be undone.`)) return
+        try {
+          const token = await getToken()
+          if (!token) return
+          await deleteTaskList(token, list.id)
+          setTaskListOrder(getTaskListOrder().filter(id => id !== list.id))
+          _callbacks.onRefresh?.()
+        } catch (err) {
+          console.error('Delete list failed:', err)
+        }
+      })
+      hdr.appendChild(delBtn)
+    }
   }
 
   // Task list
