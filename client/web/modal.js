@@ -390,6 +390,16 @@ function populate() {
 
   el('modal-delete').hidden          = !isEdit
   el('modal-toggle-complete').hidden = !isEdit
+
+  const taskIdEl = el('modal-task-id')
+  if (isEdit) {
+    const extId = _item.source.external_id ?? '—'
+    const kid   = _item.metadata?.kid ?? '—'
+    taskIdEl.textContent = `task: ${extId}  ·  kid: ${kid}`
+    taskIdEl.hidden = false
+  } else {
+    taskIdEl.hidden = true
+  }
   if (isEdit) {
     const isDone = _item.status === 'COMPLETED'
     el('modal-toggle-complete').textContent = isDone ? 'Mark incomplete' : 'Mark complete'

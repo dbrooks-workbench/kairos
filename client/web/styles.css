@@ -1642,6 +1642,16 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .modal-row-del:hover { color: #c5221f !important; }
 
+/* Task ID debug line */
+.modal-task-id {
+  padding: 0 20px 8px;
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  user-select: all;
+}
+
 /* Footer */
 .modal-footer {
   display: flex;
