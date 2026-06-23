@@ -1,6 +1,6 @@
 import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
 import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
-import { loadTaskMeta, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid } from './driveTaskMeta.js'
+import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid, archiveOrphanedMeta } from './driveTaskMeta.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -145,7 +145,12 @@ export async function moveTask(token, fromListId, taskId, toListId, overrides = 
 // completedMin only filters the completed field; active tasks have no completed
 // field so a single query with completedMin would silently drop all active tasks.
 export async function getAllTasks(token, completedDays = 30) {
-  const [lists] = await Promise.all([getTaskLists(token), loadTaskMeta(token)])
+  // Load both Drive files in parallel — archive is needed here for the sweep.
+  const [lists] = await Promise.all([
+    getTaskLists(token),
+    loadTaskMeta(token),
+    loadTaskArchive(token),
+  ])
   const completedMin = new Date(Date.now() - completedDays * 86_400_000).toISOString()
 
   const results = await Promise.allSettled(
@@ -165,13 +170,18 @@ export async function getAllTasks(token, completedDays = 30) {
     })
   )
 
-  return {
-    lists,
-    tasks: results.flatMap(r => {
-      if (r.status === 'rejected') { console.warn('Board tasks fetch error:', r.reason); return [] }
-      return r.value
-    }),
-  }
+  const tasks = results.flatMap(r => {
+    if (r.status === 'rejected') { console.warn('Board tasks fetch error:', r.reason); return [] }
+    return r.value
+  })
+
+  // Move Drive meta records for tasks no longer present in Google Tasks to the
+  // archive file rather than deleting them. Only safe here because getAllTasks
+  // has a complete picture of what's currently alive across all lists.
+  const liveKids = new Set(tasks.flatMap(t => t.metadata?.kid ? [t.metadata.kid] : []))
+  archiveOrphanedMeta(liveKids)
+
+  return { lists, tasks }
 }
 
 // Recreate a real Google Task for an orphaned-driver virtual (series whose chain
