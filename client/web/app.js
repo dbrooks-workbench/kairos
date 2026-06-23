@@ -2,7 +2,8 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -10,14 +11,14 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.12.1'
+const VERSION   = '0.13.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
   items: [],
   calendars: [],
-  hiddenCalendars: new Set(JSON.parse(localStorage.getItem('kairos:hidden-cals') ?? '[]')),
-  allDayExpanded: false,   // false = top-3 cap; true = show all
+  hiddenCalendars: new Set(),   // populated from Drive prefs after auth
+  allDayExpanded: false,        // false = top-3 cap; true = show all
   view: 'calendar',        // 'calendar' | 'board'
   taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
   boardItems: [],          // CalendarItem[] — all tasks, no date filter
@@ -228,6 +229,17 @@ function boardCallbacks() {
     }),
     onRefresh:          loadBoardData,
     onDoneWindowChange: days => { state.doneWindow = days; loadBoardData() },
+    onCreateList: async name => {
+      const token = await getToken()
+      if (!token) return
+      try {
+        const newList = await createTaskList(token, name)
+        setTaskListOrder([...getTaskListOrder(), newList.id])
+        await loadBoardData()
+      } catch (err) {
+        console.error('Create list failed:', err)
+      }
+    },
   }
 }
 
@@ -282,7 +294,7 @@ function renderCalendarPicker() {
       const id = cb.dataset.calId
       if (cb.checked) state.hiddenCalendars.delete(id)
       else            state.hiddenCalendars.add(id)
-      localStorage.setItem('kairos:hidden-cals', JSON.stringify([...state.hiddenCalendars]))
+      setHiddenCalendars([...state.hiddenCalendars])
       updateCalPickerBadge()
       renderItems(getVisibleItems())
     })
@@ -1267,10 +1279,13 @@ async function render() {
 
   try {
     const end = addDays(state.weekStart, 7)
-    // Fetch items and task lists in parallel; task lists power the modal list selector
+    // Fetch items, task lists, and prefs in parallel
     const [items] = await Promise.all([
       fetchItems(state.weekStart, end),
       getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
+      getToken().then(t => t ? loadPrefs(t).then(() => {
+        state.hiddenCalendars = new Set(getHiddenCalendars())
+      }) : null),
     ])
     state.items = items
     renderItems(getVisibleItems())

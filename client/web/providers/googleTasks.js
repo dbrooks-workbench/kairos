@@ -100,6 +100,16 @@ export async function createTask(token, listId, { title, notes, due }) {
   return res.json()
 }
 
+export async function createTaskList(token, title) {
+  const res = await fetch(`${BASE}/users/@me/lists`, {
+    method:  'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 export async function deleteTask(token, listId, taskId) {
   const res = await fetch(
     `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,

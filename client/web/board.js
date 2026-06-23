@@ -2,27 +2,25 @@ import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
 import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
+import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
+import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 
-const DONE_COL_ID    = '__done__'
-const SORT_KEY       = 'kairos-board-sort'
+const DONE_COL_ID = '__done__'
 
-let _sortables      = []
-let _callbacks      = {}
-let _taskLists      = []
-let _boardItems     = []
-let _doneWindow     = 30
-let _colSortModes   = {}
-let _sortModesLoaded = false
+let _sortables  = []
+let _callbacks  = {}
+let _taskLists  = []
+let _boardItems = []
+let _doneWindow = 30
 
 function setColSort(listId, mode) {
-  if (_colSortModes[listId] === mode) return
-  _colSortModes[listId] = mode
-  try { localStorage.setItem(SORT_KEY, JSON.stringify(_colSortModes)) } catch {}
+  if (getBoardColumnSort()[listId] === mode) return
+  setBoardColumnSort(listId, mode)
   renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow)
 }
 
 function colSortMode(listId) {
-  return _colSortModes[listId] ?? 'manual'
+  return getBoardColumnSort()[listId] ?? 'manual'
 }
 
 function sortedItems(items, listId) {
@@ -33,6 +31,16 @@ function sortedItems(items, listId) {
     if (!b.due) return -1
     return a.due - b.due
   })
+}
+
+// Apply the saved list order, appending any new lists not yet in the order array.
+function orderedLists(lists) {
+  const order  = getTaskListOrder()
+  if (!order.length) return lists
+  const known   = new Set(order)
+  const ordered = order.map(id => lists.find(l => l.id === id)).filter(Boolean)
+  const rest    = lists.filter(l => !known.has(l.id))
+  return [...ordered, ...rest]
 }
 
 // ── Snooze popover ────────────────────────────────────────────────────────────
@@ -54,28 +62,33 @@ async function executeSnooze(daysOverride) {
   const newDueIso = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}T00:00:00.000Z`
   const dateLabel = newDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-  const newNotes = serializeNotes({
-    body:       item.metadata.body       ?? '',
-    loe:        item.metadata.loe        ?? null,
-    recurrence: item.metadata.recurrence ?? null,
-    checklist:  item.metadata.checklist  ?? [],
-    comments:   [...(item.metadata.comments ?? []), {
-      timestamp: nowTimestamp(),
-      text: `Snoozed — follow up on ${dateLabel}`,
-    }],
-  })
-
   document.getElementById('snooze-popover').hidden = true
   _activeSnoozeBtn = null
   _snoozeItem      = null
   _snoozeOnRefresh = null
 
+  // Snooze comment goes to Drive meta, not notes.
+  // kid is written to notes if not already present (migrates the task).
+  const kid         = item.metadata?.kid ?? generateKid()
+  const newComments = [...(item.metadata.comments ?? []), {
+    timestamp: nowTimestamp(),
+    text: `Snoozed — follow up on ${dateLabel}`,
+  }]
+  updateTaskMeta(kid, { loe: item.metadata.loe ?? null, comments: newComments })
+
+  const notes = serializeNotes({
+    body:       item.metadata.body       ?? '',
+    recurrence: item.metadata.recurrence ?? null,
+    checklist:  item.metadata.checklist  ?? [],
+    kid,
+  })
+
   try {
     const token = await getToken()
     if (token) {
       await patchTask(token, item.source.account_id, item.source.external_id, {
-        due:   newDueIso,
-        notes: newNotes,
+        due: newDueIso,
+        notes,
       })
     }
   } catch (err) {
@@ -174,11 +187,6 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
   _doneWindow = doneWindow
   _callbacks  = callbacks
 
-  if (!_sortModesLoaded) {
-    _sortModesLoaded = true
-    try { _colSortModes = JSON.parse(localStorage.getItem(SORT_KEY) ?? '{}') } catch {}
-  }
-
   destroyBoard()
 
   const board = document.getElementById('board')
@@ -197,8 +205,9 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     }
   }
 
-  // One column per task list
-  for (const list of taskLists) {
+  // Render columns in the user's preferred order
+  const lists = orderedLists(taskLists)
+  for (const list of lists) {
     const col = buildCol(list, activeByList[list.id] ?? [], false, doneWindow)
     board.appendChild(col)
     _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
@@ -211,6 +220,9 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     }))
   }
 
+  // "Add list" pseudo-column
+  board.appendChild(buildAddListCol(callbacks))
+
   // Done column — cap at 100 to keep the list manageable
   const doneCol = buildCol({ id: DONE_COL_ID, title: 'Done' }, doneItems.slice(0, 100), true, doneWindow)
   board.appendChild(doneCol)
@@ -220,17 +232,39 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     ghostClass: 'board-ghost',
     onEnd: handleDrop,
   }))
+
+  // Drag-to-reorder columns (handle only; excludes Done and Add-list pseudo-columns)
+  _sortables.push(Sortable.create(board, {
+    animation:  150,
+    handle:     '.board-col-drag-handle',
+    draggable:  '.board-col-reorderable',
+    ghostClass: 'board-col-ghost',
+    onEnd: () => {
+      const newOrder = [...board.querySelectorAll('.board-col-reorderable')]
+        .map(col => col.dataset.listId)
+      setTaskListOrder(newOrder)
+    },
+  }))
 }
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
 function buildCol(list, items, isDone, doneWindow) {
   const col = document.createElement('div')
-  col.className = `board-col${isDone ? ' board-col-done' : ''}`
+  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}`
+  if (!isDone) col.dataset.listId = list.id
 
   // Header
   const hdr = document.createElement('div')
   hdr.className = 'board-col-header'
+
+  if (!isDone) {
+    const dragHandle = document.createElement('span')
+    dragHandle.className   = 'board-col-drag-handle'
+    dragHandle.textContent = '⠿'
+    dragHandle.title       = 'Drag to reorder'
+    hdr.appendChild(dragHandle)
+  }
 
   const titleEl = document.createElement('span')
   titleEl.className = 'board-col-title'
@@ -267,8 +301,8 @@ function buildCol(list, items, isDone, doneWindow) {
     hdr.appendChild(sortToggle)
 
     const addBtn = document.createElement('button')
-    addBtn.className = 'board-add-btn'
-    addBtn.title     = 'New task'
+    addBtn.className   = 'board-add-btn'
+    addBtn.title       = 'New task'
     addBtn.textContent = '+'
     addBtn.addEventListener('click', () => _callbacks.onCreate?.(list.id))
     hdr.appendChild(addBtn)
@@ -285,6 +319,55 @@ function buildCol(list, items, isDone, doneWindow) {
   return col
 }
 
+// "Add list" pseudo-column with inline input
+function buildAddListCol(callbacks) {
+  const col = document.createElement('div')
+  col.className = 'board-col board-col-add'
+
+  const addBtn = document.createElement('button')
+  addBtn.className   = 'board-add-list-btn'
+  addBtn.textContent = '+ New list'
+
+  const form = document.createElement('div')
+  form.className = 'board-add-list-form'
+  form.hidden    = true
+
+  const inp = document.createElement('input')
+  inp.type        = 'text'
+  inp.className   = 'board-add-list-input'
+  inp.placeholder = 'List name'
+  inp.maxLength   = 100
+
+  const confirmBtn = document.createElement('button')
+  confirmBtn.className   = 'board-add-list-confirm'
+  confirmBtn.textContent = 'Add'
+
+  const cancelBtn = document.createElement('button')
+  cancelBtn.className   = 'board-add-list-cancel'
+  cancelBtn.textContent = '✕'
+
+  form.append(inp, confirmBtn, cancelBtn)
+
+  const showForm = () => { addBtn.hidden = true; form.hidden = false; inp.value = ''; inp.focus() }
+  const hideForm = () => { form.hidden = true; addBtn.hidden = false }
+  const submit   = () => {
+    const name = inp.value.trim()
+    if (name) callbacks.onCreateList?.(name)
+    hideForm()
+  }
+
+  addBtn.addEventListener('click', showForm)
+  confirmBtn.addEventListener('click', submit)
+  cancelBtn.addEventListener('click', hideForm)
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  submit()
+    if (e.key === 'Escape') hideForm()
+  })
+
+  col.append(addBtn, form)
+  return col
+}
+
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 function buildCard(item) {
@@ -292,8 +375,8 @@ function buildCard(item) {
   const card   = document.createElement('div')
   card.className         = `board-card${isDone ? ' board-card-done' : ''}`
   card.dataset.itemId    = item.id
-  card.dataset.listId    = item.source.account_id   // actual Google list ID
-  card.dataset.extId     = item.source.external_id  // Google task ID
+  card.dataset.listId    = item.source.account_id
+  card.dataset.extId     = item.source.external_id
 
   // Header row: title + optional snooze button
   const hdr = document.createElement('div')
@@ -304,7 +387,6 @@ function buildCard(item) {
   titleEl.textContent = item.title
   hdr.appendChild(titleEl)
 
-  // Right-aligned icon group — recur indicator + snooze button
   const iconGroup = document.createElement('div')
   iconGroup.className = 'card-icon-group'
 
@@ -318,8 +400,8 @@ function buildCard(item) {
 
   if (item.due && !isDone) {
     const snoozeBtn = document.createElement('button')
-    snoozeBtn.className = 'card-snooze'
-    snoozeBtn.title     = 'Snooze'
+    snoozeBtn.className   = 'card-snooze'
+    snoozeBtn.title       = 'Snooze'
     snoozeBtn.textContent = '⏰'
     snoozeBtn.addEventListener('click', e => {
       e.stopPropagation()
@@ -353,7 +435,7 @@ function buildChips(item) {
     const diff  = Math.round((due - today) / 86_400_000)
     const chip  = document.createElement('span')
     chip.className = 'board-chip board-chip-due'
-    if (diff < 0)       chip.classList.add('overdue')
+    if (diff < 0)        chip.classList.add('overdue')
     else if (diff === 0) chip.classList.add('today')
     chip.textContent = diff === 0  ? 'Today'
       : diff === -1 ? 'Yesterday'
@@ -403,8 +485,8 @@ async function handleDrop(evt) {
   if (fromColId === toColId) {
     if (fromColId === DONE_COL_ID) return
     // Same-column reorder — persist to Google Tasks (no refresh; DOM already correct)
-    const prevCard   = to.children[evt.newIndex - 1]
-    const prevExtId  = prevCard?.dataset.extId ?? null
+    const prevCard  = to.children[evt.newIndex - 1]
+    const prevExtId = prevCard?.dataset.extId ?? null
     try {
       const token = await getToken()
       if (token) await reorderTask(token, listId, extId, prevExtId)
@@ -420,16 +502,13 @@ async function handleDrop(evt) {
     if (!token) { _callbacks.onRefresh?.(); return }
 
     if (toColId === DONE_COL_ID) {
-      // Dropped into Done → complete (spawn next if recurring)
       const item = _boardItems.find(i => i.source.external_id === extId && i.source.account_id === listId)
       if (item?.metadata?.recurrence) await spawnNextRecurrence(token, item, listId)
       await completeTask(token, listId, extId)
     } else if (fromColId === DONE_COL_ID) {
-      // Dragged out of Done → uncomplete (then move if to a different list)
       await uncompleteTask(token, listId, extId)
       if (toColId !== listId) await moveTask(token, listId, extId, toColId)
     } else {
-      // Moved between active lists
       await moveTask(token, listId, extId, toColId)
     }
   } catch (err) {
