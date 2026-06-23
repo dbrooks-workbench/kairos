@@ -51,9 +51,9 @@ export async function loadPrefs(token) {
       if (!dataRes.ok) throw new Error(`Drive read failed: ${dataRes.status}`)
       const data = await dataRes.json()
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [], ...data }
-      // Merge: localStorage fills in any sort modes not yet written to Drive
-      // (Drive wins on key conflicts since it represents the last confirmed save)
-      _prefs.boardColumnSort = { ...lsSort, ...(_prefs.boardColumnSort ?? {}) }
+      // Merge: localStorage wins on conflicts — it holds the most recent local
+      // change, which may not have flushed to Drive yet (3s debounce).
+      _prefs.boardColumnSort = { ...(_prefs.boardColumnSort ?? {}), ...lsSort }
     } else {
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: lsSort, taskListOrder: [] }
     }

@@ -11,7 +11,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.13.8'
+const VERSION   = '0.13.9'
 
 const state = {
   weekStart: getWeekStart(new Date()),
