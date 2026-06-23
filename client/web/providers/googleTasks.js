@@ -34,20 +34,22 @@ function normalizeTask(task, list) {
   const parsed = parseTaskNotes(task.notes ?? '')
   const kid    = parsed.kid
 
-  // Drive meta is authoritative for loe/comments when a record exists for this kid.
+  // Drive meta is authoritative for loe/comments/recurrence when a record exists.
   // Fall back to notes-embedded values for tasks not yet saved through the new path.
-  let loe, comments
+  let loe, comments, recurrence
   if (kid && hasTaskRecord(kid)) {
     const meta = getTaskMeta(kid)
-    loe      = meta.loe
-    comments = meta.comments
+    loe        = meta.loe
+    comments   = meta.comments
+    recurrence = meta.recurrence
   } else {
-    loe      = parsed.loe
-    comments = parsed.comments
+    loe        = parsed.loe
+    comments   = parsed.comments
+    recurrence = parsed.recurrence   // backward compat: still in notes for unmigrated tasks
   }
 
   // Push a history snapshot for any task that has a kid anchor in notes.
-  if (kid) syncTaskSnapshot(kid, task, { loe, comments })
+  if (kid) syncTaskSnapshot(kid, task, { loe, comments, recurrence })
 
   return {
     id: `gtasks:${list.id}:${task.id}`,
@@ -64,7 +66,7 @@ function normalizeTask(task, list) {
     all_day: true,
     status: task.status === 'completed' ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
-    metadata: { body: parsed.body, loe, recurrence: parsed.recurrence, checklist: parsed.checklist, comments, list_title: list.title, kid },
+    metadata: { body: parsed.body, loe, recurrence, checklist: parsed.checklist, comments, list_title: list.title, kid },
     color: null,
     editable: true,
   }
@@ -219,17 +221,13 @@ export async function recreateOrphanedTask(token, item) {
   if (!due) return
   const p   = v => String(v).padStart(2, '0')
   const kid = generateKid()
-  const notes = serializeNotes({
-    body:       '',
-    recurrence: item.metadata.recurrence,
-    checklist:  [],
-    kid,
-  })
+  const notes = serializeNotes({ body: '', checklist: [], kid })
   await createTask(token, item.source.account_id, {
     title: item.title,
     notes,
     due:   `${due.getFullYear()}-${p(due.getMonth()+1)}-${p(due.getDate())}T00:00:00.000Z`,
   })
+  updateTaskMeta(kid, { loe: null, comments: [], recurrence: item.metadata.recurrence ?? null })
 }
 
 export async function spawnNextRecurrence(token, item, listId) {
@@ -241,9 +239,8 @@ export async function spawnNextRecurrence(token, item, listId) {
   const p   = v => String(v).padStart(2, '0')
   const kid = generateKid()
   const notes = serializeNotes({
-    body:       item.metadata?.body      ?? '',
-    recurrence: rrule,
-    checklist:  (item.metadata?.checklist ?? []).map(c => ({ ...c, checked: false })),
+    body:      item.metadata?.body ?? '',
+    checklist: (item.metadata?.checklist ?? []).map(c => ({ ...c, checked: false })),
     kid,
   })
   await createTask(token, listId, {
@@ -252,9 +249,8 @@ export async function spawnNextRecurrence(token, item, listId) {
     due:   `${nextDue.getFullYear()}-${p(nextDue.getMonth()+1)}-${p(nextDue.getDate())}T00:00:00.000Z`,
   })
 
-  // Inherit parent's LOE in the new task's Drive meta record
-  const parentLoe = item.metadata?.loe ?? null
-  if (parentLoe) updateTaskMeta(kid, { loe: parentLoe, comments: [] })
+  // Write recurrence and inherited LOE to Drive meta for the spawned task
+  updateTaskMeta(kid, { loe: item.metadata?.loe ?? null, comments: [], recurrence: rrule })
 }
 
 export async function getTasks(token, start, end) {

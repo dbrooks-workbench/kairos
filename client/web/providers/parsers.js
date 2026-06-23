@@ -281,17 +281,13 @@ export function parseTaskNotes(notes) {
 // ── Serialization ────────────────────────────────────────────────────────────
 // Order: prose body → checklist → LOE line → comments (chronological)
 
-// Serialization order: prose → checklist → &recurrence → [kid:xxx]
-// LOE and comments are stored in Drive (driveTaskMeta.js), not in notes.
-export function serializeNotes({ body, recurrence, checklist, kid }) {
+// Serialization order: prose → checklist → [kid:xxx]
+// LOE, comments, and recurrence are stored in Drive (driveTaskMeta.js), not in notes.
+export function serializeNotes({ body, checklist, kid }) {
   const parts = []
   if (body?.trim()) parts.push(body.trim())
   if (checklist?.length)
     parts.push(checklist.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'))
-  if (recurrence) {
-    const sigil = recurSigilFromRrule(recurrence)
-    if (sigil) parts.push(sigil)
-  }
   const body_out = parts.join('\n\n')
   if (kid) return body_out ? `${body_out}\n\n[kid:${kid}]` : `[kid:${kid}]`
   return body_out

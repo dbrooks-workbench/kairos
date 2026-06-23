@@ -525,7 +525,6 @@ async function save() {
 
   const notes = serializeNotes({
     body:      el('modal-notes').value.trim(),
-    recurrence,
     checklist: _checklist,
     kid,
   })
@@ -533,8 +532,8 @@ async function save() {
   const token = await getToken()
   if (!token) return
 
-  // Write loe/comments to Drive — authoritative store for these fields
-  updateTaskMeta(kid, { loe, comments: _comments })
+  // Write loe/comments/recurrence to Drive — authoritative store for these fields
+  updateTaskMeta(kid, { loe, comments: _comments, recurrence })
 
   const selectedListId = el('modal-list').value
 

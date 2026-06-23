@@ -15,9 +15,10 @@
 //     version: 1,
 //     tasks: {
 //       [kid]: {
-//         loe: string | null,
-//         comments: [{timestamp, text}],
-//         history: [{_syncedAt, ...googleTaskPayload}],   // newest first, max 10
+//         loe:        string | null,
+//         comments:   [{timestamp, text}],
+//         recurrence: string | null,          // canonical RRULE string
+//         history:    [{_syncedAt, ...googleTaskPayload}],   // newest first, max 10
 //         archivedAt?: string    // ISO timestamp, present only in archive file
 //       }
 //     }
@@ -65,42 +66,44 @@ export function hasTaskRecord(kid) {
 }
 
 export function getTaskMeta(kid) {
-  if (!_meta || !kid) return { loe: null, comments: [] }
+  if (!_meta || !kid) return { loe: null, comments: [], recurrence: null }
   const record = _meta.tasks[kid]
-  if (!record) return { loe: null, comments: [] }
-  return { loe: record.loe ?? null, comments: record.comments ?? [] }
+  if (!record) return { loe: null, comments: [], recurrence: null }
+  return { loe: record.loe ?? null, comments: record.comments ?? [], recurrence: record.recurrence ?? null }
 }
 
-// Push the current Google Tasks payload to history and update loe/comments.
+// Push the current Google Tasks payload to history and update Kairos-owned fields.
 // Only call when kid is known (not null).
-export function syncTaskSnapshot(kid, googlePayload, { loe, comments }) {
+export function syncTaskSnapshot(kid, googlePayload, { loe, comments, recurrence }) {
   if (!_meta || !kid) return
 
   const entry    = { _syncedAt: new Date().toISOString(), ...googlePayload }
   const existing = _meta.tasks[kid]
 
   if (existing) {
-    existing.loe      = loe
-    existing.comments = comments
-    existing.history  = [entry, ...(existing.history ?? [])].slice(0, HISTORY_MAX)
+    existing.loe        = loe
+    existing.comments   = comments
+    existing.recurrence = recurrence ?? null
+    existing.history    = [entry, ...(existing.history ?? [])].slice(0, HISTORY_MAX)
   } else {
-    _meta.tasks[kid] = { loe, comments, history: [entry] }
+    _meta.tasks[kid] = { loe, comments, recurrence: recurrence ?? null, history: [entry] }
   }
 
   _dirty = true
   _scheduleSave()
 }
 
-// Update loe/comments without pushing a history snapshot — used on explicit save.
-export function updateTaskMeta(kid, { loe, comments }) {
+// Update Kairos-owned fields without pushing a history snapshot — used on explicit save.
+export function updateTaskMeta(kid, { loe, comments, recurrence }) {
   if (!_meta || !kid) return
 
   const existing = _meta.tasks[kid]
   if (existing) {
-    existing.loe      = loe
-    existing.comments = comments
+    existing.loe        = loe
+    existing.comments   = comments
+    existing.recurrence = recurrence ?? null
   } else {
-    _meta.tasks[kid] = { loe, comments, history: [] }
+    _meta.tasks[kid] = { loe, comments, recurrence: recurrence ?? null, history: [] }
   }
 
   _dirty = true
