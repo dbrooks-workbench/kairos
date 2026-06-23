@@ -1202,11 +1202,11 @@ body.resize-active * { cursor: ns-resize !important; }
   font-size: 13px;
   line-height: 1;
   padding: 0 2px;
-  opacity: 0;
+  opacity: 0.2;
   transition: opacity 0.15s;
   flex-shrink: 0;
 }
-.board-col:hover .board-col-delete-btn { opacity: 0.4; }
+.board-col:hover .board-col-delete-btn { opacity: 0.5; }
 .board-col-delete-btn:hover { opacity: 1 !important; }
 
 .board-add-btn {
