@@ -1,7 +1,10 @@
 // User preferences stored in Google Drive appDataFolder.
-// boardColumnSort is also mirrored to localStorage so changes persist
-// immediately across page reloads without waiting for the Drive debounce.
-// Drive is the cross-device source of truth; localStorage is the fast-path cache.
+// Drive is the single source of truth — no localStorage fallback.
+// The UI stays in a loading state until loadPrefs resolves.
+//
+// Write strategy:
+//   setBoardColumnSort / setTaskListOrder — flush immediately (explicit user action)
+//   setHiddenCalendars                   — debounced 1s (may toggle several in a row)
 //
 // Shape:
 //   {
@@ -11,10 +14,9 @@
 //     taskListOrder:   string[],            // ordered list IDs for board columns
 //   }
 
-const DRIVE_BASE   = 'https://www.googleapis.com/drive/v3'
-const UPLOAD_BASE  = 'https://www.googleapis.com/upload/drive/v3'
-const FILE_NAME    = 'kairos-prefs.json'
-const LS_SORT_KEY  = 'kairos-board-sort'   // localStorage key for sort cache
+const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3'
+const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
+const FILE_NAME   = 'kairos-prefs.json'
 
 let _fileId    = null
 let _prefs     = null
@@ -38,10 +40,6 @@ export async function loadPrefs(token) {
 
     const { files } = await searchRes.json()
 
-    // localStorage holds any sort changes not yet flushed to Drive — read it first
-    let lsSort = {}
-    try { lsSort = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch {}
-
     if (files?.length > 0) {
       _fileId = files[0].id
       const dataRes = await fetch(
@@ -51,11 +49,8 @@ export async function loadPrefs(token) {
       if (!dataRes.ok) throw new Error(`Drive read failed: ${dataRes.status}`)
       const data = await dataRes.json()
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [], ...data }
-      // Merge: localStorage wins on conflicts — it holds the most recent local
-      // change, which may not have flushed to Drive yet (3s debounce).
-      _prefs.boardColumnSort = { ...(_prefs.boardColumnSort ?? {}), ...lsSort }
     } else {
-      _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: lsSort, taskListOrder: [] }
+      _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [] }
     }
 
     _saveToken = token
@@ -81,25 +76,15 @@ export function setHiddenCalendars(cals) {
 }
 
 export function getBoardColumnSort() {
-  // When Drive prefs are loaded use them; fall back to localStorage during startup
-  if (_prefs) return _prefs.boardColumnSort ?? {}
-  try { return JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch { return {} }
+  return _prefs?.boardColumnSort ?? {}
 }
 
 export function setBoardColumnSort(listId, mode) {
-  // Write to localStorage immediately so the value survives a reload even if
-  // the Drive debounce hasn't fired yet.
-  try {
-    const ls = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}')
-    ls[listId] = mode
-    localStorage.setItem(LS_SORT_KEY, JSON.stringify(ls))
-  } catch {}
-
   if (!_prefs) return
   if (!_prefs.boardColumnSort) _prefs.boardColumnSort = {}
   _prefs.boardColumnSort[listId] = mode
   _dirty = true
-  _scheduleSave()
+  _flushNow()
 }
 
 export function getTaskListOrder() {
@@ -110,15 +95,22 @@ export function setTaskListOrder(order) {
   if (!_prefs) return
   _prefs.taskListOrder = [...order]
   _dirty = true
-  _scheduleSave()
+  _flushNow()
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────
 
+// Debounced save — for settings that may change in rapid succession.
 function _scheduleSave() {
   if (!_saveToken) return
   if (_saveTimer) clearTimeout(_saveTimer)
-  _saveTimer = setTimeout(() => _flush(), 3000)
+  _saveTimer = setTimeout(() => _flush(), 1000)
+}
+
+// Immediate save — for explicit single user actions where prompt persistence matters.
+function _flushNow() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null }
+  _flush()
 }
 
 async function _flush() {
