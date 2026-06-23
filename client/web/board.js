@@ -1,6 +1,6 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence, renameTaskList } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence, renameTaskList, deleteTaskList } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
@@ -347,6 +347,24 @@ function buildCol(list, items, isDone, doneWindow) {
     addBtn.textContent = '+'
     addBtn.addEventListener('click', () => _callbacks.onCreate?.(list.id))
     hdr.appendChild(addBtn)
+
+    const delBtn = document.createElement('button')
+    delBtn.className   = 'board-col-delete-btn'
+    delBtn.title       = 'Delete list'
+    delBtn.textContent = '🗑'
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete "${list.title}" and all its tasks? This cannot be undone.`)) return
+      try {
+        const token = await getToken()
+        if (!token) return
+        await deleteTaskList(token, list.id)
+        setTaskListOrder(getTaskListOrder().filter(id => id !== list.id))
+        _callbacks.onRefresh?.()
+      } catch (err) {
+        console.error('Delete list failed:', err)
+      }
+    })
+    hdr.appendChild(delBtn)
   }
 
   // Task list

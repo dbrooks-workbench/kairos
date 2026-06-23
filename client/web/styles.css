@@ -1195,6 +1195,20 @@ body.resize-active * { cursor: ns-resize !important; }
 .board-add-list-confirm { color: var(--today-color); font-weight: 600; }
 .board-add-list-cancel:hover { color: var(--text); }
 
+.board-col-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.board-col:hover .board-col-delete-btn { opacity: 0.4; }
+.board-col-delete-btn:hover { opacity: 1 !important; }
+
 .board-add-btn {
   background: none;
   border: none;

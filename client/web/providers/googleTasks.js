@@ -120,6 +120,14 @@ export async function renameTaskList(token, listId, title) {
   return res.json()
 }
 
+export async function deleteTaskList(token, listId) {
+  const res = await fetch(`${BASE}/users/@me/lists/${encodeURIComponent(listId)}`, {
+    method:  'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+}
+
 export async function deleteTask(token, listId, taskId) {
   const res = await fetch(
     `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
