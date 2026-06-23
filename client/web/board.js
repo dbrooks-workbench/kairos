@@ -17,7 +17,7 @@ let _primaryListId  = null
 function setColSort(listId, mode) {
   if (getBoardColumnSort()[listId] === mode) return
   setBoardColumnSort(listId, mode)
-  renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow)
+  renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow, _primaryListId)
 }
 
 function colSortMode(listId) {

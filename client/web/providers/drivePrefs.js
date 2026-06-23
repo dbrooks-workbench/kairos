@@ -1,5 +1,7 @@
 // User preferences stored in Google Drive appDataFolder.
-// Replaces localStorage so prefs are device-agnostic and survive browser clears.
+// boardColumnSort is also mirrored to localStorage so changes persist
+// immediately across page reloads without waiting for the Drive debounce.
+// Drive is the cross-device source of truth; localStorage is the fast-path cache.
 //
 // Shape:
 //   {
@@ -9,9 +11,10 @@
 //     taskListOrder:   string[],            // ordered list IDs for board columns
 //   }
 
-const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3'
-const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
-const FILE_NAME   = 'kairos-prefs.json'
+const DRIVE_BASE   = 'https://www.googleapis.com/drive/v3'
+const UPLOAD_BASE  = 'https://www.googleapis.com/upload/drive/v3'
+const FILE_NAME    = 'kairos-prefs.json'
+const LS_SORT_KEY  = 'kairos-board-sort'   // localStorage key for sort cache
 
 let _fileId    = null
 let _prefs     = null
@@ -45,8 +48,14 @@ export async function loadPrefs(token) {
       const data = await dataRes.json()
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [], ...data }
     } else {
-      _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [] }
+      // No Drive file yet — seed boardColumnSort from localStorage (migration / offline cache)
+      let lsSort = {}
+      try { lsSort = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch {}
+      _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: lsSort, taskListOrder: [] }
     }
+
+    // Keep localStorage in sync with whatever Drive returned
+    try { localStorage.setItem(LS_SORT_KEY, JSON.stringify(_prefs.boardColumnSort ?? {})) } catch {}
 
     _saveToken = token
   } catch (err) {
@@ -71,10 +80,20 @@ export function setHiddenCalendars(cals) {
 }
 
 export function getBoardColumnSort() {
-  return _prefs?.boardColumnSort ?? {}
+  // When Drive prefs are loaded use them; fall back to localStorage during startup
+  if (_prefs) return _prefs.boardColumnSort ?? {}
+  try { return JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch { return {} }
 }
 
 export function setBoardColumnSort(listId, mode) {
+  // Write to localStorage immediately so the value survives a reload even if
+  // the Drive debounce hasn't fired yet.
+  try {
+    const ls = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}')
+    ls[listId] = mode
+    localStorage.setItem(LS_SORT_KEY, JSON.stringify(ls))
+  } catch {}
+
   if (!_prefs) return
   if (!_prefs.boardColumnSort) _prefs.boardColumnSort = {}
   _prefs.boardColumnSort[listId] = mode
