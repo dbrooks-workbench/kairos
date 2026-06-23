@@ -81,12 +81,14 @@ async function _doLoad(token) {
       }
     }
 
+    console.log('[prefs] loaded | _fileId:', _fileId, '| boardColumnSort:', JSON.stringify(_prefs.boardColumnSort))
     _saveToken = token
   } catch (err) {
     if (err.message !== 'drive_scope_missing') {
-      console.warn('Drive prefs unavailable:', err.message)
+      console.warn('[prefs] load failed:', err.message)
     }
     _prefs = DEFAULTS()
+    console.log('[prefs] using defaults (load failed)')
   }
 
   return _prefs
@@ -108,6 +110,7 @@ export function getBoardColumnSort() {
 }
 
 export function setBoardColumnSort(listId, mode) {
+  console.log('[prefs] setBoardColumnSort', listId, mode, '| _prefs:', !!_prefs, '| _saveToken:', !!_saveToken, '| _fileId:', _fileId)
   if (!_prefs) return
   if (!_prefs.boardColumnSort) _prefs.boardColumnSort = {}
   _prefs.boardColumnSort[listId] = mode
@@ -140,6 +143,7 @@ function _flushNow() {
 }
 
 async function _flush() {
+  console.log('[prefs] _flush | dirty:', _dirty, '| _prefs:', !!_prefs, '| _saveToken:', !!_saveToken, '| _fileId:', _fileId)
   if (!_dirty || !_prefs || !_saveToken) return
   _dirty     = false
   _saveTimer = null
@@ -157,6 +161,7 @@ async function _flush() {
           keepalive: true,
         }
       )
+      console.log('[prefs] PATCH result:', res.status, res.ok)
       if (!res.ok) throw new Error(`Drive update failed: ${res.status}`)
     } else {
       // _fileId not set (file creation failed in loadPrefs) — fall back to multipart
@@ -172,11 +177,12 @@ async function _flush() {
           body:    form,
         }
       )
+      console.log('[prefs] multipart POST result:', res.status, res.ok)
       if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
       _fileId = (await res.json()).id
     }
   } catch (err) {
-    console.warn('Drive prefs save failed:', err.message)
+    console.warn('[prefs] save failed:', err.message)
     _dirty = true
   }
 }
