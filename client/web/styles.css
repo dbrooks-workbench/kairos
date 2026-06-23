@@ -1114,6 +1114,21 @@ body.resize-active * { cursor: ns-resize !important; }
   padding: 1px 7px;
 }
 
+/* Inline list rename input */
+.board-col-title-input {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--today-color);
+  border-radius: 4px;
+  padding: 1px 4px;
+  width: 0;
+  flex: 1;
+  min-width: 0;
+}
+.board-col-title-input:focus { outline: none; }
+
 /* Column drag handle */
 .board-col-drag-handle {
   color: var(--text-muted);

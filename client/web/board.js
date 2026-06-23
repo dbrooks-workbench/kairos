@@ -1,6 +1,6 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence, renameTaskList } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
@@ -275,6 +275,47 @@ function buildCol(list, items, isDone, doneWindow) {
   countEl.textContent = items.length
 
   hdr.append(titleEl, countEl)
+
+  if (!isDone) {
+    titleEl.title = 'Click to rename'
+    titleEl.style.cursor = 'text'
+    titleEl.addEventListener('click', () => {
+      const inp = document.createElement('input')
+      inp.type      = 'text'
+      inp.className = 'board-col-title-input'
+      inp.value     = list.title
+      inp.maxLength = 100
+      titleEl.replaceWith(inp)
+      inp.focus()
+      inp.select()
+
+      let done = false
+      const commit = async () => {
+        if (done) return
+        done = true
+        const newTitle = inp.value.trim()
+        if (newTitle && newTitle !== list.title) {
+          try {
+            const token = await getToken()
+            if (token) await renameTaskList(token, list.id, newTitle)
+            _callbacks.onRefresh?.()
+          } catch (err) {
+            console.error('Rename list failed:', err)
+            inp.replaceWith(titleEl)
+          }
+        } else {
+          inp.replaceWith(titleEl)
+        }
+      }
+      const cancel = () => { done = true; inp.replaceWith(titleEl) }
+
+      inp.addEventListener('blur', commit)
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit() }
+        if (e.key === 'Escape') cancel()
+      })
+    })
+  }
 
   if (isDone) {
     const toggle = document.createElement('div')

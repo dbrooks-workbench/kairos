@@ -110,6 +110,16 @@ export async function createTaskList(token, title) {
   return res.json()
 }
 
+export async function renameTaskList(token, listId, title) {
+  const res = await fetch(`${BASE}/users/@me/lists/${encodeURIComponent(listId)}`, {
+    method:  'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`Tasks API ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 export async function deleteTask(token, listId, taskId) {
   const res = await fetch(
     `${BASE}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
