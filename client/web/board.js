@@ -189,6 +189,12 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30, p
   _callbacks     = callbacks
   _primaryListId = primaryListId
 
+  // Capture scroll positions before wiping the DOM
+  const scrollTops = {}
+  document.querySelectorAll('.board-task-list[data-list-id]').forEach(el => {
+    if (el.scrollTop > 0) scrollTops[el.dataset.listId] = el.scrollTop
+  })
+
   destroyBoard()
 
   const board = document.getElementById('board')
@@ -247,6 +253,12 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30, p
       setTaskListOrder(newOrder)
     },
   }))
+
+  // Restore scroll positions after rebuild
+  document.querySelectorAll('.board-task-list[data-list-id]').forEach(el => {
+    const saved = scrollTops[el.dataset.listId]
+    if (saved) el.scrollTop = saved
+  })
 }
 
 // ── Column ────────────────────────────────────────────────────────────────────
