@@ -220,12 +220,12 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     }))
   }
 
-  // "Add list" pseudo-column
-  board.appendChild(buildAddListCol(callbacks))
-
   // Done column — cap at 100 to keep the list manageable
   const doneCol = buildCol({ id: DONE_COL_ID, title: 'Done' }, doneItems.slice(0, 100), true, doneWindow)
   board.appendChild(doneCol)
+
+  // "Add list" pseudo-column — after Done so new lists land before it
+  board.appendChild(buildAddListCol(callbacks))
   _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
     group: 'tasks',
     animation: 150,
