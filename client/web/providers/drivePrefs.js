@@ -38,6 +38,10 @@ export async function loadPrefs(token) {
 
     const { files } = await searchRes.json()
 
+    // localStorage holds any sort changes not yet flushed to Drive — read it first
+    let lsSort = {}
+    try { lsSort = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch {}
+
     if (files?.length > 0) {
       _fileId = files[0].id
       const dataRes = await fetch(
@@ -47,15 +51,12 @@ export async function loadPrefs(token) {
       if (!dataRes.ok) throw new Error(`Drive read failed: ${dataRes.status}`)
       const data = await dataRes.json()
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: {}, taskListOrder: [], ...data }
+      // Merge: localStorage fills in any sort modes not yet written to Drive
+      // (Drive wins on key conflicts since it represents the last confirmed save)
+      _prefs.boardColumnSort = { ...lsSort, ...(_prefs.boardColumnSort ?? {}) }
     } else {
-      // No Drive file yet — seed boardColumnSort from localStorage (migration / offline cache)
-      let lsSort = {}
-      try { lsSort = JSON.parse(localStorage.getItem(LS_SORT_KEY) ?? '{}') } catch {}
       _prefs = { version: 1, hiddenCalendars: [], boardColumnSort: lsSort, taskListOrder: [] }
     }
-
-    // Keep localStorage in sync with whatever Drive returned
-    try { localStorage.setItem(LS_SORT_KEY, JSON.stringify(_prefs.boardColumnSort ?? {})) } catch {}
 
     _saveToken = token
   } catch (err) {
