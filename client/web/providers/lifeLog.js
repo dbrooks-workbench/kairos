@@ -8,7 +8,7 @@
 // narrative     — always human-readable prose; what a human reader looks at
 
 import { getLifeLogSheetId, setLifeLogSheetId, getLifeLogMigratedHashes, addLifeLogMigratedHashes } from './drivePrefs.js'
-import { getAllTaskRecords } from './driveTaskMeta.js'
+import { loadTaskArchive, getAllTaskRecords, getAllArchiveRecords } from './driveTaskMeta.js'
 import { getAllEventRecords } from './driveEventTaskMeta.js'
 
 const SHEETS_BASE = 'https://sheets.googleapis.com/v4'
@@ -34,7 +34,12 @@ export async function appendLogEntry(token, entry) {
 // Idempotent via content hashes stored in kairos-prefs.json — safe to call on every startup.
 // items = state.items (used to resolve titles/context for known items).
 export async function migrateExistingComments(token, items = []) {
-  const taskRecords  = getAllTaskRecords()
+  // Load archive before reading records — no-op if already loaded by board view.
+  // This ensures completed/purged tasks in kairos-tasks-archive.json are included.
+  await loadTaskArchive(token)
+
+  // Current records override archive for the same kid (task still alive in Google Tasks).
+  const taskRecords  = { ...getAllArchiveRecords(), ...getAllTaskRecords() }
   const eventRecords = getAllEventRecords()
 
   const hasTasks  = Object.keys(taskRecords).length > 0

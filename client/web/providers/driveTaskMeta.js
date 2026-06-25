@@ -72,7 +72,8 @@ export function getTaskMeta(kid) {
   return { loe: record.loe ?? null, comments: record.comments ?? [], recurrence: record.recurrence ?? null }
 }
 
-export function getAllTaskRecords() { return _meta?.tasks ?? {} }
+export function getAllTaskRecords()   { return _meta?.tasks    ?? {} }
+export function getAllArchiveRecords() { return _archive?.tasks ?? {} }
 
 // Push the current Google Tasks payload to history and update Kairos-owned fields.
 // Only call when kid is known (not null).
