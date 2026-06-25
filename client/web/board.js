@@ -49,27 +49,38 @@ function orderedLists(lists) {
 let _snoozeItem      = null
 let _snoozeOnRefresh = null
 let _activeSnoozeBtn = null
+let _snoozeActionFn  = null   // optional override: async (n, newDate, dateLabel) => void
 
 async function executeSnooze(daysOverride) {
   const n = daysOverride ?? parseInt(document.getElementById('snooze-days').value, 10)
-  if (!n || n < 1 || !_snoozeItem) return
+  if (!n || n < 1) return
+  if (!_snoozeItem && !_snoozeActionFn) return
 
   const item = _snoozeItem
   const cb   = _snoozeOnRefresh
+  const fn   = _snoozeActionFn
 
-  const newDue = new Date(item.due)
+  const baseDate = item?.due ?? item?.start ?? new Date()
+  const newDue   = new Date(baseDate)
   newDue.setDate(newDue.getDate() + n)
   const pad = v => String(v).padStart(2, '0')
-  const newDueIso = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}T00:00:00.000Z`
   const dateLabel = newDue.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   document.getElementById('snooze-popover').hidden = true
   _activeSnoozeBtn = null
   _snoozeItem      = null
   _snoozeOnRefresh = null
+  _snoozeActionFn  = null
 
-  // Snooze comment goes to Drive meta, not notes.
-  // kid is written to notes if not already present (migrates the task).
+  if (fn) {
+    try { await fn(n, newDue, dateLabel) } catch (err) { console.error('Snooze failed:', err) }
+    cb?.()
+    return
+  }
+
+  // Default: task snooze
+  const newDueIso = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}T00:00:00.000Z`
+
   const kid         = item.metadata?.kid ?? generateKid()
   const newComments = [...(item.metadata.comments ?? []), {
     timestamp: nowTimestamp(),
@@ -98,7 +109,7 @@ async function executeSnooze(daysOverride) {
   cb?.()
 }
 
-export function openSnoozePopover(btn, item, onRefresh) {
+export function openSnoozePopover(btn, item, onRefresh, actionFn = null) {
   const popover = document.getElementById('snooze-popover')
 
   if (_activeSnoozeBtn === btn && !popover.hidden) {
@@ -110,6 +121,7 @@ export function openSnoozePopover(btn, item, onRefresh) {
   _snoozeItem      = item
   _snoozeOnRefresh = onRefresh
   _activeSnoozeBtn = btn
+  _snoozeActionFn  = actionFn ?? null
 
   const daysInput = document.getElementById('snooze-days')
   daysInput.value = 3

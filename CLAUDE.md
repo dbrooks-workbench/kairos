@@ -93,23 +93,74 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
   due: Date | null,           // tasks with deadlines
   all_day: boolean,
   status: 'CONFIRMED' | 'TENTATIVE' | 'CANCELLED' | 'COMPLETED' | 'NEEDS_ACTION',
-  recurrence: string | null,  // RRULE string
-  metadata: {                 // type-specific fields
+  recurrence: string | null,  // RRULE string (EVENT items only; TASK recurrence is in metadata)
+  metadata: {                 // type-specific and derived fields
     body?: string,            // prose notes
-    loe?: string,             // e.g. "2d 4h" (parsed from ~-prefix line)
+    loe?: string,             // e.g. "2d 4h"
     comments?: [{timestamp, text}],
     checklist?: [{text, checked}],
+    recurrence?: string,      // RRULE string for TASK items (stored in Drive, not notes)
+    kid?: string,             // Kairos stable ID for TASK items (anchor in notes)
+    task_calendar?: boolean,  // derived: true when item_type=EVENT and source calendar is a commitment calendar
     linked_task_ids?: string[],
+    // virtual/orphaned flags for recurring task instances
+    virtual?: boolean,
+    orphaned?: boolean,
   },
   color: string | null,
   editable: boolean,
 }
 ```
 
-**`item_type` drives:**
-- How the item renders on the calendar grid (all-day bar vs timed block vs task chip)
-- What interaction surface appears on click/tap (view-only, completable, editable form, etc.)
-- Whether it appears in the ICS feed output
+### `item_type` vs render behavior
+
+`item_type` is the **persistence type** — where the item lives:
+- `'TASK'` → stored in Google Tasks
+- `'EVENT'` → stored in Google Calendar
+
+**Render behavior is derived, not stored.** The interaction surface Kairos shows depends on `item_type` plus context:
+- `TASK` → task chip, completion button, snooze, LOE display
+- `EVENT` where `metadata.task_calendar` is false → standard event block, view-only or editable form
+- `EVENT` where `metadata.task_calendar` is true → **commitment**: renders as a task chip (all-day) with completion button and snooze
+
+`metadata.task_calendar` is a derived flag set at normalization time by checking `source.account_id` against the user's designated commitment calendars (`commitmentCalendars` in Drive prefs). It is never stored in Drive or Google APIs — always recomputed on load.
+
+---
+
+## Commitments
+
+Google Calendar events on a user-designated **commitment calendar** are treated by Kairos as completable, snoozeable commitments. This is the correct model for recurring scheduled work (weekly review, monthly budget, etc.) because Google Calendar has first-class native recurrence with per-instance editing, stable event IDs, and "edit this / this and following / all" semantics — none of which exist in Google Tasks.
+
+The logical line between a task and a commitment: a **task** is something you need to do, often with a due date. A **commitment** is something you've scheduled — it happens at a specific time and may recur. Due dates alone don't cross the line; recurrence and schedule-anchoring do.
+
+### Commitment calendar designation
+
+Users designate 0–n Google Calendars as commitment calendars via `commitmentCalendars: string[]` in `kairos-prefs.json`. The calendar picker UI shows a "Use as commitment calendar" toggle per calendar (independent of the visibility toggle). Multiple commitment calendars are supported.
+
+### Completion model
+
+Completion state is maintained at two layers:
+
+1. **Drive** (`kairos-event-tasks.json`, keyed by Google Calendar event instance ID):
+   ```json
+   { "version": 1, "events": { "[eventId]": { "completedAt": "ISO timestamp | null" } } }
+   ```
+   `completedAt` is the single authoritative field: a non-null value means completed (and is the completion time); null/absent means not completed. One field encodes both state and timestamp with no redundancy and no possibility of the two going out of sync. Kairos reads this to render; it never walks the event log to determine current state.
+
+2. **Log entry in event description** (append-only audit trail):
+   - Complete: appends `@timestamp !completed` to the event instance description
+   - Uncomplete: appends `@timestamp !uncompleted`
+   - Visible in all calendar clients; feeds the Life History Project
+
+Uncompleting sets `completedAt: null` in Drive and appends `!uncompleted` to the log.
+
+### Snooze
+
+Snooze moves the specific event instance to a new date via Google Calendar PATCH (updating `start.date`/`end.date` for all-day, `start.dateTime`/`end.dateTime` for timed) and appends `@timestamp !snoozed to YYYY-MM-DD` to the event description. The series is unaffected; only this instance moves.
+
+### What stays on Google Tasks
+
+One-off personal tasks, with or without a due date. The board view reflects Google Tasks only. Recurring scheduled work belongs on a commitment calendar; the board is for work items, not scheduled commitments.
 
 ---
 
@@ -178,6 +229,10 @@ async function updateTask(token, item) -> CalendarItem
 | No backend | Google APIs direct | No server to maintain; auth handled by Pages Functions |
 | Provider pattern | JS modules | Normalize provider-specific models; parse agile-tasks metadata extensions |
 | PWA | Optional | Offline support without a separate native app |
+| Recurring commitments | Calendar events on commitment calendar, not tasks | Google Tasks has no native recurrence; Google Calendar has first-class RRULE with per-instance editing, stable IDs, and native "edit this / all" semantics |
+| Commitment render behavior | Derived, not stored | `item_type` = persistence type; render behavior derived from `item_type` + commitment calendar membership at normalization time |
+| Commitment completion | `completedAt` timestamp in Drive + log entry in description | `completedAt` non-null = completed (encodes both state and time in one field); log is append-only audit trail |
+| Task vs commitment line | Due date alone stays a task; schedule/recurrence → commitment | "Task with a due date" ≠ "calendar event". Tasks live on the board; commitments render on the calendar with the completion surface |
 
 ---
 
@@ -195,7 +250,10 @@ async function updateTask(token, item) -> CalendarItem
 - Not a team collaboration tool (single-user, self-hosted first)
 - Not a replacement for a full PMS or project management suite — it is a *calendar-first* view of personal work
 - Not locked to Google — Google is the first implementation, not the architecture
-- Tasks are not events: due time and recurrence are event properties, not task properties. Recurrence belongs on calendar events; a recurring commitment that triggers work should be modelled as a recurring event, not a recurring task. Google's own recurring task feature is considered a kludge that confirms this boundary. `GoogleTasksProvider` has no RRULE logic.
+- Tasks are not events. `item_type` reflects persistence: `TASK` = Google Tasks, `EVENT` = Google Calendar. Render behavior is derived separately.
+- Recurring commitments belong on commitment calendar events, not Google Tasks. Google Tasks has no native recurrence; the synthetic recurrence Kairos previously implemented there was fragile. `GoogleTasksProvider` has no RRULE logic going forward.
+- The user-facing term for a completable calendar event is **commitment**. Internally, `metadata.task_calendar` flags it; `commitmentCalendars` in Drive prefs holds the designated calendar IDs.
+- `!completed`, `!uncompleted`, and `!snoozed` are in the known action verb allowlist in `parseEventDescription`. All three append log entries to the event instance description; complete/uncomplete also write to `kairos-event-tasks.json`.
 
 ---
 
@@ -206,7 +264,7 @@ async function updateTask(token, item) -> CalendarItem
 - Provider interfaces should be finalized before writing implementations
 - The SPA calendar grid is custom — build the week view first, then month view
 - All-day area and timed area are separate rendering zones; tasks can appear in either depending on whether they have a time component
-- `GoogleTasksProvider` must parse agile-tasks metadata conventions from the Google Tasks `notes` field and surface them via `CalendarItem.metadata`. Conventions (from `../agile-tasks/src/parsers.js`): LOE as `~1d 5h 20m` (→ `metadata.loe`), timestamped comments as `@2026-05-21T14:30:00 text` (→ `metadata.comments`), checklists as GFM `- [ ] item` (→ `metadata.checklist`). Serialization order within notes: prose body → checklist → LOE → comments.
+- `GoogleTasksProvider`: task `notes` field contains only: prose body → GFM checklist (`- [ ] item`) → `[kid:xxx]` anchor (last line). LOE, comments, and recurrence are stored in `kairos-tasks.json` (Drive), not in notes. Backward-compat: `parseTaskNotes` still extracts LOE, comments, and recurrence sigils from notes for tasks not yet migrated through the modal save path. Migration is lazy — first explicit modal save moves metadata to Drive and cleans the notes.
 - `GoogleCalendarProvider` parses event descriptions for: (1) a single embedded JSON object (first `{` to matching `}`, depth-tracked, silent fail) → `metadata.config`; (2) `@timestamp` comment lines → `metadata.comments`. Structured action comments use a `!verb` prefix to distinguish from plain narrative entries — sigil grammar: `@` = when, `!` = action verb, `$` = key reference. Parser matches `!verb` against a known allowlist (`spawned`, `cancelled`, `deferred`, ...) so unrecognized `!word` gracefully degrades to narrative. Example: `@2025-11-15T09:23:00 !spawned $PAY-TAX tasks/abc123xyz`. The JSON config object may contain `tasks` (linked task IDs) and `spawn` (task prototypes) keys.
 - **Event description format**: prose first, then optional JSON config block, then `@timestamp` log entries appended at the bottom. Example: `{"tasks":["tasks/abc123"],"spawn":[{"key":"PAY-TAX","trigger":"-30d","due":"-5d","title":"Pay property tax","loe":"1h","checklist":["Check assessor","Pay via portal"]}]}`
 - **Spawn triggers** (future feature): `spawn` array in the event's JSON config block defines named task prototypes. Kairos spawns a Google Task when entering the trigger window and appends `@timestamp !spawned $KEY tasks/{id}` to the event log. Spawn state determined by parsing `!spawned $KEY` comments — no writeback to the JSON block. Do not implement until core calendar + task rendering is complete.

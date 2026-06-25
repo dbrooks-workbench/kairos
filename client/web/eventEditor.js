@@ -1,6 +1,8 @@
 import { getToken } from './auth.js'
 import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
-import { serializeNotes, serializeEventDescription } from './providers/parsers.js'
+import { serializeNotes, serializeEventDescription, nowTimestamp } from './providers/parsers.js'
+import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
+import { openSnoozePopover } from './board.js'
 
 let _callbacks     = {}
 let _spawns        = []     // [{ key, title, triggerDays, dueDays, loe, checklist, _autoKey }]
@@ -261,6 +263,16 @@ export function initEventEditor() {
   el('event-spawn-add').addEventListener('click', addSpawn)
 
   el('event-modal-delete')?.addEventListener('click', confirmDelete)
+  el('event-modal-complete')?.addEventListener('click', handleCommitmentToggle)
+  el('event-modal-snooze')?.addEventListener('click', () => {
+    if (!_editItem) return
+    openSnoozePopover(
+      el('event-modal-snooze'),
+      _editItem,
+      () => { close(); _callbacks.onSaved?.() },
+      (n, newDate, dateLabel) => handleCommitmentSnooze(n, newDate, dateLabel)
+    )
+  })
 
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
 
@@ -444,6 +456,14 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   el('event-modal-delete').hidden  = false
   el('event-modal-delete').disabled = false
 
+  if (item.metadata?.task_calendar) {
+    const isDone = item.status === 'COMPLETED'
+    const completeBtn = el('event-modal-complete')
+    completeBtn.textContent = isDone ? 'Mark incomplete' : 'Mark complete'
+    completeBtn.hidden      = false
+    el('event-modal-snooze').hidden = isDone
+  }
+
   // Refresh location link and description preview for the loaded values
   const locVal = (item.metadata?.location ?? '').trim()
   if (_locLink) {
@@ -465,7 +485,77 @@ function populateCalendars(select, calendars, preferredId) {
   if (preferredId) select.value = preferredId
 }
 
-function close() { el('event-modal').hidden = true }
+function close() {
+  el('event-modal').hidden = true
+  el('event-modal-complete').hidden = true
+  el('event-modal-snooze').hidden   = true
+}
+
+// ── Commitment complete / snooze ──────────────────────────────────────────────
+
+async function handleCommitmentToggle() {
+  if (!_editItem) return
+  const token   = await getToken()
+  if (!token) return
+  const isDone  = _editItem.status === 'COMPLETED'
+  const calId   = _editItem.source.account_id
+  const eventId = _editItem.source.external_id
+
+  const ts      = nowTimestamp()
+  const entry   = { timestamp: ts, text: isDone ? '!uncompleted' : '!completed' }
+  const newComments = [...(_editItem.metadata?.comments ?? []), entry]
+  const newDesc = serializeEventDescription(_editItem.metadata?.body ?? '', _editItem.metadata?.config, newComments)
+
+  el('event-modal-complete').disabled = true
+  try {
+    if (isDone) {
+      await setEventUncompleted(token, eventId)
+    } else {
+      await setEventCompleted(token, eventId)
+    }
+    await updateEvent(token, calId, eventId, { description: newDesc })
+    close()
+    _callbacks.onSaved?.()
+  } catch (err) {
+    console.error('Commitment toggle failed:', err)
+    el('event-modal-complete').disabled = false
+  }
+}
+
+async function handleCommitmentSnooze(n, newDate, dateLabel) {
+  if (!_editItem) return
+  const token   = await getToken()
+  if (!token) return
+  const calId   = _editItem.source.account_id
+  const eventId = _editItem.source.external_id
+  const pad     = v => String(v).padStart(2, '0')
+  const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
+
+  const ts    = nowTimestamp()
+  const entry = { timestamp: ts, text: `!snoozed to ${newDateStr}` }
+  const newComments = [...(_editItem.metadata?.comments ?? []), entry]
+  const newDesc = serializeEventDescription(_editItem.metadata?.body ?? '', _editItem.metadata?.config, newComments)
+
+  const body = { description: newDesc }
+  if (_editItem.all_day) {
+    const endDate = new Date(newDate)
+    endDate.setDate(endDate.getDate() + 1)  // Google all-day end is exclusive
+    body.start = { date: newDateStr }
+    body.end   = { date: `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}` }
+  } else {
+    const origStart = new Date(_editItem.start)
+    const origEnd   = _editItem.end ? new Date(_editItem.end) : null
+    const newStart  = new Date(origStart); newStart.setDate(newStart.getDate() + n)
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    body.start = { dateTime: newStart.toISOString(), timeZone: tz }
+    if (origEnd) {
+      const newEnd = new Date(origEnd); newEnd.setDate(newEnd.getDate() + n)
+      body.end = { dateTime: newEnd.toISOString(), timeZone: tz }
+    }
+  }
+
+  await updateEvent(token, calId, eventId, body)
+}
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 

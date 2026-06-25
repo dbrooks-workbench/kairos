@@ -226,7 +226,7 @@ export function expandRruleInWindow(item, windowStart, windowEnd) {
 
 // Structured action comment verbs: @timestamp !verb $KEY payload
 const ACTION_RE = /^!([a-z]+)\s+\$(\S+)\s*(.*)/
-const KNOWN_VERBS = new Set(['spawned', 'cancelled', 'deferred'])
+const KNOWN_VERBS = new Set(['spawned', 'cancelled', 'deferred', 'completed', 'uncompleted', 'snoozed'])
 
 // ── Task notes parser ─────────────────────────────────────────────────────────
 // Serialization order: prose body → checklist → LOE → comments

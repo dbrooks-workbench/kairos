@@ -1,9 +1,11 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
-import { getCalendars, getEvents } from './providers/googleCalendar.js'
+import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
+import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
+import { serializeEventDescription, nowTimestamp } from './providers/parsers.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -11,13 +13,14 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.15.0'
+const VERSION   = '0.16.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
   items: [],
   calendars: [],
-  hiddenCalendars: new Set(),   // populated from Drive prefs after auth
+  hiddenCalendars:     new Set(),   // populated from Drive prefs after auth
+  commitmentCalendars: new Set(),   // calendar IDs designated as commitment calendars
   allDayExpanded: false,        // false = top-3 cap; true = show all
   view: 'calendar',        // 'calendar' | 'board'
   taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
@@ -121,6 +124,67 @@ async function handleToggleTask(item) {
   } catch (err) {
     console.error('Failed to toggle task:', err)
   }
+}
+
+async function handleToggleCommitment(item) {
+  const token   = await getToken()
+  if (!token) return
+  const isDone  = item.status === 'COMPLETED'
+  const calId   = item.source.account_id
+  const eventId = item.source.external_id
+
+  const ts    = nowTimestamp()
+  const entry = { timestamp: ts, text: isDone ? '!uncompleted' : '!completed' }
+  const newComments = [...(item.metadata?.comments ?? []), entry]
+  const newDesc = serializeEventDescription(item.metadata?.body ?? '', item.metadata?.config, newComments)
+
+  try {
+    if (isDone) {
+      await setEventUncompleted(token, eventId)
+    } else {
+      await setEventCompleted(token, eventId)
+    }
+    await updateEvent(token, calId, eventId, { description: newDesc })
+    const target = state.items.find(i => i.id === item.id)
+    if (target) target.status = isDone ? 'CONFIRMED' : 'COMPLETED'
+    renderItems(getVisibleItems())
+  } catch (err) {
+    console.error('Failed to toggle commitment:', err)
+    await refreshCalendarItems()
+  }
+}
+
+async function handleSnoozeCommitment(item, n, newDate, dateLabel) {
+  const token   = await getToken()
+  if (!token) return
+  const calId   = item.source.account_id
+  const eventId = item.source.external_id
+  const pad     = v => String(v).padStart(2, '0')
+  const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
+
+  const ts    = nowTimestamp()
+  const entry = { timestamp: ts, text: `!snoozed to ${newDateStr}` }
+  const newComments = [...(item.metadata?.comments ?? []), entry]
+  const newDesc = serializeEventDescription(item.metadata?.body ?? '', item.metadata?.config, newComments)
+
+  const body = { description: newDesc }
+  if (item.all_day) {
+    const endDate = new Date(newDate)
+    endDate.setDate(endDate.getDate() + 1)
+    body.start = { date: newDateStr }
+    body.end   = { date: `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}` }
+  } else {
+    const origStart = new Date(item.start)
+    const origEnd   = item.end ? new Date(item.end) : null
+    const newStart  = new Date(origStart); newStart.setDate(newStart.getDate() + n)
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    body.start = { dateTime: newStart.toISOString(), timeZone: tz }
+    if (origEnd) {
+      const newEnd = new Date(origEnd); newEnd.setDate(newEnd.getDate() + n)
+      body.end = { dateTime: newEnd.toISOString(), timeZone: tz }
+    }
+  }
+  await updateEvent(token, calId, eventId, body)
 }
 
 // ── Loading indicator ─────────────────────────────────────────────────────────
@@ -285,14 +349,21 @@ function renderCalendarPicker() {
     return
   }
 
-  panel.innerHTML = state.calendars.map(cal => `
-    <label class="cal-picker-item">
-      <input type="checkbox" data-cal-id="${cal.id}"
-             ${state.hiddenCalendars.has(cal.id) ? '' : 'checked'}>
-      <span class="cal-swatch" style="background:${cal.backgroundColor ?? '#1a73e8'}"></span>
-      <span title="${cal.summary}">${cal.summary}</span>
-    </label>
-  `).join('')
+  panel.innerHTML = state.calendars.map(cal => {
+    const isCommitment = state.commitmentCalendars.has(cal.id)
+    return `
+      <div class="cal-picker-item">
+        <label class="cal-picker-vis">
+          <input type="checkbox" data-cal-id="${escHtml(cal.id)}"
+                 ${state.hiddenCalendars.has(cal.id) ? '' : 'checked'}>
+          <span class="cal-swatch" style="background:${escHtml(cal.backgroundColor ?? '#1a73e8')}"></span>
+          <span class="cal-name" title="${escHtml(cal.summary)}">${escHtml(cal.summary)}</span>
+        </label>
+        <button class="cal-commitment-toggle${isCommitment ? ' active' : ''}"
+                data-cal-id="${escHtml(cal.id)}"
+                title="Use as commitment calendar">commitment</button>
+      </div>`
+  }).join('')
 
   panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', () => {
@@ -302,6 +373,22 @@ function renderCalendarPicker() {
       setHiddenCalendars([...state.hiddenCalendars])
       updateCalPickerBadge()
       renderItems(getVisibleItems())
+    })
+  })
+
+  panel.querySelectorAll('.cal-commitment-toggle').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation()
+      const id = btn.dataset.calId
+      if (state.commitmentCalendars.has(id)) {
+        state.commitmentCalendars.delete(id)
+        btn.classList.remove('active')
+      } else {
+        state.commitmentCalendars.add(id)
+        btn.classList.add('active')
+      }
+      setCommitmentCalendars([...state.commitmentCalendars])
+      refreshCalendarItems()
     })
   })
 }
@@ -726,7 +813,8 @@ function renderItems(items) {
       if (span.row >= visibleRows) continue
 
       const { item } = span
-      const isTask = item.item_type === 'TASK'
+      const isTask       = item.item_type === 'TASK'
+      const isCommitment = item.item_type === 'EVENT' && !!item.metadata?.task_calendar
       const isDone = item.status === 'COMPLETED'
 
       const isVirtual  = !!item.metadata?.virtual
@@ -734,7 +822,7 @@ function renderItems(items) {
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
-        isTask                      ? 'type-task'      : '',
+        (isTask || isCommitment)    ? 'type-task'      : '',
         isDone                      ? 'completed'      : '',
         isVirtual && !isOrphaned    ? 'virtual'        : '',
         isOrphaned                  ? 'orphaned'       : '',
@@ -798,7 +886,6 @@ function renderItems(items) {
             _calDragItem = null
           })
         } else if (isOrphaned) {
-          // Orphaned-driver virtual: chain broken externally, click to recreate
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
           const icon = document.createElement('span')
@@ -809,11 +896,41 @@ function renderItems(items) {
           chipEl.style.cursor = 'pointer'
           chipEl.addEventListener('click', () => handleRecreateOrphaned(item))
         } else {
-          // Normal virtual instance: show title only, no interaction
           const titleSpan = document.createElement('span')
           titleSpan.textContent = item.title
           chipEl.appendChild(titleSpan)
         }
+      } else if (isCommitment) {
+        if (isDone) chipEl.style.background = 'transparent'
+        else if (item.color) chipEl.style.background = item.color
+
+        const check = document.createElement('button')
+        check.className = `task-check${isDone ? ' done' : ''}`
+        check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+        if (isDone) check.textContent = '✓'
+        check.addEventListener('click', e => { e.stopPropagation(); handleToggleCommitment(item) })
+
+        const titleSpan = document.createElement('span')
+        titleSpan.textContent = item.title
+
+        const snoozeBtn = !isDone ? (() => {
+          const btn = document.createElement('button')
+          btn.className   = 'task-snooze'
+          btn.title       = 'Snooze'
+          btn.textContent = '⏰'
+          btn.addEventListener('click', e => {
+            e.stopPropagation()
+            openSnoozePopover(btn, item, refreshCalendarItems,
+              (n, newDate, dateLabel) => handleSnoozeCommitment(item, n, newDate, dateLabel))
+          })
+          return btn
+        })() : null
+
+        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+        chipEl.style.cursor = 'pointer'
+        chipEl.addEventListener('click', () => {
+          openEventEditorForEdit(item, calendarModalCallbacks())
+        })
       } else {
         if (item.color) chipEl.style.background = item.color
         chipEl.textContent = item.title
@@ -1289,7 +1406,8 @@ async function render() {
       fetchItems(state.weekStart, end),
       getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
       getToken().then(t => t ? loadPrefs(t).then(() => {
-        state.hiddenCalendars = new Set(getHiddenCalendars())
+        state.hiddenCalendars     = new Set(getHiddenCalendars())
+        state.commitmentCalendars = new Set(getCommitmentCalendars())
       }) : null),
     ])
     state.items = items

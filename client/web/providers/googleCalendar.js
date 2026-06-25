@@ -1,4 +1,6 @@
 import { parseEventDescription } from './parsers.js'
+import { loadPrefs, getCommitmentCalendars } from './drivePrefs.js'
+import { loadEventTaskMeta, getEventCompletedAt } from './driveEventTaskMeta.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -42,6 +44,9 @@ function normalizeEvent(event, calendar) {
 
   const { prose, config, comments } = parseEventDescription(event.description ?? '')
 
+  const isCommitment = getCommitmentCalendars().includes(calendar.id)
+  const completedAt  = isCommitment ? getEventCompletedAt(event.id) : null
+
   return {
     id: `gcal:${calendar.id}:${event.id}`,
     title: event.summary ?? '(No title)',
@@ -55,7 +60,7 @@ function normalizeEvent(event, calendar) {
     end,
     due: null,
     all_day: allDay,
-    status: EVENT_STATUS[event.status] ?? 'CONFIRMED',
+    status: completedAt ? 'COMPLETED' : (EVENT_STATUS[event.status] ?? 'CONFIRMED'),
     recurrence: event.recurrence?.[0] ?? null,
     metadata: {
       body: prose,
@@ -67,6 +72,7 @@ function normalizeEvent(event, calendar) {
       calendar_color: calendar.backgroundColor ?? null,
       recurring_event_id: event.recurringEventId ?? null,
       location: event.location ?? null,
+      task_calendar: isCommitment,
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
     editable: event.organizer?.self === true,
@@ -123,7 +129,11 @@ export async function createEvent(token, calendarId, body) {
 }
 
 export async function getEvents(token, start, end) {
-  const calendars = await getCalendars(token)
+  const [calendars] = await Promise.all([
+    getCalendars(token),
+    loadPrefs(token),           // ensures getCommitmentCalendars() returns correct data
+    loadEventTaskMeta(token),   // ensures getEventCompletedAt() returns correct data
+  ])
   const results = await Promise.allSettled(
     calendars.map(async calendar => {
       const params = new URLSearchParams({
