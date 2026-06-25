@@ -282,51 +282,57 @@ async function save() {
   const title = el('modal-title').value.trim()
   if (!title) { el('modal-title').focus(); return }
 
-  const rawLoe = el('modal-loe').value.trim()
-  const loe    = rawLoe ? normalizeLoe(rawLoe) : null
-  if (rawLoe && !loe) {
-    el('modal-loe-error').hidden = false
-    el('modal-loe').focus()
-    return
-  }
-
-  const dueStr = el('modal-due').value
-  const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
-
-  const kid           = _item?.metadata?.kid ?? generateKid()
-  const userComments  = _comments.filter(c => !c._readonly)
-  const snapshot      = buildSnapshot({ loe, comments: userComments })
-
-  const notes = serializeNotes({
-    body:      el('modal-notes').value.trim(),
-    checklist: _checklist,
-    kid,
-    snapshot,
-  })
-
-  const token = await getToken()
-  if (!token) return
-
-  // Write loe/recurrence to Drive — comments are stored in the life log Sheet only
-  updateTaskMeta(kid, { loe, recurrence: _recurrence })
-
-  // Log new user comments (added this session) to the life log Sheet
-  const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
-  for (const c of newUserComments) {
-    appendLogEntry(token, {
-      item_id:       _item?.id ?? `kid:${kid}`,
-      item_type:     'TASK',
-      title,
-      verb:          'comment',
-      action_detail: { verb: 'comment', text: c.text },
-      narrative:     c.text,
-      context:       _item?.metadata?.list_title ?? '',
-    })
-  }
-
-  const selectedListId = el('modal-list').value
+  const saveBtn = el('modal-save')
+  if (saveBtn.disabled) return
+  saveBtn.disabled = true
 
   try {
+    const rawLoe = el('modal-loe').value.trim()
+    const loe    = rawLoe ? normalizeLoe(rawLoe) : null
+    if (rawLoe && !loe) {
+      el('modal-loe-error').hidden = false
+      el('modal-loe').focus()
+      return
+    }
+
+    const dueStr = el('modal-due').value
+    const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
+
+    const kid           = _item?.metadata?.kid ?? generateKid()
+    const userComments  = _comments.filter(c => !c._readonly)
+    const snapshot      = buildSnapshot({ loe, comments: userComments })
+
+    const notes = serializeNotes({
+      body:      el('modal-notes').value.trim(),
+      checklist: _checklist,
+      kid,
+      snapshot,
+    })
+
+    const token = await getToken()
+    if (!token) return
+
+    // Write loe/recurrence to Drive — comments are stored in the life log Sheet only
+    updateTaskMeta(kid, { loe, recurrence: _recurrence })
+
+    // Log new user comments (added this session) to the life log Sheet
+    const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
+    for (const c of newUserComments) {
+      appendLogEntry(token, {
+        item_id:       _item?.id ?? `kid:${kid}`,
+        item_type:     'TASK',
+        title,
+        verb:          'comment',
+        action_detail: { verb: 'comment', text: c.text },
+        narrative:     c.text,
+        context:       _item?.metadata?.list_title ?? '',
+      })
+      // Mark as logged so a re-save within the same session doesn't duplicate
+      _originalCommentTimestamps.add(c.timestamp)
+    }
+
+    const selectedListId = el('modal-list').value
+
     if (!_item) {
       await createTask(token, selectedListId, { title, notes, due })
     } else if (selectedListId !== _listId) {
@@ -338,6 +344,7 @@ async function save() {
     _callbacks.onSaved?.()
   } catch (err) {
     console.error('Save failed:', err)
+    saveBtn.disabled = false
   }
 }
 
