@@ -31,10 +31,11 @@ const FILE_ARCHIVE = 'kairos-tasks-archive.json'
 const HISTORY_MAX  = 10
 
 // ── Current file state ────────────────────────────────────────────────────────
-let _fileId    = null
-let _meta      = null
-let _dirty     = false
-let _saveTimer = null
+let _fileId          = null
+let _meta            = null
+let _loadedFromDrive = false  // true once meta was successfully read from Drive; gates all flushes
+let _dirty           = false
+let _saveTimer       = null
 
 // ── Archive file state ────────────────────────────────────────────────────────
 let _archiveFileId    = null
@@ -56,7 +57,7 @@ export function generateKid() {
 
 export async function loadTaskMeta(token) {
   if (_meta) return _meta
-  _meta = await _loadFile(token, FILE_CURRENT, id => { _fileId = id })
+  _meta = await _loadFile(token, FILE_CURRENT, id => { _fileId = id }, () => { _loadedFromDrive = true })
   _saveToken = token
   return _meta
 }
@@ -149,7 +150,7 @@ export function archiveOrphanedMeta(liveKids) {
 
 // ── Internal: shared file helpers ─────────────────────────────────────────────
 
-async function _loadFile(token, fileName, onFileId) {
+async function _loadFile(token, fileName, onFileId, onSuccess) {
   try {
     const q         = encodeURIComponent(`name='${fileName}'`)
     const searchRes = await fetch(
@@ -164,7 +165,6 @@ async function _loadFile(token, fileName, onFileId) {
     const { files } = await searchRes.json()
 
     if (files?.length > 0) {
-      onFileId(files[0].id)
       const dataRes = await fetch(
         `${DRIVE_BASE}/files/${files[0].id}?alt=media`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -172,14 +172,21 @@ async function _loadFile(token, fileName, onFileId) {
       if (!dataRes.ok) throw new Error(`Drive read failed: ${dataRes.status}`)
       const data = await dataRes.json()
       if (!data.tasks) data.tasks = {}
+      // Set file ID only after a successful read — prevents a stale ID from
+      // being used to overwrite real data if the read later fails.
+      onFileId(files[0].id)
+      onSuccess?.()
       return { version: 1, tasks: {}, ...data }
     }
 
+    // No file yet — safe to create on first write.
+    onSuccess?.()
     return { version: 1, tasks: {} }
   } catch (err) {
     if (err.message !== 'drive_scope_missing') {
       console.warn(`Drive load failed (${fileName}):`, err.message)
     }
+    // onSuccess NOT called — _loadedFromDrive stays false, blocking all flushes.
     return { version: 1, tasks: {} }
   }
 }
@@ -229,6 +236,10 @@ function _scheduleArchiveSave() {
 
 async function _flush() {
   if (!_dirty || !_meta || !_saveToken) return
+  if (!_loadedFromDrive) {
+    console.warn('Drive task meta: skipping flush — initial load did not succeed, refusing to overwrite Drive data')
+    return
+  }
   _dirty     = false
   _saveTimer = null
   try {
