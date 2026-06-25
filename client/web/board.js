@@ -79,12 +79,13 @@ async function executeSnooze(daysOverride) {
   }
 
   // Default: task snooze
-  const newDueIso = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}T00:00:00.000Z`
+  const newDateStr = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}`
+  const newDueIso  = `${newDateStr}T00:00:00.000Z`
 
   const kid         = item.metadata?.kid ?? generateKid()
   const newComments = [...(item.metadata.comments ?? []), {
     timestamp: nowTimestamp(),
-    text: `Snoozed — follow up on ${dateLabel}`,
+    text: `!snoozed to ${newDateStr}`,
   }]
   updateTaskMeta(kid, { loe: item.metadata.loe ?? null, comments: newComments })
 

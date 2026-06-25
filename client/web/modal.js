@@ -1,5 +1,5 @@
 import { getToken } from './auth.js'
-import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
+import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 
@@ -277,12 +277,14 @@ async function save() {
   const dueStr = el('modal-due').value
   const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-  const kid = _item?.metadata?.kid ?? generateKid()
+  const kid      = _item?.metadata?.kid ?? generateKid()
+  const snapshot = buildSnapshot({ loe, comments: _comments })
 
   const notes = serializeNotes({
     body:      el('modal-notes').value.trim(),
     checklist: _checklist,
     kid,
+    snapshot,
   })
 
   const token = await getToken()

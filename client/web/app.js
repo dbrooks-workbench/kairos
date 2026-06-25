@@ -4,8 +4,7 @@ import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
-import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
-import { serializeEventDescription, nowTimestamp } from './providers/parsers.js'
+import { setEventCompleted, setEventUncompleted, addEventSnooze } from './providers/driveEventTaskMeta.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -13,7 +12,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.16.0'
+const VERSION   = '0.16.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -130,21 +129,11 @@ async function handleToggleCommitment(item) {
   const token   = await getToken()
   if (!token) return
   const isDone  = item.status === 'COMPLETED'
-  const calId   = item.source.account_id
   const eventId = item.source.external_id
 
-  const ts    = nowTimestamp()
-  const entry = { timestamp: ts, text: isDone ? '!uncompleted' : '!completed' }
-  const newComments = [...(item.metadata?.comments ?? []), entry]
-  const newDesc = serializeEventDescription(item.metadata?.body ?? '', item.metadata?.config, newComments)
-
   try {
-    if (isDone) {
-      await setEventUncompleted(token, eventId)
-    } else {
-      await setEventCompleted(token, eventId)
-    }
-    await updateEvent(token, calId, eventId, { description: newDesc })
+    if (isDone) await setEventUncompleted(token, eventId)
+    else        await setEventCompleted(token, eventId)
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'CONFIRMED' : 'COMPLETED'
     renderItems(getVisibleItems())
@@ -162,12 +151,9 @@ async function handleSnoozeCommitment(item, n, newDate, dateLabel) {
   const pad     = v => String(v).padStart(2, '0')
   const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
 
-  const ts    = nowTimestamp()
-  const entry = { timestamp: ts, text: `!snoozed to ${newDateStr}` }
-  const newComments = [...(item.metadata?.comments ?? []), entry]
-  const newDesc = serializeEventDescription(item.metadata?.body ?? '', item.metadata?.config, newComments)
+  await addEventSnooze(token, eventId, newDateStr)
 
-  const body = { description: newDesc }
+  const body = {}
   if (item.all_day) {
     const endDate = new Date(newDate)
     endDate.setDate(endDate.getDate() + 1)

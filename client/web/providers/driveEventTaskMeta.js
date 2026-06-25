@@ -1,7 +1,12 @@
-// Commitment completion state stored in Google Drive appDataFolder.
-// Shape: { version: 1, events: { "[eventId]": { "completedAt": "ISO | null" } } }
-// completedAt non-null = completed (encodes both state and timestamp in one field).
-// Event IDs are stable for the instance lifetime — no kid anchor needed.
+// Commitment completion state and log/comments stored in Google Drive appDataFolder.
+// Shape: {
+//   version: 1,
+//   events: {
+//     "[eventId]": { completedAt: "ISO | null", comments: [{timestamp, text}] }
+//   }
+// }
+// completedAt non-null = completed. Action entries use !verb text convention.
+// Same {timestamp, text} schema as task comments in kairos-tasks.json.
 
 const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
@@ -63,23 +68,45 @@ async function _doLoad(token) {
   return _meta
 }
 
+function _ensureRecord(eventId) {
+  if (!_meta.events) _meta.events = {}
+  if (!_meta.events[eventId]) _meta.events[eventId] = { completedAt: null, comments: [] }
+  if (!_meta.events[eventId].comments) _meta.events[eventId].comments = []
+  return _meta.events[eventId]
+}
+
 export function getEventCompletedAt(eventId) {
   return _meta?.events?.[eventId]?.completedAt ?? null
 }
 
+export function getEventComments(eventId) {
+  return _meta?.events?.[eventId]?.comments ?? []
+}
+
 export async function setEventCompleted(token, eventId) {
   if (!_meta) return null
-  const ts = new Date().toISOString()
-  if (!_meta.events) _meta.events = {}
-  _meta.events[eventId] = { completedAt: ts }
+  const ts  = new Date().toISOString()
+  const rec = _ensureRecord(eventId)
+  rec.completedAt = ts
+  rec.comments.push({ timestamp: ts, text: '!completed' })
   await _flush(token ?? _saveToken)
   return ts
 }
 
 export async function setEventUncompleted(token, eventId) {
   if (!_meta) return
-  if (!_meta.events) _meta.events = {}
-  _meta.events[eventId] = { completedAt: null }
+  const ts  = new Date().toISOString()
+  const rec = _ensureRecord(eventId)
+  rec.completedAt = null
+  rec.comments.push({ timestamp: ts, text: '!uncompleted' })
+  await _flush(token ?? _saveToken)
+}
+
+export async function addEventSnooze(token, eventId, newDateStr) {
+  if (!_meta) return
+  const ts  = new Date().toISOString()
+  const rec = _ensureRecord(eventId)
+  rec.comments.push({ timestamp: ts, text: `!snoozed to ${newDateStr}` })
   await _flush(token ?? _saveToken)
 }
 

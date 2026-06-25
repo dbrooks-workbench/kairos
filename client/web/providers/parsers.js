@@ -234,7 +234,11 @@ const KNOWN_VERBS = new Set(['spawned', 'cancelled', 'deferred', 'completed', 'u
 export function parseTaskNotes(notes) {
   if (!notes) return { body: '', loe: null, recurrence: null, checklist: [], comments: [], kid: null }
 
-  const lines     = notes.split('\n')
+  // Strip write-only snapshot block — Kairos never reads it back
+  const snapIdx = notes.indexOf('\n--- Kairos ---')
+  const stripped = snapIdx >= 0 ? notes.slice(0, snapIdx) : notes
+
+  const lines     = stripped.split('\n')
   const bodyLines = []
   let loe        = null
   let recurrence = null
@@ -283,14 +287,32 @@ export function parseTaskNotes(notes) {
 
 // Serialization order: prose → checklist → [kid:xxx]
 // LOE, comments, and recurrence are stored in Drive (driveTaskMeta.js), not in notes.
-export function serializeNotes({ body, checklist, kid }) {
+export function serializeNotes({ body, checklist, kid, snapshot }) {
   const parts = []
   if (body?.trim()) parts.push(body.trim())
   if (checklist?.length)
     parts.push(checklist.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'))
   const body_out = parts.join('\n\n')
-  if (kid) return body_out ? `${body_out}\n\n[kid:${kid}]` : `[kid:${kid}]`
-  return body_out
+  let result = kid ? (body_out ? `${body_out}\n\n[kid:${kid}]` : `[kid:${kid}]`) : body_out
+  if (snapshot) result = result ? `${result}\n\n${snapshot}` : snapshot
+  return result
+}
+
+// Build the write-only --- Kairos --- snapshot appended to notes/descriptions.
+// Standard clients see this; Kairos never reads it back (stripped in parseTaskNotes).
+export function buildSnapshot({ completedAt, loe, comments }) {
+  const parts = []
+  if (completedAt) {
+    const d = new Date(completedAt)
+    parts.push(`Completed ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+  } else if (loe) {
+    parts.push(`LOE: ${loe}`)
+  }
+  if (comments?.length) {
+    parts.push(`${comments.length} comment${comments.length === 1 ? '' : 's'}`)
+  }
+  parts.push(`Updated ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+  return `--- Kairos ---\n${parts.join('  ·  ')}`
 }
 
 // ── LOE helpers ───────────────────────────────────────────────────────────────

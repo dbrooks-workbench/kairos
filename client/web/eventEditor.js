@@ -1,7 +1,8 @@
 import { getToken } from './auth.js'
 import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
-import { serializeNotes, serializeEventDescription, nowTimestamp } from './providers/parsers.js'
-import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
+import { serializeNotes, buildSnapshot } from './providers/parsers.js'
+import { setEventCompleted, setEventUncompleted, addEventSnooze, getEventComments, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
+import { getCommitmentCalendars } from './providers/drivePrefs.js'
 import { openSnoozePopover } from './board.js'
 
 let _callbacks     = {}
@@ -498,22 +499,12 @@ async function handleCommitmentToggle() {
   const token   = await getToken()
   if (!token) return
   const isDone  = _editItem.status === 'COMPLETED'
-  const calId   = _editItem.source.account_id
   const eventId = _editItem.source.external_id
-
-  const ts      = nowTimestamp()
-  const entry   = { timestamp: ts, text: isDone ? '!uncompleted' : '!completed' }
-  const newComments = [...(_editItem.metadata?.comments ?? []), entry]
-  const newDesc = serializeEventDescription(_editItem.metadata?.body ?? '', _editItem.metadata?.config, newComments)
 
   el('event-modal-complete').disabled = true
   try {
-    if (isDone) {
-      await setEventUncompleted(token, eventId)
-    } else {
-      await setEventCompleted(token, eventId)
-    }
-    await updateEvent(token, calId, eventId, { description: newDesc })
+    if (isDone) await setEventUncompleted(token, eventId)
+    else        await setEventCompleted(token, eventId)
     close()
     _callbacks.onSaved?.()
   } catch (err) {
@@ -531,15 +522,12 @@ async function handleCommitmentSnooze(n, newDate, dateLabel) {
   const pad     = v => String(v).padStart(2, '0')
   const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
 
-  const ts    = nowTimestamp()
-  const entry = { timestamp: ts, text: `!snoozed to ${newDateStr}` }
-  const newComments = [...(_editItem.metadata?.comments ?? []), entry]
-  const newDesc = serializeEventDescription(_editItem.metadata?.body ?? '', _editItem.metadata?.config, newComments)
+  await addEventSnooze(token, eventId, newDateStr)
 
-  const body = { description: newDesc }
+  const body = {}
   if (_editItem.all_day) {
     const endDate = new Date(newDate)
-    endDate.setDate(endDate.getDate() + 1)  // Google all-day end is exclusive
+    endDate.setDate(endDate.getDate() + 1)
     body.start = { date: newDateStr }
     body.end   = { date: `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}` }
   } else {
@@ -553,7 +541,6 @@ async function handleCommitmentSnooze(n, newDate, dateLabel) {
       body.end = { dateTime: newEnd.toISOString(), timeZone: tz }
     }
   }
-
   await updateEvent(token, calId, eventId, body)
 }
 
@@ -576,24 +563,10 @@ async function save() {
   const prose     = el('event-modal-desc').value.trim()
   const tz        = Intl.DateTimeFormat().resolvedOptions().timeZone
 
-  // Build spawn config if any entries are defined
-  const spawnArr = _spawns
-    .filter(s => s.key && s.title)
-    .map(s => {
-      const e = { key: s.key, title: s.title, trigger: `-${s.triggerDays}d`, due: `-${s.dueDays}d` }
-      if (s.loe)              e.loe = s.loe
-      if (s.checklist.length) e.checklist = s.checklist
-      return e
-    })
-  const config = spawnArr.length ? { spawn: spawnArr } : null
-
-  // Serialize description: prose → JSON config block → (empty log at create time)
-  const description = serializeEventDescription(prose, config, []) || undefined
-
   const body = {
     summary: title,
-    ...(location    && { location }),
-    ...(description && { description }),
+    ...(location && { location }),
+    ...(prose    && { description: prose }),
   }
 
   if (allDay) {
@@ -622,12 +595,6 @@ async function save() {
     body.recurrence = []
   }
 
-  // In edit mode, preserve existing log comments — only update prose + config
-  if (_editItem) {
-    const existingComments = _editItem.metadata?.comments ?? []
-    body.description = serializeEventDescription(prose, config, existingComments) || undefined
-  }
-
   const token = await getToken()
   if (!token) return
 
@@ -648,11 +615,24 @@ async function save() {
 
   // Non-recurring edit or new event — save immediately
   try {
+    let savedId = _editItem?.source.external_id ?? null
     if (_editItem) {
       await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
     } else {
-      await createEvent(token, calendarId, body)
+      const created = await createEvent(token, calendarId, body)
+      savedId = created.id
     }
+
+    // Write snapshot to description so standard clients see current state
+    const isCommitment = getCommitmentCalendars().includes(calendarId)
+    if (savedId && isCommitment) {
+      const comments    = getEventComments(savedId)
+      const completedAt = getEventCompletedAt(savedId)
+      const snapshot    = buildSnapshot({ completedAt, comments })
+      const snapDesc    = prose ? `${prose.trim()}\n\n${snapshot}` : snapshot
+      await updateEvent(token, calendarId, savedId, { description: snapDesc }).catch(() => {})
+    }
+
     close()
     _callbacks.onSaved?.()
   } catch (err) {
@@ -720,10 +700,23 @@ async function executeWithScope(scope) {
   const saveBtn = el('event-modal-save')
   const token   = await getToken()
   if (!token || !body) { saveBtn.disabled = false; return }
+  const calId   = _editItem.source.account_id
+  const eventId = _editItem.source.external_id
   try {
-    if (scope === 'all')           await saveAllEvents(token, body)
+    if (scope === 'all')            await saveAllEvents(token, body)
     else if (scope === 'following') await saveThisAndFollowing(token, body)
-    else await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
+    else                            await updateEvent(token, calId, eventId, body)
+
+    // Snapshot for commitment events
+    if (getCommitmentCalendars().includes(calId)) {
+      const comments    = getEventComments(eventId)
+      const completedAt = getEventCompletedAt(eventId)
+      const prose       = el('event-modal-desc').value.trim()
+      const snapshot    = buildSnapshot({ completedAt, comments })
+      const snapDesc    = prose ? `${prose}\n\n${snapshot}` : snapshot
+      await updateEvent(token, calId, eventId, { description: snapDesc }).catch(() => {})
+    }
+
     close()
     _callbacks.onSaved?.()
   } catch (err) {

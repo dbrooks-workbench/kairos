@@ -1,6 +1,6 @@
 import { parseEventDescription } from './parsers.js'
 import { loadPrefs, getCommitmentCalendars } from './drivePrefs.js'
-import { loadEventTaskMeta, getEventCompletedAt } from './driveEventTaskMeta.js'
+import { loadEventTaskMeta, getEventCompletedAt, getEventComments } from './driveEventTaskMeta.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -44,8 +44,10 @@ function normalizeEvent(event, calendar) {
 
   const { prose, config, comments } = parseEventDescription(event.description ?? '')
 
-  const isCommitment = getCommitmentCalendars().includes(calendar.id)
-  const completedAt  = isCommitment ? getEventCompletedAt(event.id) : null
+  const isCommitment  = getCommitmentCalendars().includes(calendar.id)
+  const completedAt   = isCommitment ? getEventCompletedAt(event.id) : null
+  // Commitments read comments from Drive; standard events read from description (backward compat)
+  const driveComments = isCommitment ? getEventComments(event.id) : null
 
   return {
     id: `gcal:${calendar.id}:${event.id}`,
@@ -65,7 +67,7 @@ function normalizeEvent(event, calendar) {
     metadata: {
       body: prose,
       config,
-      comments,
+      comments: driveComments ?? comments,
       linked_task_ids: config?.tasks ?? [],
       spawn_prototypes: config?.spawn ?? [],
       calendar_name: calendar.summary,
