@@ -4,6 +4,7 @@ import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNe
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
+import { appendLogEntry } from './providers/lifeLog.js'
 
 const DONE_COL_ID = '__done__'
 
@@ -102,6 +103,18 @@ async function executeSnooze(daysOverride) {
       await patchTask(token, item.source.account_id, item.source.external_id, {
         due: newDueIso,
         notes,
+      })
+      const fromStr = item.due
+        ? `${item.due.getFullYear()}-${pad(item.due.getMonth()+1)}-${pad(item.due.getDate())}`
+        : null
+      appendLogEntry(token, {
+        item_id:       item.id,
+        item_type:     'TASK',
+        title:         item.title,
+        verb:          'snoozed',
+        action_detail: { verb: 'snoozed', to: newDateStr, ...(fromStr && { from: fromStr }) },
+        narrative:     `Snoozed "${item.title}" to ${dateLabel}`,
+        context:       item.metadata?.list_title ?? '',
       })
     }
   } catch (err) {

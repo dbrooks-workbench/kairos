@@ -22,7 +22,7 @@
 const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 const FILE_NAME   = 'kairos-prefs.json'
-const DEFAULTS    = () => ({ version: 1, hiddenCalendars: [], commitmentCalendars: [], boardColumnSort: {}, taskListOrder: [] })
+const DEFAULTS    = () => ({ version: 1, hiddenCalendars: [], commitmentCalendars: [], boardColumnSort: {}, taskListOrder: [], lifeLogSheetId: null })
 
 let _fileId      = null
 let _prefs       = null
@@ -101,6 +101,17 @@ export function setHiddenCalendars(cals) {
   _prefs.hiddenCalendars = [...cals]
   _dirty = true
   _scheduleSave()
+}
+
+export function getLifeLogSheetId() {
+  return _prefs?.lifeLogSheetId ?? null
+}
+
+export function setLifeLogSheetId(id) {
+  if (!_prefs) return
+  _prefs.lifeLogSheetId = id
+  _dirty = true
+  _flushNow()
 }
 
 export function getCommitmentCalendars() {

@@ -3,6 +3,7 @@ import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/goo
 import { serializeNotes, buildSnapshot } from './providers/parsers.js'
 import { setEventCompleted, setEventUncompleted, addEventSnooze, getEventComments, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
 import { getCommitmentCalendars } from './providers/drivePrefs.js'
+import { appendLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
 
 let _callbacks     = {}
@@ -501,10 +502,20 @@ async function handleCommitmentToggle() {
   const isDone  = _editItem.status === 'COMPLETED'
   const eventId = _editItem.source.external_id
 
+  const verb = isDone ? 'uncompleted' : 'completed'
   el('event-modal-complete').disabled = true
   try {
     if (isDone) await setEventUncompleted(token, eventId)
     else        await setEventCompleted(token, eventId)
+    appendLogEntry(token, {
+      item_id:       _editItem.id,
+      item_type:     'EVENT',
+      title:         _editItem.title,
+      verb,
+      action_detail: { verb },
+      narrative:     isDone ? `Marked "${_editItem.title}" incomplete` : `Completed "${_editItem.title}"`,
+      context:       _editItem.metadata?.calendar_name ?? '',
+    })
     close()
     _callbacks.onSaved?.()
   } catch (err) {

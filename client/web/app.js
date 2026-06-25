@@ -5,6 +5,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
 import { setEventCompleted, setEventUncompleted, addEventSnooze } from './providers/driveEventTaskMeta.js'
+import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -12,7 +13,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.16.1'
+const VERSION   = '0.16.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -108,6 +109,7 @@ async function handleToggleTask(item) {
   const token = await getToken()
   if (!token) return
   const isDone = item.status === 'COMPLETED'
+  const verb   = isDone ? 'uncompleted' : 'completed'
   try {
     if (isDone) {
       await uncompleteTask(token, item.source.account_id, item.source.external_id)
@@ -120,6 +122,15 @@ async function handleToggleTask(item) {
       if (target) target.status = 'COMPLETED'
     }
     renderItems(getVisibleItems())
+    appendLogEntry(token, {
+      item_id:       item.id,
+      item_type:     'TASK',
+      title:         item.title,
+      verb,
+      action_detail: { verb },
+      narrative:     isDone ? `Marked "${item.title}" incomplete` : `Completed "${item.title}"`,
+      context:       item.metadata?.list_title ?? '',
+    })
   } catch (err) {
     console.error('Failed to toggle task:', err)
   }
@@ -129,6 +140,7 @@ async function handleToggleCommitment(item) {
   const token   = await getToken()
   if (!token) return
   const isDone  = item.status === 'COMPLETED'
+  const verb    = isDone ? 'uncompleted' : 'completed'
   const eventId = item.source.external_id
 
   try {
@@ -137,6 +149,15 @@ async function handleToggleCommitment(item) {
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'CONFIRMED' : 'COMPLETED'
     renderItems(getVisibleItems())
+    appendLogEntry(token, {
+      item_id:       item.id,
+      item_type:     'EVENT',
+      title:         item.title,
+      verb,
+      action_detail: { verb },
+      narrative:     isDone ? `Marked "${item.title}" incomplete` : `Completed "${item.title}"`,
+      context:       item.metadata?.calendar_name ?? '',
+    })
   } catch (err) {
     console.error('Failed to toggle commitment:', err)
     await refreshCalendarItems()
@@ -152,6 +173,20 @@ async function handleSnoozeCommitment(item, n, newDate, dateLabel) {
   const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
 
   await addEventSnooze(token, eventId, newDateStr)
+
+  const pad2 = v => String(v).padStart(2, '0')
+  const fromStr = item.start
+    ? `${item.start.getFullYear()}-${pad2(item.start.getMonth()+1)}-${pad2(item.start.getDate())}`
+    : null
+  appendLogEntry(token, {
+    item_id:       item.id,
+    item_type:     'EVENT',
+    title:         item.title,
+    verb:          'snoozed',
+    action_detail: { verb: 'snoozed', to: newDateStr, ...(fromStr && { from: fromStr }) },
+    narrative:     `Snoozed "${item.title}" to ${dateLabel}`,
+    context:       item.metadata?.calendar_name ?? '',
+  })
 
   const body = {}
   if (item.all_day) {
