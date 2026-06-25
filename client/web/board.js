@@ -1,6 +1,6 @@
 import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
 import { getToken } from './auth.js'
-import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, spawnNextRecurrence, renameTaskList, deleteTaskList } from './providers/googleTasks.js'
+import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, renameTaskList, deleteTaskList } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
 import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
@@ -83,17 +83,12 @@ async function executeSnooze(daysOverride) {
   const newDateStr = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}`
   const newDueIso  = `${newDateStr}T00:00:00.000Z`
 
-  const kid         = item.metadata?.kid ?? generateKid()
-  const newComments = [...(item.metadata.comments ?? []), {
-    timestamp: nowTimestamp(),
-    text: `!snoozed to ${newDateStr}`,
-  }]
-  updateTaskMeta(kid, { loe: item.metadata.loe ?? null, comments: newComments })
+  const kid = item.metadata?.kid ?? generateKid()
+  updateTaskMeta(kid, { loe: item.metadata.loe ?? null })
 
   const notes = serializeNotes({
-    body:       item.metadata.body       ?? '',
-    recurrence: item.metadata.recurrence ?? null,
-    checklist:  item.metadata.checklist  ?? [],
+    body:      item.metadata.body      ?? '',
+    checklist: item.metadata.checklist ?? [],
     kid,
   })
 
@@ -487,14 +482,6 @@ function buildCard(item) {
   const iconGroup = document.createElement('div')
   iconGroup.className = 'card-icon-group'
 
-  if (item.metadata?.recurrence && !isDone) {
-    const recurIcon = document.createElement('span')
-    recurIcon.className   = 'card-recur-icon'
-    recurIcon.title       = 'Recurring task'
-    recurIcon.textContent = '↻'
-    iconGroup.appendChild(recurIcon)
-  }
-
   if (item.due && !isDone) {
     const snoozeBtn = document.createElement('button')
     snoozeBtn.className   = 'card-snooze'
@@ -599,8 +586,6 @@ async function handleDrop(evt) {
     if (!token) { _callbacks.onRefresh?.(); return }
 
     if (toColId === DONE_COL_ID) {
-      const item = _boardItems.find(i => i.source.external_id === extId && i.source.account_id === listId)
-      if (item?.metadata?.recurrence) await spawnNextRecurrence(token, item, listId)
       await completeTask(token, listId, extId)
     } else if (fromColId === DONE_COL_ID) {
       await uncompleteTask(token, listId, extId)

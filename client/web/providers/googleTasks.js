@@ -1,5 +1,4 @@
-import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
-import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
+import { parseTaskNotes, serializeNotes } from './parsers.js'
 import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid, archiveOrphanedMeta } from './driveTaskMeta.js'
 import { loadPrefs } from './drivePrefs.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
@@ -36,17 +35,7 @@ function normalizeTask(task, list) {
   const parsed = parseTaskNotes(task.notes ?? '')
   const kid    = parsed.kid
 
-  // Drive meta is authoritative for loe/recurrence when a record exists.
-  // Fall back to notes-embedded values for tasks not yet saved through the new path.
-  let loe, recurrence
-  if (kid && hasTaskRecord(kid)) {
-    const meta = getTaskMeta(kid)
-    loe        = meta.loe
-    recurrence = meta.recurrence
-  } else {
-    loe        = parsed.loe
-    recurrence = parsed.recurrence   // backward compat: still in notes for unmigrated tasks
-  }
+  const loe = kid && hasTaskRecord(kid) ? getTaskMeta(kid).loe : parsed.loe
 
   // Comments sourced exclusively from the life log Sheet (single source of truth).
   const itemId   = `gtasks:${list.id}:${task.id}`
@@ -56,8 +45,7 @@ function normalizeTask(task, list) {
     _readonly: e.verb !== 'comment',
   }))
 
-  // Push a history snapshot for any task that has a kid anchor in notes.
-  if (kid) syncTaskSnapshot(kid, task, { loe, recurrence })
+  if (kid) syncTaskSnapshot(kid, task, { loe })
 
   return {
     id: `gtasks:${list.id}:${task.id}`,
@@ -74,7 +62,7 @@ function normalizeTask(task, list) {
     all_day: true,
     status: task.status === 'completed' ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
-    metadata: { body: parsed.body, loe, recurrence, checklist: parsed.checklist, comments, list_title: list.title, kid },
+    metadata: { body: parsed.body, loe, checklist: parsed.checklist, comments, list_title: list.title, kid },
     color: null,
     editable: true,
   }
@@ -222,48 +210,9 @@ export async function getAllTasks(token, completedDays = 30) {
   return { lists, tasks }
 }
 
-// Recreate a real Google Task for an orphaned-driver virtual (series whose chain
-// was broken externally and whose real tasks have been GC'd by Google).
-export async function recreateOrphanedTask(token, item) {
-  const due = item.due
-  if (!due) return
-  const p   = v => String(v).padStart(2, '0')
-  const kid = generateKid()
-  const notes = serializeNotes({ body: '', checklist: [], kid })
-  await createTask(token, item.source.account_id, {
-    title: item.title,
-    notes,
-    due:   `${due.getFullYear()}-${p(due.getMonth()+1)}-${p(due.getDate())}T00:00:00.000Z`,
-  })
-  updateTaskMeta(kid, { loe: null, comments: [], recurrence: item.metadata.recurrence ?? null })
-}
-
-export async function spawnNextRecurrence(token, item, listId) {
-  const rrule = item.metadata?.recurrence
-  if (!rrule) return
-  const nextDue = nextOccurrenceAfter(rrule, item.due ?? new Date())
-  if (!nextDue) return  // UNTIL reached — series is done
-
-  const p   = v => String(v).padStart(2, '0')
-  const kid = generateKid()
-  const notes = serializeNotes({
-    body:      item.metadata?.body ?? '',
-    checklist: (item.metadata?.checklist ?? []).map(c => ({ ...c, checked: false })),
-    kid,
-  })
-  await createTask(token, listId, {
-    title: item.title,
-    notes,
-    due:   `${nextDue.getFullYear()}-${p(nextDue.getMonth()+1)}-${p(nextDue.getDate())}T00:00:00.000Z`,
-  })
-
-  // Write recurrence and inherited LOE to Drive meta for the spawned task
-  updateTaskMeta(kid, { loe: item.metadata?.loe ?? null, comments: [], recurrence: rrule })
-}
-
 export async function getTasks(token, start, end) {
   await loadPrefs(token)   // must resolve before loadLifeLog reads getLifeLogSheetId()
-  const [lists] = await Promise.all([getTaskLists(token), loadRegistry(token), loadTaskMeta(token), loadLifeLog(token)])
+  const [lists] = await Promise.all([getTaskLists(token), loadTaskMeta(token), loadLifeLog(token)])
 
   const results = await Promise.allSettled(
     lists.map(async list => {
@@ -275,97 +224,8 @@ export async function getTasks(token, start, end) {
         dueMin: start.toISOString(),
         dueMax: end.toISOString(),
       })
-
-      // completedMin window for fetching recently-completed tasks as series drivers.
-      // Needed so tasks completed outside Kairos (no spawn) still generate virtuals.
-      const completedMin = new Date(Date.now() - 30 * 86_400_000).toISOString()
-
-      const [windowRaw, activeRaw, recentDoneRaw] = await Promise.all([
-        paginate(token, `${BASE}/lists/${enc}/tasks?${params}`),
-        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=false&showHidden=false`),
-        paginate(token, `${BASE}/lists/${enc}/tasks?maxResults=100&showCompleted=true&showHidden=true&completedMin=${encodeURIComponent(completedMin)}`),
-      ])
-
-      const windowItems = windowRaw.map(t => normalizeTask(t, list))
-
-      // Outer active recurring tasks (due outside the window)
-      const windowIds = new Set(windowItems.map(i => i.source.external_id))
-      const outerRecurring = activeRaw
-        .filter(t => !windowIds.has(t.id))
-        .map(t => normalizeTask(t, list))
-        .filter(i => i.metadata?.recurrence)
-
-      // Recently-completed recurring tasks that fall outside the window.
-      // When a task is completed via Google Tasks directly (bypassing Kairos),
-      // no successor is spawned. Including these here lets them drive virtual
-      // expansion so the series stays visible. seriesLatest de-dup ensures that
-      // if a real successor was spawned (higher due date), it wins instead.
-      const outerDoneRecurring = recentDoneRaw
-        .filter(t => !windowIds.has(t.id))
-        .map(t => normalizeTask(t, list))
-        .filter(i => i.metadata?.recurrence && i.status === 'COMPLETED')
-
-      // Build virtual instances from ALL recurring tasks (active + completed).
-      // De-duplicate by series: group by (title + rrule) and only expand from the
-      // LATEST task in each series. This prevents cascading duplicates when Google
-      // GCs old completed instances while newer spawned ones are still alive.
-      const allRecurring = [
-        ...windowItems.filter(i => i.metadata?.recurrence),
-        ...outerRecurring,
-        ...outerDoneRecurring,
-      ]
-
-      // Refresh the Drive registry with every live recurring task we can see.
-      for (const item of allRecurring) {
-        if (item.due) upsertSeries(token, item.title, item.metadata.recurrence, list.id, item.due)
-      }
-
-      // Add registry entries for series with no live task driver. These are
-      // series whose real tasks have been GC'd by Google (>30 days after completion
-      // without a Kairos-spawned successor). The registry anchor keeps the series
-      // visible as virtual instances indefinitely.
-      const liveSeriesKeys = new Set(allRecurring.map(i => `${i.title}::${i.metadata.recurrence}`))
-      for (const s of orphanedDrivers(liveSeriesKeys, list.id)) {
-        allRecurring.push({
-          id:         `registry:${list.id}:${s.title}`,
-          title:      s.title,
-          item_type:  'TASK',
-          source:     { provider: 'google-tasks', account_id: list.id, external_id: null },
-          due:        new Date(s.lastDue + 'T00:00:00'),
-          start:      new Date(s.lastDue + 'T00:00:00'),
-          end:        null,
-          all_day:    true,
-          status:     'NEEDS_ACTION',
-          recurrence: null,
-          metadata:   { recurrence: s.rrule, orphaned: true, body: '', loe: null, checklist: [], comments: [], list_title: list.title },
-          color:      null,
-          editable:   false,
-        })
-      }
-
-      const seriesLatest = new Map()  // `${title}::${rrule}` → item with highest due
-      for (const item of allRecurring) {
-        const key = `${item.title}::${item.metadata.recurrence}`
-        const cur = seriesLatest.get(key)
-        if (!cur || (item.due && (!cur.due || item.due > cur.due))) seriesLatest.set(key, item)
-      }
-
-      const virtual = [...seriesLatest.values()].flatMap(item => expandRruleInWindow(item, start, end))
-
-      // Suppress virtuals only where a real task from the SAME series (title + rrule)
-      // already occupies that date. Different recurring series may share dates freely.
-      const realSeriesDateKeys = new Set(
-        windowItems
-          .filter(i => i.due && i.metadata?.recurrence)
-          .map(i => `${i.title}::${i.metadata.recurrence}::${i.due.toLocaleDateString('en-CA')}`)
-      )
-      const dedupedVirtual = virtual.filter(v => {
-        const dk = v.due?.toLocaleDateString('en-CA')
-        if (!dk) return false
-        return !realSeriesDateKeys.has(`${v.title}::${v.metadata.recurrence}::${dk}`)
-      })
-
-      return [...windowItems, ...dedupedVirtual]
+      const raw = await paginate(token, `${BASE}/lists/${enc}/tasks?${params}`)
+      return raw.map(t => normalizeTask(t, list))
     })
   )
 

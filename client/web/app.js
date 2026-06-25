@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
 import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
 import { appendLogEntry } from './providers/lifeLog.js'
@@ -10,10 +10,9 @@ import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './boar
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
-import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.17.0'
+const VERSION   = '0.17.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -94,17 +93,6 @@ async function fetchItems(start, end) {
   return [...events, ...tasks]
 }
 
-async function handleRecreateOrphaned(item) {
-  const token = await getToken()
-  if (!token) return
-  try {
-    await recreateOrphanedTask(token, item)
-    await refreshCalendarItems()
-  } catch (err) {
-    console.error('Failed to recreate orphaned task:', err)
-  }
-}
-
 async function handleToggleTask(item) {
   const token = await getToken()
   if (!token) return
@@ -116,7 +104,6 @@ async function handleToggleTask(item) {
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'NEEDS_ACTION'
     } else {
-      if (item.metadata?.recurrence) await spawnNextRecurrence(token, item, item.source.account_id)
       await completeTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'COMPLETED'
@@ -836,17 +823,13 @@ function renderItems(items) {
       const isCommitment = item.item_type === 'EVENT' && !!item.metadata?.task_calendar
       const isDone = item.status === 'COMPLETED'
 
-      const isVirtual  = !!item.metadata?.virtual
-      const isOrphaned = isVirtual && !!item.metadata?.orphaned
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
-        (isTask || isCommitment)    ? 'type-task'      : '',
-        isDone                      ? 'completed'      : '',
-        isVirtual && !isOrphaned    ? 'virtual'        : '',
-        isOrphaned                  ? 'orphaned'       : '',
-        span.startsEarly            ? 'continues-left' : '',
-        span.endsLate               ? 'continues-right': '',
+        (isTask || isCommitment) ? 'type-task'       : '',
+        isDone                   ? 'completed'       : '',
+        span.startsEarly         ? 'continues-left'  : '',
+        span.endsLate            ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
       chipEl.title = item.title
 
@@ -858,67 +841,44 @@ function renderItems(items) {
         if (isDone) chipEl.style.background = 'transparent'
         else if (item.color) chipEl.style.background = item.color
 
-        if (!isVirtual) {
-          const check = document.createElement('button')
-          check.className = `task-check${isDone ? ' done' : ''}`
-          check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
-          if (isDone) check.textContent = '✓'
-          check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
+        const check = document.createElement('button')
+        check.className = `task-check${isDone ? ' done' : ''}`
+        check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+        if (isDone) check.textContent = '✓'
+        check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
 
-          const titleSpan = document.createElement('span')
-          titleSpan.textContent = item.title
+        const titleSpan = document.createElement('span')
+        titleSpan.textContent = item.title
 
-          const snoozeBtn = item.due && !isDone ? (() => {
-            const btn = document.createElement('button')
-            btn.className   = 'task-snooze'
-            btn.title       = 'Snooze'
-            btn.textContent = '⏰'
-            btn.addEventListener('click', e => {
-              e.stopPropagation()
-              openSnoozePopover(btn, item, refreshCalendarItems)
-            })
-            return btn
-          })() : null
-
-          const recurIcon = item.metadata?.recurrence && !isDone ? (() => {
-            const s = document.createElement('span')
-            s.className   = 'task-recur-icon'
-            s.title       = 'Recurring task'
-            s.textContent = '↻'
-            return s
-          })() : null
-          chipEl.append(check, titleSpan, ...(recurIcon ? [recurIcon] : []), ...(snoozeBtn ? [snoozeBtn] : []))
-          chipEl.style.cursor = 'pointer'
-          chipEl.addEventListener('click', async () => {
-            await ensureTaskLists()
-            openModal(item, state.taskLists, calendarModalCallbacks())
+        const snoozeBtn = item.due && !isDone ? (() => {
+          const btn = document.createElement('button')
+          btn.className   = 'task-snooze'
+          btn.title       = 'Snooze'
+          btn.textContent = '⏰'
+          btn.addEventListener('click', e => {
+            e.stopPropagation()
+            openSnoozePopover(btn, item, refreshCalendarItems)
           })
+          return btn
+        })() : null
 
-          chipEl.draggable = true
-          chipEl.addEventListener('dragstart', e => {
-            _calDragItem = item
-            e.dataTransfer.effectAllowed = 'move'
-            requestAnimationFrame(() => chipEl.classList.add('drag-source'))
-          })
-          chipEl.addEventListener('dragend', () => {
-            chipEl.classList.remove('drag-source')
-            _calDragItem = null
-          })
-        } else if (isOrphaned) {
-          const titleSpan = document.createElement('span')
-          titleSpan.textContent = item.title
-          const icon = document.createElement('span')
-          icon.className   = 'task-recur-icon'
-          icon.textContent = '↺'
-          icon.title       = 'Recurring task — chain broken. Click to recreate.'
-          chipEl.append(titleSpan, icon)
-          chipEl.style.cursor = 'pointer'
-          chipEl.addEventListener('click', () => handleRecreateOrphaned(item))
-        } else {
-          const titleSpan = document.createElement('span')
-          titleSpan.textContent = item.title
-          chipEl.appendChild(titleSpan)
-        }
+        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+        chipEl.style.cursor = 'pointer'
+        chipEl.addEventListener('click', async () => {
+          await ensureTaskLists()
+          openModal(item, state.taskLists, calendarModalCallbacks())
+        })
+
+        chipEl.draggable = true
+        chipEl.addEventListener('dragstart', e => {
+          _calDragItem = item
+          e.dataTransfer.effectAllowed = 'move'
+          requestAnimationFrame(() => chipEl.classList.add('drag-source'))
+        })
+        chipEl.addEventListener('dragend', () => {
+          chipEl.classList.remove('drag-source')
+          _calDragItem = null
+        })
       } else if (isCommitment) {
         if (isDone) chipEl.style.background = 'transparent'
         else if (item.color) chipEl.style.background = item.color
@@ -994,10 +954,8 @@ function renderItems(items) {
     for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
-      const isVirtual  = !!item.metadata?.virtual
-      const isOrphaned = isVirtual && !!item.metadata?.orphaned
       const el     = document.createElement('div')
-      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}${isVirtual && !isOrphaned ? ' virtual' : ''}${isOrphaned ? ' orphaned' : ''}`
+      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
       el.dataset.itemId = item.id
       if (item.color) el.style.background = item.color
       el.style.top    = `${topMin}px`
@@ -1026,25 +984,19 @@ function renderItems(items) {
       timeEl.textContent = formatTimeRange(start, end)
       el.append(titleEl, timeEl)
       el.title = item.title
-      if (isOrphaned) {
-        el.style.cursor = 'pointer'
-        el.title = (el.title ? el.title + ' — ' : '') + 'Recurring task — chain broken. Click to recreate.'
-        el.addEventListener('click', () => handleRecreateOrphaned(item))
-      } else if (!isVirtual) {
-        if (item.item_type === 'TASK') {
-          el.addEventListener('click', async () => {
-            await ensureTaskLists()
-            openModal(item, state.taskLists, calendarModalCallbacks())
-          })
-        } else {
-          el.addEventListener('click', () => {
-            openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
-          })
-          if (item.editable) {
-            const handle = document.createElement('div')
-            handle.className = 'resize-handle'
-            el.appendChild(handle)
-          }
+      if (item.item_type === 'TASK') {
+        el.addEventListener('click', async () => {
+          await ensureTaskLists()
+          openModal(item, state.taskLists, calendarModalCallbacks())
+        })
+      } else {
+        el.addEventListener('click', () => {
+          openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
+        })
+        if (item.editable) {
+          const handle = document.createElement('div')
+          handle.className = 'resize-handle'
+          el.appendChild(handle)
         }
       }
       dayCol.appendChild(el)
@@ -1144,23 +1096,18 @@ function renderMobileDay() {
     }
     if (!covers) continue
 
-    const isOrphanedChip = !!item.metadata?.virtual && !!item.metadata?.orphaned
     const chip = document.createElement('div')
-    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}${item.metadata?.virtual && !isOrphanedChip ? ' virtual' : ''}${isOrphanedChip ? ' orphaned' : ''}`
+    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}`
     if (item.color) chip.style.background = item.color
-    chip.textContent = item.title + (isOrphanedChip ? ' ↺' : '')
-    chip.title       = isOrphanedChip ? `${item.title} — Recurring task — chain broken. Tap to recreate.` : item.title
-    if (isOrphanedChip) {
-      chip.addEventListener('click', () => handleRecreateOrphaned(item))
-    } else if (!item.metadata?.virtual) {
-      chip.addEventListener('click', () => {
-        if (item.item_type === 'TASK') {
-          ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
-        } else {
-          openEventEditorForEdit(item, calendarModalCallbacks())
-        }
-      })
-    }
+    chip.textContent = item.title
+    chip.title       = item.title
+    chip.addEventListener('click', () => {
+      if (item.item_type === 'TASK') {
+        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+      } else {
+        openEventEditorForEdit(item, calendarModalCallbacks())
+      }
+    })
     allDayContainer.appendChild(chip)
   }
 
@@ -1212,15 +1159,13 @@ function renderMobileDay() {
     eventEl.append(titleEl, timeEl)
     eventEl.title = item.title
 
-    if (!item.metadata?.virtual) {
-      eventEl.addEventListener('click', () => {
-        if (item.item_type === 'TASK') {
-          ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
-        } else {
-          openEventEditorForEdit(item, calendarModalCallbacks())
-        }
-      })
-    }
+    eventEl.addEventListener('click', () => {
+      if (item.item_type === 'TASK') {
+        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+      } else {
+        openEventEditorForEdit(item, calendarModalCallbacks())
+      }
+    })
     col.appendChild(eventEl)
   }
 

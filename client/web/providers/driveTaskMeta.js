@@ -16,8 +16,6 @@
 //     tasks: {
 //       [kid]: {
 //         loe:        string | null,
-//         comments:   [{timestamp, text}],
-//         recurrence: string | null,          // canonical RRULE string
 //         history:    [{_syncedAt, ...googleTaskPayload}],   // newest first, max 10
 //         archivedAt?: string    // ISO timestamp, present only in archive file
 //       }
@@ -67,27 +65,26 @@ export function hasTaskRecord(kid) {
 }
 
 export function getTaskMeta(kid) {
-  if (!_meta || !kid) return { loe: null, recurrence: null }
+  if (!_meta || !kid) return { loe: null }
   const record = _meta.tasks[kid]
-  if (!record) return { loe: null, recurrence: null }
-  return { loe: record.loe ?? null, recurrence: record.recurrence ?? null }
+  if (!record) return { loe: null }
+  return { loe: record.loe ?? null }
 }
 
 
 // Push the current Google Tasks payload to history and update Kairos-owned fields.
 // Only call when kid is known (not null).
-export function syncTaskSnapshot(kid, googlePayload, { loe, recurrence }) {
+export function syncTaskSnapshot(kid, googlePayload, { loe }) {
   if (!_meta || !kid) return
 
   const entry    = { _syncedAt: new Date().toISOString(), ...googlePayload }
   const existing = _meta.tasks[kid]
 
   if (existing) {
-    existing.loe        = loe
-    existing.recurrence = recurrence ?? null
-    existing.history    = [entry, ...(existing.history ?? [])].slice(0, HISTORY_MAX)
+    existing.loe     = loe
+    existing.history = [entry, ...(existing.history ?? [])].slice(0, HISTORY_MAX)
   } else {
-    _meta.tasks[kid] = { loe, recurrence: recurrence ?? null, history: [entry] }
+    _meta.tasks[kid] = { loe, history: [entry] }
   }
 
   _dirty = true
@@ -95,15 +92,14 @@ export function syncTaskSnapshot(kid, googlePayload, { loe, recurrence }) {
 }
 
 // Update Kairos-owned fields without pushing a history snapshot — used on explicit save.
-export function updateTaskMeta(kid, { loe, recurrence }) {
+export function updateTaskMeta(kid, { loe }) {
   if (!_meta || !kid) return
 
   const existing = _meta.tasks[kid]
   if (existing) {
-    existing.loe        = loe
-    existing.recurrence = recurrence ?? null
+    existing.loe = loe
   } else {
-    _meta.tasks[kid] = { loe, recurrence: recurrence ?? null, history: [] }
+    _meta.tasks[kid] = { loe, history: [] }
   }
 
   _dirty = true

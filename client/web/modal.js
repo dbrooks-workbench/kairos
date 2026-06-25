@@ -1,6 +1,6 @@
 import { getToken } from './auth.js'
 import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot } from './providers/parsers.js'
-import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
+import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask } from './providers/googleTasks.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 import { appendLogEntry, getItemLog } from './providers/lifeLog.js'
 
@@ -14,7 +14,6 @@ let _comments                  = []
 let _originalCommentTimestamps = new Set()  // timestamps present when modal opened; new ones logged on save
 let _callbacks                 = {}
 let _defaultDue                = null   // 'yyyy-mm-dd' pre-fill for create mode
-let _recurrence                = null   // preserved from Drive meta — not editable in task modal
 let _notesPreview              = null   // created once in initModal
 
 // ── URL linkification ─────────────────────────────────────────────────────────
@@ -67,14 +66,6 @@ export function initModal() {
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('task-modal').hidden) close() })
 
-  // ── Task delete scope picker ───────────────────────────────────────────────
-  el('task-delete-scope-cancel').addEventListener('click', () => { el('task-delete-scope-modal').hidden = true })
-  el('task-delete-scope-ok').addEventListener('click', async () => {
-    const scope = document.querySelector('input[name="task-delete-scope"]:checked')?.value ?? 'this'
-    el('task-delete-scope-modal').hidden = true
-    await _executeDeleteRecur(scope)
-  })
-
   // ── Notes URL preview ──────────────────────────────────────────────────────
   _notesPreview = document.createElement('div')
   _notesPreview.className = 'notes-preview'
@@ -99,7 +90,6 @@ export function openModal(item, taskLists, callbacks) {
   }))
   _originalCommentTimestamps = new Set(_comments.map(c => c.timestamp))
   _callbacks  = callbacks
-  _recurrence = item.metadata?.recurrence ?? null
   populate()
   show()
 }
@@ -113,7 +103,6 @@ export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
   _originalCommentTimestamps = new Set()
   _callbacks  = callbacks
   _defaultDue = opts.due ?? null
-  _recurrence = null
   populate()
   show()
 }
@@ -312,8 +301,7 @@ async function save() {
     const token = await getToken()
     if (!token) return
 
-    // Write loe/recurrence to Drive — comments are stored in the life log Sheet only
-    updateTaskMeta(kid, { loe, recurrence: _recurrence })
+    updateTaskMeta(kid, { loe })
 
     // Log new user comments (added this session) to the life log Sheet
     const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
@@ -352,14 +340,6 @@ async function save() {
 
 async function doDelete() {
   if (!_item) return
-
-  if (_item.metadata?.recurrence) {
-    const radio = document.querySelector('input[name="task-delete-scope"][value="this"]')
-    if (radio) radio.checked = true
-    el('task-delete-scope-modal').hidden = false
-    return
-  }
-
   if (!confirm(`Delete "${_item.title}"?`)) return
   const token = await getToken()
   if (!token) return
@@ -369,22 +349,6 @@ async function doDelete() {
     _callbacks.onDeleted?.()
   } catch (err) {
     console.error('Delete failed:', err)
-  }
-}
-
-async function _executeDeleteRecur(scope) {
-  if (!_item) return
-  const token = await getToken()
-  if (!token) return
-  try {
-    if (scope === 'this') {
-      await spawnNextRecurrence(token, _item, _listId)
-    }
-    await deleteTask(token, _listId, _item.source.external_id)
-    close()
-    _callbacks.onDeleted?.()
-  } catch (err) {
-    console.error('Delete recurring failed:', err)
   }
 }
 
@@ -400,7 +364,6 @@ async function toggleComplete() {
     if (isDone) {
       await uncompleteTask(token, _listId, _item.source.external_id)
     } else {
-      if (_item.metadata?.recurrence) await spawnNextRecurrence(token, _item, _listId)
       await completeTask(token, _listId, _item.source.external_id)
     }
     close()
