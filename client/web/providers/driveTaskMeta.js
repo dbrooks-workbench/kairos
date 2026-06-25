@@ -1,255 +1,145 @@
-// Per-task metadata store in Google Drive appDataFolder — two files:
+// Per-task metadata in Firestore.
 //
-//   kairos-tasks.json         active/current records; loaded on every page load;
-//                             stays bounded to roughly what's alive in Google Tasks
+// Collection: tasks/{kid}
+//   { loe, history, archivedAt? }
 //
-//   kairos-tasks-archive.json historical records; grows indefinitely; loaded only
-//                             on demand (history view, Life History export, etc.)
+// Active tasks:   no archivedAt field
+// Archived tasks: archivedAt is an ISO timestamp
 //
-// When a kid disappears from the live Google Tasks set (detected during board-view
-// load via getAllTasks), its record is moved from current → archive rather than
-// deleted. This preserves the full task history even after Google's purge window.
-//
-// Record shape (same in both files):
-//   {
-//     version: 1,
-//     tasks: {
-//       [kid]: {
-//         loe:        string | null,
-//         history:    [{_syncedAt, ...googleTaskPayload}],   // newest first, max 10
-//         archivedAt?: string    // ISO timestamp, present only in archive file
-//       }
-//     }
-//   }
+// loadTaskMeta lists the full collection once and partitions into active / archive.
+// Mutations mark individual kids dirty; a debounced batch write flushes them.
 
-const DRIVE_BASE  = 'https://www.googleapis.com/drive/v3'
-const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
-const FILE_CURRENT = 'kairos-tasks.json'
-const FILE_ARCHIVE = 'kairos-tasks-archive.json'
-const HISTORY_MAX  = 10
+import { fsList, fsBatchWrite } from './firestore.js'
 
-// ── Current file state ────────────────────────────────────────────────────────
-let _fileId          = null
-let _meta            = null
-let _loadedFromDrive = false  // true once meta was successfully read from Drive; gates all flushes
-let _dirty           = false
-let _saveTimer       = null
+const HISTORY_MAX = 10
 
-// ── Archive file state ────────────────────────────────────────────────────────
-let _archiveFileId    = null
-let _archive          = null   // null = not yet loaded
-let _archiveDirty     = false
-let _archiveSaveTimer = null
-
-// Shared token — set on first successful load of either file
-let _saveToken = null
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
+let _active      = null   // { [kid]: record } — null until loaded
+let _archive     = null   // { [kid]: record } — null until loaded
+let _saveToken   = null
+let _dirty       = new Set()
+let _saveTimer   = null
+let _loadPromise = null
 
 export function generateKid() {
   return Array.from(crypto.getRandomValues(new Uint8Array(6)))
     .map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// ── Current file ──────────────────────────────────────────────────────────────
+// ── Load ──────────────────────────────────────────────────────────────────────
 
 export async function loadTaskMeta(token) {
-  if (_meta) return _meta
-  _meta = await _loadFile(token, FILE_CURRENT, id => { _fileId = id }, () => { _loadedFromDrive = true })
-  _saveToken = token
-  return _meta
+  if (_active !== null) return
+  if (_loadPromise) return _loadPromise
+  _loadPromise = _doLoad(token).finally(() => { _loadPromise = null })
+  return _loadPromise
 }
 
+async function _doLoad(token) {
+  _saveToken = token
+  try {
+    const docs = await fsList(token, 'tasks')
+    _active  = {}
+    _archive = {}
+    for (const { _id: kid, ...record } of docs) {
+      if (record.archivedAt) _archive[kid] = record
+      else _active[kid] = record
+    }
+  } catch (err) {
+    console.warn('Firestore task meta load failed:', err.message)
+    _active  = {}
+    _archive = {}
+  }
+}
+
+// Archive is loaded as part of loadTaskMeta (same LIST call). This function
+// exists so callers that only need the archive can await it independently.
+export async function loadTaskArchive(token) {
+  if (_active === null) await loadTaskMeta(token ?? _saveToken)
+  return { version: 1, tasks: _archive ?? {} }
+}
+
+// ── Read ──────────────────────────────────────────────────────────────────────
+
 export function hasTaskRecord(kid) {
-  return !!(_meta?.tasks?.[kid])
+  return !!(_active?.[kid])
 }
 
 export function getTaskMeta(kid) {
-  if (!_meta || !kid) return { loe: null }
-  const record = _meta.tasks[kid]
+  if (!_active || !kid) return { loe: null }
+  const record = _active[kid]
   if (!record) return { loe: null }
   return { loe: record.loe ?? null }
 }
 
+// ── Write ─────────────────────────────────────────────────────────────────────
 
-// Push the current Google Tasks payload to history and update Kairos-owned fields.
-// Only call when kid is known (not null).
+// Push the current Google Tasks payload to history and update loe.
+// Call on every normalizeTask so Drive reflects the latest Google Tasks state.
 export function syncTaskSnapshot(kid, googlePayload, { loe }) {
-  if (!_meta || !kid) return
-
+  if (!_active || !kid) return
   const entry    = { _syncedAt: new Date().toISOString(), ...googlePayload }
-  const existing = _meta.tasks[kid]
-
+  const existing = _active[kid]
   if (existing) {
     existing.loe     = loe
     existing.history = [entry, ...(existing.history ?? [])].slice(0, HISTORY_MAX)
   } else {
-    _meta.tasks[kid] = { loe, history: [entry] }
+    _active[kid] = { loe, history: [entry] }
   }
-
-  _dirty = true
+  _dirty.add(kid)
   _scheduleSave()
 }
 
-// Update Kairos-owned fields without pushing a history snapshot — used on explicit save.
+// Update loe on explicit modal Save — does not push a history snapshot.
 export function updateTaskMeta(kid, { loe }) {
-  if (!_meta || !kid) return
-
-  const existing = _meta.tasks[kid]
+  if (!_active || !kid) return
+  const existing = _active[kid]
   if (existing) {
     existing.loe = loe
   } else {
-    _meta.tasks[kid] = { loe, history: [] }
+    _active[kid] = { loe, history: [] }
   }
-
-  _dirty = true
+  _dirty.add(kid)
   _scheduleSave()
 }
 
-// ── Archive file ──────────────────────────────────────────────────────────────
-
-// Load the archive lazily — only called from getAllTasks (board view) and
-// explicit history/export consumers. Not loaded on normal calendar page load.
-export async function loadTaskArchive(token) {
-  if (_archive) return _archive
-  _archive   = await _loadFile(token, FILE_ARCHIVE, id => { _archiveFileId = id })
-  _saveToken = token
-  return _archive
-}
-
-// Move records for kids no longer present in the live Google Tasks set from
-// current → archive. Call only from getAllTasks, which has a complete picture
-// of what's alive. Never deletes from archive.
+// Move records for kids no longer in the live Google Tasks set to the archive.
+// Only safe to call from getAllTasks, which has a complete view of live kids.
 export function archiveOrphanedMeta(liveKids) {
-  if (!_meta || !_archive) return
-
-  let moved = false
-  for (const [kid, record] of Object.entries(_meta.tasks)) {
+  if (!_active || !_archive) return
+  const now = new Date().toISOString()
+  for (const [kid, record] of Object.entries(_active)) {
     if (!liveKids.has(kid)) {
-      _archive.tasks[kid] = { ...record, archivedAt: new Date().toISOString() }
-      delete _meta.tasks[kid]
-      moved = true
+      _archive[kid] = { ...record, archivedAt: now }
+      delete _active[kid]
+      _dirty.add(kid)
     }
   }
-
-  if (moved) {
-    _dirty        = true
-    _archiveDirty = true
-    _scheduleSave()
-    _scheduleArchiveSave()
-  }
+  if (_dirty.size) _scheduleSave()
 }
 
-// ── Internal: shared file helpers ─────────────────────────────────────────────
-
-async function _loadFile(token, fileName, onFileId, onSuccess) {
-  try {
-    const q         = encodeURIComponent(`name='${fileName}'`)
-    const searchRes = await fetch(
-      `${DRIVE_BASE}/files?spaces=appDataFolder&q=${q}&fields=files(id)`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    )
-    if (!searchRes.ok) {
-      if (searchRes.status === 403) throw new Error('drive_scope_missing')
-      throw new Error(`Drive search failed: ${searchRes.status}`)
-    }
-
-    const { files } = await searchRes.json()
-
-    if (files?.length > 0) {
-      const dataRes = await fetch(
-        `${DRIVE_BASE}/files/${files[0].id}?alt=media`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      if (!dataRes.ok) throw new Error(`Drive read failed: ${dataRes.status}`)
-      const data = await dataRes.json()
-      if (!data.tasks) data.tasks = {}
-      // Set file ID only after a successful read — prevents a stale ID from
-      // being used to overwrite real data if the read later fails.
-      onFileId(files[0].id)
-      onSuccess?.()
-      return { version: 1, tasks: {}, ...data }
-    }
-
-    // No file yet — safe to create on first write.
-    onSuccess?.()
-    return { version: 1, tasks: {} }
-  } catch (err) {
-    if (err.message !== 'drive_scope_missing') {
-      console.warn(`Drive load failed (${fileName}):`, err.message)
-    }
-    // onSuccess NOT called — _loadedFromDrive stays false, blocking all flushes.
-    return { version: 1, tasks: {} }
-  }
-}
-
-async function _writeFile(fileId, fileName, data) {
-  const body = JSON.stringify(data)
-  if (fileId) {
-    const res = await fetch(
-      `${UPLOAD_BASE}/files/${fileId}?uploadType=media`,
-      {
-        method:  'PATCH',
-        headers: { Authorization: `Bearer ${_saveToken}`, 'Content-Type': 'application/json' },
-        body,
-      }
-    )
-    if (res.ok) return fileId
-    // 404 = file deleted on Drive — fall through and recreate it
-    if (res.status !== 404) throw new Error(`Drive update failed: ${res.status}`)
-  }
-  const meta = JSON.stringify({ name: fileName, parents: ['appDataFolder'] })
-  const form = new FormData()
-  form.append('metadata', new Blob([meta], { type: 'application/json' }))
-  form.append('media',    new Blob([body], { type: 'application/json' }))
-  const res = await fetch(
-    `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
-    {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${_saveToken}` },
-      body:    form,
-    }
-  )
-  if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
-  return (await res.json()).id
-}
+// ── Flush ─────────────────────────────────────────────────────────────────────
 
 function _scheduleSave() {
   if (!_saveToken) return
   if (_saveTimer) clearTimeout(_saveTimer)
-  _saveTimer = setTimeout(() => _flush(), 3000)
-}
-
-function _scheduleArchiveSave() {
-  if (!_saveToken) return
-  if (_archiveSaveTimer) clearTimeout(_archiveSaveTimer)
-  _archiveSaveTimer = setTimeout(() => _flushArchive(), 3000)
+  _saveTimer = setTimeout(_flush, 3000)
 }
 
 async function _flush() {
-  if (!_dirty || !_meta || !_saveToken) return
-  if (!_loadedFromDrive) {
-    console.warn('Drive task meta: skipping flush — initial load did not succeed, refusing to overwrite Drive data')
-    return
-  }
-  _dirty     = false
+  if (!_dirty.size || !_saveToken) return
+  const kids = [..._dirty]
+  _dirty.clear()
   _saveTimer = null
   try {
-    _fileId = await _writeFile(_fileId, FILE_CURRENT, _meta)
+    const writes = kids
+      .map(kid => {
+        const record = _active?.[kid] ?? _archive?.[kid]
+        return record ? { path: `tasks/${kid}`, data: record } : null
+      })
+      .filter(Boolean)
+    if (writes.length) await fsBatchWrite(_saveToken, writes)
   } catch (err) {
-    console.warn('Drive task meta save failed:', err.message)
-    _dirty = true
-  }
-}
-
-async function _flushArchive() {
-  if (!_archiveDirty || !_archive || !_saveToken) return
-  _archiveDirty     = false
-  _archiveSaveTimer = null
-  try {
-    _archiveFileId = await _writeFile(_archiveFileId, FILE_ARCHIVE, _archive)
-  } catch (err) {
-    console.warn('Drive task archive save failed:', err.message)
-    _archiveDirty = true
+    console.warn('Firestore task meta save failed:', err.message)
+    for (const kid of kids) _dirty.add(kid)
   }
 }

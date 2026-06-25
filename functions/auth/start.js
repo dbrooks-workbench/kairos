@@ -31,7 +31,7 @@ export async function onRequestGet(context) {
     response_type: 'code',
     client_id:     env.GOOGLE_CLIENT_ID,
     redirect_uri:  `${url.origin}/auth/callback`,
-    scope: 'openid email https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+    scope: 'openid email https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/datastore',
     access_type: 'offline',
     // Force account picker + consent so the user can choose a different account
     // and we always receive a fresh refresh token.
