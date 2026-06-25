@@ -79,6 +79,8 @@ export function getEventCompletedAt(eventId) {
   return _meta?.events?.[eventId]?.completedAt ?? null
 }
 
+export function getAllEventRecords() { return _meta?.events ?? {} }
+
 export function getEventComments(eventId) {
   return _meta?.events?.[eventId]?.comments ?? []
 }

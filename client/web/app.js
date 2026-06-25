@@ -5,7 +5,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
 import { setEventCompleted, setEventUncompleted, addEventSnooze } from './providers/driveEventTaskMeta.js'
-import { appendLogEntry } from './providers/lifeLog.js'
+import { appendLogEntry, migrateExistingComments } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -13,7 +13,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.16.2'
+const VERSION   = '0.16.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1483,7 +1483,7 @@ document.addEventListener('click', () => {
 })
 document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
 
-render().then(() => {
+render().then(async () => {
   // #timed-scroll is a flex column container; scrollTop = M shows timed-area
   // minute M at the top of the visible area below the sticky header.
   // No pinnedTop.offsetHeight offset needed — that caused the indicator to land
@@ -1498,6 +1498,10 @@ render().then(() => {
 
   const mobileScroll = document.getElementById('mobile-timed-scroll')
   if (mobileScroll) mobileScroll.scrollTop = Math.max(0, minsNow - 120)
+
+  // Migrate pre-existing Drive comments into the life log (idempotent via content hashes)
+  const _migToken = await getToken()
+  if (_migToken) migrateExistingComments(_migToken, state.items)
 
   runSweepAndRefresh().then(() => runSpawnScan())
   startPolling(120_000)
