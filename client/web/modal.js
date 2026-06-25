@@ -2,18 +2,20 @@ import { getToken } from './auth.js'
 import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask, spawnNextRecurrence } from './providers/googleTasks.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
+import { appendLogEntry, getItemLog } from './providers/lifeLog.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _item         = null   // null → create mode
-let _listId       = null
-let _taskLists    = []
-let _checklist    = []
-let _comments     = []
-let _callbacks    = {}
-let _defaultDue   = null   // 'yyyy-mm-dd' pre-fill for create mode
-let _recurrence   = null   // preserved from Drive meta — not editable in task modal
-let _notesPreview = null   // created once in initModal
+let _item                      = null   // null → create mode
+let _listId                    = null
+let _taskLists                 = []
+let _checklist                 = []
+let _comments                  = []
+let _originalCommentTimestamps = new Set()  // timestamps present when modal opened; new ones logged on save
+let _callbacks                 = {}
+let _defaultDue                = null   // 'yyyy-mm-dd' pre-fill for create mode
+let _recurrence                = null   // preserved from Drive meta — not editable in task modal
+let _notesPreview              = null   // created once in initModal
 
 // ── URL linkification ─────────────────────────────────────────────────────────
 
@@ -89,7 +91,13 @@ export function openModal(item, taskLists, callbacks) {
   _listId     = item.source.account_id
   _taskLists  = taskLists
   _checklist  = (item.metadata?.checklist ?? []).map(i => ({ ...i }))
-  _comments   = (item.metadata?.comments  ?? []).map(c => ({ ...c }))
+  // Comments sourced from life log Sheet (single source of truth)
+  _comments   = getItemLog(item.id).map(e => ({
+    timestamp: e.timestamp,
+    text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
+    _readonly: e.verb !== 'comment',
+  }))
+  _originalCommentTimestamps = new Set(_comments.map(c => c.timestamp))
   _callbacks  = callbacks
   _recurrence = item.metadata?.recurrence ?? null
   populate()
@@ -102,6 +110,7 @@ export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
   _taskLists  = taskLists
   _checklist  = []
   _comments   = []
+  _originalCommentTimestamps = new Set()
   _callbacks  = callbacks
   _defaultDue = opts.due ?? null
   _recurrence = null
@@ -219,35 +228,42 @@ function renderComments() {
   const sorted = [..._comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
   sorted.forEach(c => {
     const row = document.createElement('div')
-    row.className = 'modal-comment-row'
+    row.className = 'modal-comment-row' + (c._readonly ? ' modal-comment-readonly' : '')
 
     const ts = document.createElement('span')
     ts.className   = 'modal-comment-ts'
     ts.textContent = displayTimestamp(c.timestamp)
 
-    const txt = document.createElement('input')
-    txt.type      = 'text'
-    txt.className = 'modal-comment-text'
-    txt.value     = c.text
-    txt.addEventListener('input', () => {
-      const orig = _comments.find(x => x.timestamp === c.timestamp)
-      if (orig) orig.text = txt.value
-    })
+    if (c._readonly) {
+      const txt = document.createElement('span')
+      txt.className   = 'modal-comment-text'
+      txt.textContent = c.text
+      row.append(ts, txt)
+    } else {
+      const txt = document.createElement('input')
+      txt.type      = 'text'
+      txt.className = 'modal-comment-text'
+      txt.value     = c.text
+      txt.addEventListener('input', () => {
+        const orig = _comments.find(x => x.timestamp === c.timestamp)
+        if (orig) orig.text = txt.value
+      })
 
-    const del = document.createElement('button')
-    del.className   = 'modal-row-del'
-    del.textContent = '×'
-    del.addEventListener('click', () => {
-      _comments = _comments.filter(x => x.timestamp !== c.timestamp)
-      renderComments()
-    })
+      const del = document.createElement('button')
+      del.className   = 'modal-row-del'
+      del.textContent = '×'
+      del.addEventListener('click', () => {
+        _comments = _comments.filter(x => x.timestamp !== c.timestamp)
+        renderComments()
+      })
 
-    row.append(ts, txt, del)
+      row.append(ts, txt, del)
+    }
+
     container.appendChild(row)
   })
 
-  const count = _comments.length
-  el('modal-comments-count').textContent = count ? `(${count})` : ''
+  el('modal-comments-count').textContent = _comments.length ? `(${_comments.length})` : ''
 }
 
 function addComment() {
@@ -277,8 +293,9 @@ async function save() {
   const dueStr = el('modal-due').value
   const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-  const kid      = _item?.metadata?.kid ?? generateKid()
-  const snapshot = buildSnapshot({ loe, comments: _comments })
+  const kid           = _item?.metadata?.kid ?? generateKid()
+  const userComments  = _comments.filter(c => !c._readonly)
+  const snapshot      = buildSnapshot({ loe, comments: userComments })
 
   const notes = serializeNotes({
     body:      el('modal-notes').value.trim(),
@@ -290,8 +307,23 @@ async function save() {
   const token = await getToken()
   if (!token) return
 
-  // Write loe/comments/recurrence to Drive — recurrence preserved from open (not editable here)
-  updateTaskMeta(kid, { loe, comments: _comments, recurrence: _recurrence })
+  // Write loe/recurrence to Drive — comments are stored in the life log Sheet only
+  updateTaskMeta(kid, { loe, recurrence: _recurrence })
+
+  // Log new user comments (added this session) to the life log Sheet
+  const title = el('modal-title').value.trim()
+  const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
+  for (const c of newUserComments) {
+    appendLogEntry(token, {
+      item_id:       _item?.id ?? `kid:${kid}`,
+      item_type:     'TASK',
+      title,
+      verb:          'comment',
+      action_detail: { verb: 'comment', text: c.text },
+      narrative:     c.text,
+      context:       _item?.metadata?.list_title ?? '',
+    })
+  }
 
   const selectedListId = el('modal-list').value
 

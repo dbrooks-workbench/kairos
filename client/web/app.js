@@ -4,7 +4,7 @@ import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
-import { setEventCompleted, setEventUncompleted, addEventSnooze } from './providers/driveEventTaskMeta.js'
+import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
 import { appendLogEntry, migrateExistingComments } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
@@ -13,7 +13,7 @@ import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 import { spawnNextRecurrence } from './providers/googleTasks.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.16.4'
+const VERSION   = '0.17.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -171,8 +171,6 @@ async function handleSnoozeCommitment(item, n, newDate, dateLabel) {
   const eventId = item.source.external_id
   const pad     = v => String(v).padStart(2, '0')
   const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
-
-  await addEventSnooze(token, eventId, newDateStr)
 
   const pad2 = v => String(v).padStart(2, '0')
   const fromStr = item.start

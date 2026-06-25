@@ -1,6 +1,7 @@
 import { parseEventDescription } from './parsers.js'
 import { loadPrefs, getCommitmentCalendars } from './drivePrefs.js'
-import { loadEventTaskMeta, getEventCompletedAt, getEventComments } from './driveEventTaskMeta.js'
+import { loadEventTaskMeta, getEventCompletedAt } from './driveEventTaskMeta.js'
+import { loadLifeLog, getItemLog } from './lifeLog.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -42,15 +43,21 @@ function normalizeEvent(event, calendar) {
       ? new Date(event.end.date + 'T00:00:00')
       : new Date(event.end.dateTime)
 
-  const { prose, config, comments } = parseEventDescription(event.description ?? '')
+  const { prose, config } = parseEventDescription(event.description ?? '')
 
-  const isCommitment  = getCommitmentCalendars().includes(calendar.id)
-  const completedAt   = isCommitment ? getEventCompletedAt(event.id) : null
-  // Commitments read comments from Drive; standard events read from description (backward compat)
-  const driveComments = isCommitment ? getEventComments(event.id) : null
+  const isCommitment = getCommitmentCalendars().includes(calendar.id)
+  const completedAt  = isCommitment ? getEventCompletedAt(event.id) : null
+  const itemId       = `gcal:${calendar.id}:${event.id}`
+
+  // Comments sourced exclusively from the life log Sheet (single source of truth).
+  const comments = getItemLog(itemId).map(e => ({
+    timestamp: e.timestamp,
+    text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
+    _readonly: e.verb !== 'comment',
+  }))
 
   return {
-    id: `gcal:${calendar.id}:${event.id}`,
+    id: itemId,
     title: event.summary ?? '(No title)',
     item_type: 'EVENT',
     source: {
@@ -67,7 +74,7 @@ function normalizeEvent(event, calendar) {
     metadata: {
       body: prose,
       config,
-      comments: driveComments ?? comments,
+      comments,
       linked_task_ids: config?.tasks ?? [],
       spawn_prototypes: config?.spawn ?? [],
       calendar_name: calendar.summary,
@@ -135,6 +142,7 @@ export async function getEvents(token, start, end) {
     getCalendars(token),
     loadPrefs(token),           // ensures getCommitmentCalendars() returns correct data
     loadEventTaskMeta(token),   // ensures getEventCompletedAt() returns correct data
+    loadLifeLog(token),         // ensures getItemLog() returns correct data
   ])
   const results = await Promise.allSettled(
     calendars.map(async calendar => {

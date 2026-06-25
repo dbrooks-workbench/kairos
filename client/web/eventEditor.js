@@ -1,7 +1,8 @@
 import { getToken } from './auth.js'
 import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
 import { serializeNotes, buildSnapshot } from './providers/parsers.js'
-import { setEventCompleted, setEventUncompleted, addEventSnooze, getEventComments, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
+import { setEventCompleted, setEventUncompleted, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
+import { getItemLog } from './providers/lifeLog.js'
 import { getCommitmentCalendars } from './providers/drivePrefs.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
@@ -419,8 +420,6 @@ async function handleCommitmentSnooze(n, newDate, dateLabel) {
   const pad     = v => String(v).padStart(2, '0')
   const newDateStr = `${newDate.getFullYear()}-${pad(newDate.getMonth()+1)}-${pad(newDate.getDate())}`
 
-  await addEventSnooze(token, eventId, newDateStr)
-
   const body = {}
   if (_editItem.all_day) {
     const endDate = new Date(newDate)
@@ -523,7 +522,7 @@ async function save() {
     // Write snapshot to description so standard clients see current state
     const isCommitment = getCommitmentCalendars().includes(calendarId)
     if (savedId && isCommitment) {
-      const comments    = getEventComments(savedId)
+      const comments    = getItemLog(_editItem?.id ?? `gcal:${calendarId}:${savedId}`)
       const completedAt = getEventCompletedAt(savedId)
       const snapshot    = buildSnapshot({ completedAt, comments })
       const snapDesc    = prose ? `${prose.trim()}\n\n${snapshot}` : snapshot
@@ -606,7 +605,7 @@ async function executeWithScope(scope) {
 
     // Snapshot for commitment events
     if (getCommitmentCalendars().includes(calId)) {
-      const comments    = getEventComments(eventId)
+      const comments    = getItemLog(_editItem?.id ?? `gcal:${calId}:${eventId}`)
       const completedAt = getEventCompletedAt(eventId)
       const prose       = el('event-modal-desc').value.trim()
       const snapshot    = buildSnapshot({ completedAt, comments })

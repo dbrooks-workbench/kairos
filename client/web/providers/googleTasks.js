@@ -1,6 +1,7 @@
 import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
 import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
 import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid, archiveOrphanedMeta } from './driveTaskMeta.js'
+import { loadLifeLog, getItemLog } from './lifeLog.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -34,22 +35,28 @@ function normalizeTask(task, list) {
   const parsed = parseTaskNotes(task.notes ?? '')
   const kid    = parsed.kid
 
-  // Drive meta is authoritative for loe/comments/recurrence when a record exists.
+  // Drive meta is authoritative for loe/recurrence when a record exists.
   // Fall back to notes-embedded values for tasks not yet saved through the new path.
-  let loe, comments, recurrence
+  let loe, recurrence
   if (kid && hasTaskRecord(kid)) {
     const meta = getTaskMeta(kid)
     loe        = meta.loe
-    comments   = meta.comments
     recurrence = meta.recurrence
   } else {
     loe        = parsed.loe
-    comments   = parsed.comments
     recurrence = parsed.recurrence   // backward compat: still in notes for unmigrated tasks
   }
 
+  // Comments sourced exclusively from the life log Sheet (single source of truth).
+  const itemId   = `gtasks:${list.id}:${task.id}`
+  const comments = getItemLog(itemId).map(e => ({
+    timestamp: e.timestamp,
+    text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
+    _readonly: e.verb !== 'comment',
+  }))
+
   // Push a history snapshot for any task that has a kid anchor in notes.
-  if (kid) syncTaskSnapshot(kid, task, { loe, comments, recurrence })
+  if (kid) syncTaskSnapshot(kid, task, { loe, recurrence })
 
   return {
     id: `gtasks:${list.id}:${task.id}`,
@@ -254,7 +261,7 @@ export async function spawnNextRecurrence(token, item, listId) {
 }
 
 export async function getTasks(token, start, end) {
-  const [lists] = await Promise.all([getTaskLists(token), loadRegistry(token), loadTaskMeta(token)])
+  const [lists] = await Promise.all([getTaskLists(token), loadRegistry(token), loadTaskMeta(token), loadLifeLog(token)])
 
   const results = await Promise.allSettled(
     lists.map(async list => {
