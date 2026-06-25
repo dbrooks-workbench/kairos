@@ -7,7 +7,6 @@ import { appendLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
 
 let _callbacks     = {}
-let _spawns        = []     // [{ key, title, triggerDays, dueDays, loe, checklist, _autoKey }]
 let _editItem      = null   // CalendarItem being edited; null = create mode
 let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-configured
 let _pendingBody   = null   // body held while scope-picker modal is open
@@ -62,12 +61,6 @@ function matchRrulePreset(rrule) {
   return 'CUSTOM'
 }
 
-// Parse "-30d" → -30 (used when loading spawn config from an existing event)
-function parseDayOffset(str) {
-  const m = String(str ?? '0d').match(/^(-?\d+)d$/)
-  return m ? parseInt(m[1], 10) : 0
-}
-
 function buildRrule(freq, startDate) {
   if (!freq || freq === 'CUSTOM') return null
   if (freq === 'DAILY')    return 'RRULE:FREQ=DAILY'
@@ -112,95 +105,6 @@ function minutesToTime(n) { return `${String(Math.floor(n/60)%24).padStart(2,'0'
 
 function setAllDayUI(allDay) {
   el('event-modal-panel').classList.toggle('all-day', allDay)
-}
-
-function slugify(str) {
-  return String(str).toUpperCase().trim().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'TASK'
-}
-
-// ── Spawn list UI ─────────────────────────────────────────────────────────────
-
-function renderSpawnList() {
-  const container = el('event-spawn-items')
-  container.innerHTML = ''
-
-  _spawns.forEach((spawn, idx) => {
-    const entry = document.createElement('div')
-    entry.className = 'spawn-entry'
-    entry.innerHTML = `
-      <div class="spawn-entry-header">
-        <input class="spawn-title modal-input" type="text" placeholder="Task title…" value="${esc(spawn.title)}">
-        <button type="button" class="spawn-remove modal-row-del">×</button>
-      </div>
-      <div class="spawn-fields">
-        <div class="spawn-field-row">
-          <label class="spawn-label">Key</label>
-          <input class="spawn-key modal-input" type="text" placeholder="TASK-KEY" value="${esc(spawn.key)}">
-        </div>
-        <div class="spawn-field-row">
-          <label class="spawn-label">Trigger</label>
-          <input class="spawn-num crp-interval" type="number" min="0" max="365" value="${spawn.triggerDays}" data-field="triggerDays">
-          <span class="spawn-suffix">days before event</span>
-        </div>
-        <div class="spawn-field-row">
-          <label class="spawn-label">Due</label>
-          <input class="spawn-num crp-interval" type="number" min="0" max="365" value="${spawn.dueDays}" data-field="dueDays">
-          <span class="spawn-suffix">days before event</span>
-        </div>
-        <div class="spawn-field-row">
-          <label class="spawn-label">LOE</label>
-          <input class="spawn-loe modal-input" type="text" placeholder="1h 30m" value="${esc(spawn.loe)}">
-        </div>
-        <div class="spawn-field-row spawn-cl-row">
-          <label class="spawn-label">Checklist</label>
-          <textarea class="spawn-checklist modal-notes" rows="3" placeholder="One item per line…">${esc(spawn.checklist.join('\n'))}</textarea>
-        </div>
-      </div>`
-
-    const titleInp = entry.querySelector('.spawn-title')
-    const keyInp   = entry.querySelector('.spawn-key')
-
-    titleInp.addEventListener('input', e => {
-      _spawns[idx].title = e.target.value
-      if (_spawns[idx]._autoKey) {
-        const auto = slugify(e.target.value)
-        _spawns[idx].key = auto
-        keyInp.value = auto
-      }
-    })
-    keyInp.addEventListener('input', e => {
-      _spawns[idx].key = e.target.value
-      _spawns[idx]._autoKey = false
-    })
-    entry.querySelectorAll('.spawn-num').forEach(inp => {
-      inp.addEventListener('input', e => {
-        _spawns[idx][e.target.dataset.field] = Math.max(0, parseInt(e.target.value, 10) || 0)
-      })
-    })
-    entry.querySelector('.spawn-loe').addEventListener('input', e => {
-      _spawns[idx].loe = e.target.value.trim()
-    })
-    entry.querySelector('.spawn-checklist').addEventListener('input', e => {
-      _spawns[idx].checklist = e.target.value.split('\n').map(s => s.trim()).filter(Boolean)
-    })
-    entry.querySelector('.spawn-remove').addEventListener('click', () => {
-      _spawns.splice(idx, 1)
-      renderSpawnList()
-    })
-
-    container.appendChild(entry)
-  })
-
-  el('event-spawn-count').textContent = _spawns.length ? `(${_spawns.length})` : ''
-}
-
-function addSpawn() {
-  _spawns.push({ key: '', title: '', triggerDays: 30, dueDays: 5, loe: '', checklist: [], _autoKey: true })
-  renderSpawnList()
-  el('event-spawn-section').open = true
-  // Focus the new title input
-  const entries = el('event-spawn-items').querySelectorAll('.spawn-title')
-  entries[entries.length - 1]?.focus()
 }
 
 // ── Custom recurrence panel init ──────────────────────────────────────────────
@@ -262,8 +166,6 @@ export function initEventEditor() {
     _preserveRrule = null  // user changed the selector — don't preserve original anymore
   })
 
-  el('event-spawn-add').addEventListener('click', addSpawn)
-
   el('event-modal-delete')?.addEventListener('click', confirmDelete)
   el('event-modal-complete')?.addEventListener('click', handleCommitmentToggle)
   el('event-modal-snooze')?.addEventListener('click', () => {
@@ -323,7 +225,6 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   _editItem      = null
   _preserveRrule = null
   _callbacks     = callbacks
-  _spawns        = []
 
   const allDay = opts.allDay ?? false
   el('event-modal-allday').checked = allDay
@@ -346,9 +247,7 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   el('event-modal-desc').value     = ''
   el('event-modal-recur').value    = ''
   el('custom-recur-panel').hidden  = true
-  el('event-spawn-section').open   = false
   el('event-modal-delete').hidden  = true
-  renderSpawnList()
   resetCustomRecur(today)
 
   // Populate calendar list (create mode — always writable calendars only)
@@ -410,19 +309,6 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   if (preset === 'CUSTOM' && item.recurrence) _preserveRrule = item.recurrence
 
   resetCustomRecur(toDate(start))
-
-  // Pre-load spawn prototypes from existing config
-  _spawns = (item.metadata?.config?.spawn ?? []).map(s => ({
-    key:         s.key,
-    title:       s.title,
-    triggerDays: Math.abs(parseDayOffset(s.trigger)),
-    dueDays:     Math.abs(parseDayOffset(s.due ?? '0d')),
-    loe:         s.loe ?? '',
-    checklist:   s.checklist ?? [],
-    _autoKey:    false,
-  }))
-  renderSpawnList()
-  el('event-spawn-section').open = _spawns.length > 0
 
   // Populate calendar list and, for recurring instances, load master RRULE
   const calSelect = el('event-modal-calendar')
