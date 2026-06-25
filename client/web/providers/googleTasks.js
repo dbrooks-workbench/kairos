@@ -1,6 +1,7 @@
 import { parseTaskNotes, serializeNotes, expandRruleInWindow, nextOccurrenceAfter } from './parsers.js'
 import { loadRegistry, upsertSeries, orphanedDrivers } from './driveStore.js'
 import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKid, archiveOrphanedMeta } from './driveTaskMeta.js'
+import { loadPrefs } from './drivePrefs.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
 
 const BASE = 'https://www.googleapis.com/tasks/v1'
@@ -261,6 +262,7 @@ export async function spawnNextRecurrence(token, item, listId) {
 }
 
 export async function getTasks(token, start, end) {
+  await loadPrefs(token)   // must resolve before loadLifeLog reads getLifeLogSheetId()
   const [lists] = await Promise.all([getTaskLists(token), loadRegistry(token), loadTaskMeta(token), loadLifeLog(token)])
 
   const results = await Promise.allSettled(

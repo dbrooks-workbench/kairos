@@ -7,9 +7,7 @@
 // action_detail — JSON payload with verb + verb-specific fields
 // narrative     — always human-readable prose; what a human reader looks at
 
-import { getLifeLogSheetId, setLifeLogSheetId, getLifeLogMigratedHashes, addLifeLogMigratedHashes } from './drivePrefs.js'
-import { loadTaskArchive, getAllTaskRecords, getAllArchiveRecords } from './driveTaskMeta.js'
-import { getAllEventRecords } from './driveEventTaskMeta.js'
+import { getLifeLogSheetId, setLifeLogSheetId } from './drivePrefs.js'
 
 const SHEETS_BASE = 'https://sheets.googleapis.com/v4'
 const SHEET_TITLE = 'Kairos Life Log'
@@ -74,76 +72,6 @@ export async function appendLogEntry(token, entry) {
     await _appendRows(token, sheetId, [_buildRow(timestamp, entry)])
   } catch (err) {
     console.warn('Life log append failed:', err.message)
-  }
-}
-
-// Sweep existing Drive task/event comments into the life log.
-// Idempotent via content hashes stored in kairos-prefs.json — safe to call on every startup.
-// items = state.items (used to resolve titles/context for known items).
-export async function migrateExistingComments(token, items = []) {
-  // Load archive before reading records — no-op if already loaded by board view.
-  // This ensures completed/purged tasks in kairos-tasks-archive.json are included.
-  await loadTaskArchive(token)
-
-  // Current records override archive for the same kid (task still alive in Google Tasks).
-  const taskRecords  = { ...getAllArchiveRecords(), ...getAllTaskRecords() }
-  const eventRecords = getAllEventRecords()
-
-  const hasTasks  = Object.keys(taskRecords).length > 0
-  const hasEvents = Object.keys(eventRecords).length > 0
-  if (!hasTasks && !hasEvents) return
-
-  const processed = new Set(getLifeLogMigratedHashes())
-  const newRows   = []
-  const newHashes = []
-
-  // ── Task Drive comments ────────────────────────────────────────────────────
-  for (const [kid, record] of Object.entries(taskRecords)) {
-    if (!record.comments?.length) continue
-    const itemRef = items.find(i => i.metadata?.kid === kid)
-    const title   = itemRef?.title ?? record.history?.[0]?.title ?? `[task:${kid.slice(-6)}]`
-    const context = itemRef?.metadata?.list_title ?? ''
-    const item_id = itemRef?.id ?? `kid:${kid}`
-
-    for (const comment of record.comments) {
-      const hash = _hash(comment.timestamp, item_id, comment.text)
-      if (processed.has(hash)) continue
-      const { verb, action_detail, narrative } = _parseComment(comment.text, title)
-      newRows.push(_buildRow(comment.timestamp, { item_id, item_type: 'TASK', title, verb, action_detail, narrative, context }))
-      newHashes.push(hash)
-      processed.add(hash)
-    }
-  }
-
-  // ── Event Drive comments ───────────────────────────────────────────────────
-  for (const [eventId, record] of Object.entries(eventRecords)) {
-    if (!record.comments?.length) continue
-    const itemRef = items.find(i => i.source?.external_id === eventId)
-    const title   = itemRef?.title ?? `[event:${eventId.slice(-8)}]`
-    const context = itemRef?.metadata?.calendar_name ?? ''
-    const item_id = itemRef?.id ?? `gcal:${eventId}`
-
-    for (const comment of record.comments) {
-      const hash = _hash(comment.timestamp, item_id, comment.text)
-      if (processed.has(hash)) continue
-      const { verb, action_detail, narrative } = _parseComment(comment.text, title)
-      newRows.push(_buildRow(comment.timestamp, { item_id, item_type: 'EVENT', title, verb, action_detail, narrative, context }))
-      newHashes.push(hash)
-      processed.add(hash)
-    }
-  }
-
-  if (!newRows.length) return
-
-  try {
-    const sheetId = await _ensureSheet(token)
-    if (!sheetId) return
-    // Sort rows chronologically before writing
-    newRows.sort((a, b) => a[0].localeCompare(b[0]))
-    await _appendRows(token, sheetId, newRows)
-    addLifeLogMigratedHashes(newHashes)
-  } catch (err) {
-    console.warn('Life log migration failed:', err.message)
   }
 }
 
@@ -213,42 +141,3 @@ async function _createSheet(token) {
   return sheetId
 }
 
-// Parse a Drive comment text string into { verb, action_detail, narrative }.
-// Handles both current !verb format and legacy prose formats.
-function _parseComment(text, title) {
-  const t = (text ?? '').trim()
-  const q = `"${title}"`
-
-  if (t === '!completed')
-    return { verb: 'completed',   action_detail: { verb: 'completed' },   narrative: `Completed ${q}` }
-
-  if (t === '!uncompleted')
-    return { verb: 'uncompleted', action_detail: { verb: 'uncompleted' }, narrative: `Marked ${q} incomplete` }
-
-  const snoozeM = t.match(/^!snoozed to (\d{4}-\d{2}-\d{2})$/)
-  if (snoozeM) {
-    const to  = snoozeM[1]
-    const d   = new Date(to + 'T00:00:00')
-    const ds  = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    return { verb: 'snoozed', action_detail: { verb: 'snoozed', to }, narrative: `Snoozed ${q} to ${ds}` }
-  }
-
-  // Legacy task snooze prose (pre-v0.16.1): "Snoozed — follow up on Jun 25, 2026"
-  const legacySnoozeM = t.match(/^Snoozed — follow up on (.+)$/)
-  if (legacySnoozeM)
-    return { verb: 'snoozed', action_detail: { verb: 'snoozed' }, narrative: `Snoozed ${q}: follow up on ${legacySnoozeM[1]}` }
-
-  // Legacy event description log entries (pre-v0.16.1 @timestamp format already stripped by caller)
-  return { verb: 'comment', action_detail: { verb: 'comment', text: t }, narrative: t }
-}
-
-// FNV-1a 32-bit hash → base-36 string. Deterministic, compact, sufficient for dedup.
-function _hash(timestamp, itemId, text) {
-  const s = `${timestamp}|${itemId}|${(text ?? '').slice(0, 40)}`
-  let h = 2166136261
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return (h >>> 0).toString(36)
-}

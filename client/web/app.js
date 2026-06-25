@@ -5,7 +5,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, recreateOrphanedTask, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
 import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
-import { appendLogEntry, migrateExistingComments } from './providers/lifeLog.js'
+import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { initModal, openModal, openCreateModal } from './modal.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
@@ -1496,10 +1496,6 @@ render().then(async () => {
 
   const mobileScroll = document.getElementById('mobile-timed-scroll')
   if (mobileScroll) mobileScroll.scrollTop = Math.max(0, minsNow - 120)
-
-  // Migrate pre-existing Drive comments into the life log (idempotent via content hashes)
-  const _migToken = await getToken()
-  if (_migToken) migrateExistingComments(_migToken, state.items)
 
   runSweepAndRefresh().then(() => runSpawnScan())
   startPolling(120_000)

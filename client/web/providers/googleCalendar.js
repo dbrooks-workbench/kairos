@@ -138,9 +138,9 @@ export async function createEvent(token, calendarId, body) {
 }
 
 export async function getEvents(token, start, end) {
+  await loadPrefs(token)   // must resolve before loadLifeLog reads getLifeLogSheetId()
   const [calendars] = await Promise.all([
     getCalendars(token),
-    loadPrefs(token),           // ensures getCommitmentCalendars() returns correct data
     loadEventTaskMeta(token),   // ensures getEventCompletedAt() returns correct data
     loadLifeLog(token),         // ensures getItemLog() returns correct data
   ])

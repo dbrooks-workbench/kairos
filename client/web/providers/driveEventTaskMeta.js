@@ -72,8 +72,6 @@ export function getEventCompletedAt(eventId) {
   return _meta?.events?.[eventId]?.completedAt ?? null
 }
 
-export function getAllEventRecords() { return _meta?.events ?? {} }
-
 export async function setEventCompleted(token, eventId) {
   if (!_meta) return null
   const ts  = new Date().toISOString()
