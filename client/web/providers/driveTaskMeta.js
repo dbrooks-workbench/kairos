@@ -195,24 +195,24 @@ async function _writeFile(fileId, fileName, data) {
         body,
       }
     )
-    if (!res.ok) throw new Error(`Drive update failed: ${res.status}`)
-    return fileId
-  } else {
-    const meta = JSON.stringify({ name: fileName, parents: ['appDataFolder'] })
-    const form = new FormData()
-    form.append('metadata', new Blob([meta], { type: 'application/json' }))
-    form.append('media',    new Blob([body], { type: 'application/json' }))
-    const res = await fetch(
-      `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
-      {
-        method:  'POST',
-        headers: { Authorization: `Bearer ${_saveToken}` },
-        body:    form,
-      }
-    )
-    if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
-    return (await res.json()).id
+    if (res.ok) return fileId
+    // 404 = file deleted on Drive — fall through and recreate it
+    if (res.status !== 404) throw new Error(`Drive update failed: ${res.status}`)
   }
+  const meta = JSON.stringify({ name: fileName, parents: ['appDataFolder'] })
+  const form = new FormData()
+  form.append('metadata', new Blob([meta], { type: 'application/json' }))
+  form.append('media',    new Blob([body], { type: 'application/json' }))
+  const res = await fetch(
+    `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+    {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${_saveToken}` },
+      body:    form,
+    }
+  )
+  if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
+  return (await res.json()).id
 }
 
 function _scheduleSave() {

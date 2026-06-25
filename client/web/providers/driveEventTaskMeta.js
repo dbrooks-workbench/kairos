@@ -126,8 +126,21 @@ async function _flush(token) {
           keepalive: true,
         }
       )
-      if (!res.ok) throw new Error(`Drive update failed: ${res.status}`)
+      if (res.ok) return
+      if (res.status !== 404) throw new Error(`Drive update failed: ${res.status}`)
+      // 404 = file deleted on Drive — recreate it
+      _fileId = null
     }
+    const meta = JSON.stringify({ name: FILE_NAME, parents: ['appDataFolder'] })
+    const form = new FormData()
+    form.append('metadata', new Blob([meta], { type: 'application/json' }))
+    form.append('media',    new Blob([body], { type: 'application/json' }))
+    const res = await fetch(
+      `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }
+    )
+    if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
+    _fileId = (await res.json()).id
   } catch (err) {
     console.warn('Drive event-task meta save failed:', err.message)
   }

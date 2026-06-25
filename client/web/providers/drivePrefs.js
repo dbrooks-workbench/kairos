@@ -192,24 +192,26 @@ async function _flush() {
           keepalive: true,
         }
       )
-      if (!res.ok) throw new Error(`Drive update failed: ${res.status}`)
-    } else {
-      // _fileId not set (file creation failed in loadPrefs) — fall back to multipart
-      const meta = JSON.stringify({ name: FILE_NAME, parents: ['appDataFolder'] })
-      const form = new FormData()
-      form.append('metadata', new Blob([meta], { type: 'application/json' }))
-      form.append('media',    new Blob([body], { type: 'application/json' }))
-      const res = await fetch(
-        `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
-        {
-          method:  'POST',
-          headers: { Authorization: `Bearer ${_saveToken}` },
-          body:    form,
-        }
-      )
-      if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
-      _fileId = (await res.json()).id
+      if (res.ok) return
+      // 404 = file deleted on Drive — fall through and recreate it
+      if (res.status !== 404) throw new Error(`Drive update failed: ${res.status}`)
+      _fileId = null
     }
+    // _fileId null: either file creation failed in loadPrefs, or stale ID returned 404
+    const meta = JSON.stringify({ name: FILE_NAME, parents: ['appDataFolder'] })
+    const form = new FormData()
+    form.append('metadata', new Blob([meta], { type: 'application/json' }))
+    form.append('media',    new Blob([body], { type: 'application/json' }))
+    const res = await fetch(
+      `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+      {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${_saveToken}` },
+        body:    form,
+      }
+    )
+    if (!res.ok) throw new Error(`Drive create failed: ${res.status}`)
+    _fileId = (await res.json()).id
   } catch (err) {
     console.warn('Drive prefs save failed:', err.message)
     _dirty = true
