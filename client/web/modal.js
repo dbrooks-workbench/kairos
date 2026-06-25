@@ -311,7 +311,6 @@ async function save() {
   updateTaskMeta(kid, { loe, recurrence: _recurrence })
 
   // Log new user comments (added this session) to the life log Sheet
-  const title = el('modal-title').value.trim()
   const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
   for (const c of newUserComments) {
     appendLogEntry(token, {
