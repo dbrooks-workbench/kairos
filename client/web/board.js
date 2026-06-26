@@ -215,8 +215,11 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     }
   }
 
-  // Columns in ascending list.order
-  const sorted = [...taskLists].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  // Columns in ascending list.order; exclude any list named "Done" — the board
+  // always appends its own sentinel Done column for completed tasks.
+  const sorted = [...taskLists]
+    .filter(l => l.name?.toLowerCase() !== 'done')
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   for (const list of sorted) {
     const items = sortedItems(activeByList[list.id] ?? [], list.id)
     const col   = buildCol(list, items, false, doneWindow)
