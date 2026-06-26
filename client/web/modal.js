@@ -228,7 +228,7 @@ function renderComments() {
     del.className   = 'modal-row-del'
     del.textContent = '×'
     del.addEventListener('click', async () => {
-      _comments = _comments.filter(x => x.timestamp !== c.timestamp)
+      _comments = _comments.filter(x => x !== c)
       renderComments()
       // If the entry has a Firestore ID, delete it from the life log
       if (c._id && _item) {

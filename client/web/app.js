@@ -12,7 +12,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.18.3'
+const VERSION   = '0.18.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
