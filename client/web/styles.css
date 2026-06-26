@@ -464,6 +464,31 @@ body {
 
 .cal-list-add-btn:hover { opacity: 0.85; }
 
+.cal-migrate-section {
+  padding: 8px 12px 6px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.cal-migrate-btn {
+  font-size: 12px;
+  color: var(--today-color, #1a73e8);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.cal-migrate-btn:hover { text-decoration: underline; }
+.cal-migrate-btn:disabled { opacity: 0.5; cursor: wait; }
+
+.cal-migrate-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 /* ── ────────────────────────────────────────────────────────────────────────── */
 
 .cal-picker-empty {

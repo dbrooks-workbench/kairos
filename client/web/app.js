@@ -9,12 +9,13 @@ import { loadLists, getListsForCalendar, createList, getAllLists, updateList, de
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
+import { runMigration } from './migration.js'
 import { initModal, openModal, openCreateModal } from './taskEditor.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.20.5'
+const VERSION   = '0.21.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -498,8 +499,57 @@ function buildListsPanel(calendarId) {
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd() })
 
   addRow.append(inp, addBtn)
-  wrap.append(items, addRow)
+  wrap.append(items, addRow, buildMigrateSection(calendarId))
   return wrap
+}
+
+function buildMigrateSection(calendarId) {
+  const section = document.createElement('div')
+  section.className = 'cal-migrate-section'
+
+  const btn = document.createElement('button')
+  btn.className   = 'cal-migrate-btn'
+  btn.textContent = 'Import Google Tasks →'
+  btn.title       = 'Migrate active Google Tasks into this calendar (tasks are marked complete in GT and auto-deleted by Google after 30 days)'
+
+  const status = document.createElement('div')
+  status.className = 'cal-migrate-status'
+  status.hidden    = true
+
+  btn.addEventListener('click', async () => {
+    if (!confirm(
+      'Migrate all active Google Tasks to this calendar?\n\n' +
+      'Each task will be imported as a calendar event. ' +
+      'The originals will be marked complete in Google Tasks (auto-deleted by Google after 30 days).'
+    )) return
+
+    btn.disabled  = true
+    status.hidden = false
+    status.textContent = 'Migrating…'
+
+    try {
+      const token = await getToken()
+      if (!token) { btn.disabled = false; return }
+
+      const result = await runMigration(token, ({ migrated, failed, total }) => {
+        status.textContent = `Migrating… ${migrated + failed}/${total}`
+      })
+
+      const parts = [`${result.migrated} imported`]
+      if (result.failed)  parts.push(`${result.failed} failed`)
+      if (result.skipped) parts.push(`${result.skipped} skipped`)
+      status.textContent = `Done — ${parts.join(', ')}`
+
+      if (result.migrated > 0) loadBoardData()
+    } catch (err) {
+      console.error('Migration failed:', err)
+      status.textContent = `Error: ${err.message}`
+      btn.disabled = false
+    }
+  })
+
+  section.append(btn, status)
+  return section
 }
 
 function buildListRow(list) {
