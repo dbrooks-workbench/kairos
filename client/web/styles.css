@@ -362,6 +362,110 @@ body {
   border-color: var(--accent, #1a73e8);
 }
 
+/* ── Calendar list management ─────────────────────────────────────────────── */
+
+.cal-lists-panel {
+  padding: 4px 10px 8px 30px;
+  border-bottom: 1px solid var(--border, #e0e0e0);
+}
+
+.cal-lists-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cal-list-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.cal-list-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text, #202124);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-list-rename-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 1px 5px;
+  border: 1px solid var(--accent, #1a73e8);
+  border-radius: 3px;
+  background: var(--bg, #fff);
+  color: var(--text, #202124);
+  min-width: 0;
+  outline: none;
+}
+
+.cal-list-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted, #5f6368);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  line-height: 1.4;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.cal-list-row:hover .cal-list-btn {
+  opacity: 1;
+}
+
+.cal-list-btn:hover {
+  background: var(--hover-bg, #f1f3f4);
+  color: var(--text, #202124);
+}
+
+.cal-lists-add-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cal-list-add-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 3px 7px;
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 4px;
+  background: var(--bg, #fff);
+  color: var(--text, #202124);
+  min-width: 0;
+}
+
+.cal-list-add-input:focus {
+  outline: none;
+  border-color: var(--accent, #1a73e8);
+}
+
+.cal-list-add-btn {
+  flex-shrink: 0;
+  background: var(--accent, #1a73e8);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.cal-list-add-btn:hover { opacity: 0.85; }
+
+/* ── ────────────────────────────────────────────────────────────────────────── */
+
 .cal-picker-empty {
   padding: 12px 14px;
   font-size: 13px;

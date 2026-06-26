@@ -4,6 +4,7 @@ import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, createTaskList } from './providers/googleTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
+import { loadLists, getListsForCalendar, createList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -379,48 +380,165 @@ function renderCalendarPicker() {
     return
   }
 
-  panel.innerHTML = state.calendars.map(cal => {
-    const isTaskCal = state.taskCalendars.has(cal.id)
-    return `
-      <div class="cal-picker-item">
-        <label class="cal-picker-vis">
-          <input type="checkbox" data-cal-id="${escHtml(cal.id)}"
-                 ${state.hiddenCalendars.has(cal.id) ? '' : 'checked'}>
-          <span class="cal-swatch" style="background:${escHtml(cal.backgroundColor ?? '#1a73e8')}"></span>
-          <span class="cal-name" title="${escHtml(cal.summary)}">${escHtml(cal.summary)}</span>
-        </label>
-        <button class="cal-task-toggle${isTaskCal ? ' active' : ''}"
-                data-cal-id="${escHtml(cal.id)}"
-                title="Use as task calendar">tasks</button>
-      </div>`
-  }).join('')
+  panel.innerHTML = ''
 
-  panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+  for (const cal of state.calendars) {
+    const isTaskCal = state.taskCalendars.has(cal.id)
+
+    // ── Calendar row ────────────────────────────────────────────────────────
+    const row = document.createElement('div')
+    row.className = 'cal-picker-item'
+
+    const lbl = document.createElement('label')
+    lbl.className = 'cal-picker-vis'
+
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = !state.hiddenCalendars.has(cal.id)
     cb.addEventListener('change', () => {
-      const id = cb.dataset.calId
-      if (cb.checked) state.hiddenCalendars.delete(id)
-      else            state.hiddenCalendars.add(id)
+      if (cb.checked) state.hiddenCalendars.delete(cal.id)
+      else            state.hiddenCalendars.add(cal.id)
       setHiddenCalendars([...state.hiddenCalendars])
       updateCalPickerBadge()
       renderItems(getVisibleItems())
     })
-  })
 
-  panel.querySelectorAll('.cal-task-toggle').forEach(btn => {
-    btn.addEventListener('click', e => {
+    const swatch = document.createElement('span')
+    swatch.className = 'cal-swatch'
+    swatch.style.background = cal.backgroundColor ?? '#1a73e8'
+
+    const nameSp = document.createElement('span')
+    nameSp.className = 'cal-name'
+    nameSp.title = cal.summary
+    nameSp.textContent = cal.summary
+
+    lbl.append(cb, swatch, nameSp)
+
+    const taskBtn = document.createElement('button')
+    taskBtn.className = `cal-task-toggle${isTaskCal ? ' active' : ''}`
+    taskBtn.title = 'Use as task calendar'
+    taskBtn.textContent = 'tasks'
+    taskBtn.addEventListener('click', async e => {
       e.stopPropagation()
-      const id = btn.dataset.calId
-      if (state.taskCalendars.has(id)) {
-        state.taskCalendars.delete(id)
-        btn.classList.remove('active')
+      if (state.taskCalendars.has(cal.id)) {
+        state.taskCalendars.delete(cal.id)
+        taskBtn.classList.remove('active')
+        panel.querySelector(`.cal-lists-panel[data-cal-id="${cal.id}"]`)?.remove()
       } else {
-        state.taskCalendars.add(id)
-        btn.classList.add('active')
+        state.taskCalendars.add(cal.id)
+        taskBtn.classList.add('active')
+        const token = await getToken()
+        if (token) {
+          await ensureDefaultLists(token, cal.id)
+          row.insertAdjacentElement('afterend', buildListsPanel(cal.id))
+        }
       }
       setTaskCalendars([...state.taskCalendars])
       refreshCalendarItems()
     })
+
+    row.append(lbl, taskBtn)
+    panel.appendChild(row)
+
+    // ── Lists sub-panel (already a task calendar) ─────────────────────────
+    if (isTaskCal) panel.appendChild(buildListsPanel(cal.id))
+  }
+}
+
+function buildListsPanel(calendarId) {
+  const lists = getListsForCalendar(calendarId)
+
+  const wrap = document.createElement('div')
+  wrap.className = 'cal-lists-panel'
+  wrap.dataset.calId = calendarId
+
+  const items = document.createElement('div')
+  items.className = 'cal-lists-items'
+  for (const list of lists) items.appendChild(buildListRow(list))
+
+  const addRow = document.createElement('div')
+  addRow.className = 'cal-lists-add-row'
+
+  const inp = document.createElement('input')
+  inp.type = 'text'
+  inp.className = 'cal-list-add-input'
+  inp.placeholder = 'New list…'
+
+  const addBtn = document.createElement('button')
+  addBtn.className = 'cal-list-add-btn'
+  addBtn.textContent = '+'
+
+  const doAdd = async () => {
+    const name = inp.value.trim()
+    if (!name) return
+    const token = await getToken()
+    if (!token) return
+    const all   = getListsForCalendar(calendarId)
+    const order = all.length ? Math.max(...all.map(l => l.order ?? 0)) + 10 : 0
+    const list  = await createList(token, calendarId, name, order)
+    inp.value   = ''
+    items.appendChild(buildListRow(list))
+  }
+  addBtn.addEventListener('click', doAdd)
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd() })
+
+  addRow.append(inp, addBtn)
+  wrap.append(items, addRow)
+  return wrap
+}
+
+function buildListRow(list) {
+  const row = document.createElement('div')
+  row.className = 'cal-list-row'
+
+  const nameEl = document.createElement('span')
+  nameEl.className = 'cal-list-name'
+  nameEl.textContent = list.name
+
+  const renameBtn = document.createElement('button')
+  renameBtn.className = 'cal-list-btn'
+  renameBtn.title = 'Rename'
+  renameBtn.textContent = '✎'
+  renameBtn.addEventListener('click', () => {
+    const field = document.createElement('input')
+    field.type = 'text'
+    field.className = 'cal-list-rename-input'
+    field.value = nameEl.textContent
+    nameEl.replaceWith(field)
+    renameBtn.disabled = true
+    field.focus(); field.select()
+
+    const commit = async () => {
+      const val = field.value.trim() || nameEl.textContent
+      if (val !== nameEl.textContent) {
+        const token = await getToken()
+        if (token) await updateList(token, list.id, { name: val })
+      }
+      nameEl.textContent = val
+      field.replaceWith(nameEl)
+      renameBtn.disabled = false
+    }
+    field.addEventListener('blur', commit)
+    field.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); field.blur() }
+      if (e.key === 'Escape') { field.value = nameEl.textContent; field.blur() }
+    })
   })
+
+  const delBtn = document.createElement('button')
+  delBtn.className = 'cal-list-btn'
+  delBtn.title = 'Delete'
+  delBtn.textContent = '×'
+  delBtn.addEventListener('click', async () => {
+    if (!confirm(`Delete "${nameEl.textContent}"?`)) return
+    const token = await getToken()
+    if (!token) return
+    await deleteList(token, list.id)
+    row.remove()
+  })
+
+  row.append(nameEl, renameBtn, delBtn)
+  return row
 }
 
 // Toggle all-day between top-3 cap and show-all
@@ -1394,9 +1512,10 @@ async function render() {
       fetchItems(state.weekStart, end),
       getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
       getToken().then(t => t ? loadPrefs(t).then(() => {
-        state.hiddenCalendars     = new Set(getHiddenCalendars())
-        state.taskCalendars = new Set(getTaskCalendars())
+        state.hiddenCalendars = new Set(getHiddenCalendars())
+        state.taskCalendars   = new Set(getTaskCalendars())
       }) : null),
+      getToken().then(t => t ? loadLists(t) : null),
     ])
     state.items = items
     renderItems(getVisibleItems())
