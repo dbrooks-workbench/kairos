@@ -11,7 +11,7 @@
 import { parseTaskNotes } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { createTask } from './providers/calendarTasks.js'
-import { getListsForCalendar } from './providers/kairosLists.js'
+import { getListsForCalendar, createList } from './providers/kairosLists.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 
 const GT_BASE = 'https://www.googleapis.com/tasks/v1'
@@ -99,11 +99,11 @@ export async function runMigration(token, onProgress) {
 
   const webhookToken = await _fetchWebhookToken()
 
-  // Build name→listId lookup from Kairos lists
+  // Build name→listId lookup from Kairos lists (populated lazily during migration)
   const kairosLists  = getListsForCalendar(targetCalId)
   const nameToListId = new Map(kairosLists.map(l => [l.name.toLowerCase(), l.id]))
-  const backlogId    = kairosLists.find(l => l.name.toLowerCase() === 'backlog')?.id
-    ?? kairosLists[0]?.id ?? null
+  const maxOrder     = kairosLists.reduce((m, l) => Math.max(m, l.order ?? 0), 0)
+  let   nextOrder    = maxOrder + 10
 
   const gtLists = await _getLists(token)
   let migrated = 0, failed = 0, skipped = 0, total = 0
@@ -120,7 +120,15 @@ export async function runMigration(token, onProgress) {
       continue
     }
 
-    const targetListId = nameToListId.get(gtList.title?.toLowerCase()) ?? backlogId
+    // Match by name (case-insensitive); create a new Kairos list if none matches
+    const nameKey = gtList.title?.toLowerCase() ?? ''
+    let targetListId = nameToListId.get(nameKey) ?? null
+    if (!targetListId && gtList.title?.trim()) {
+      const newList  = await createList(token, targetCalId, gtList.title.trim(), nextOrder)
+      nextOrder += 10
+      targetListId = newList.id
+      nameToListId.set(nameKey, targetListId)
+    }
     total += tasks.length
     onProgress?.({ migrated, failed, skipped, total })
 

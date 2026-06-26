@@ -3,7 +3,7 @@
 
 import { fsAdd, fsList, fsSet, fsDelete } from './firestore.js'
 
-const DEFAULT_LIST_NAMES = ['Backlog', 'In Progress']
+const DEFAULT_LIST_NAMES = ['To Do']
 
 let _lists       = null  // { [listId]: record } — null until loaded
 let _saveToken   = null
