@@ -18,7 +18,8 @@ const COLLECTION   = 'activity'
 
 // { [item_id]: [{ _id, timestamp, verb, action_detail, narrative }] }
 // null until loadLifeLog has run
-let _logByItemId = null
+let _logByItemId  = null
+let _loadPromise  = null   // deduplicates concurrent calls (e.g. from parallel getEvents+getTasks)
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,12 @@ let _logByItemId = null
 // Must be awaited at startup before getItemLog is meaningful.
 export async function loadLifeLog(token) {
   if (_logByItemId !== null) return
+  if (_loadPromise) return _loadPromise
+  _loadPromise = _doLoad(token).finally(() => { _loadPromise = null })
+  return _loadPromise
+}
+
+async function _doLoad(token) {
   try {
     const docs = await fsList(token, COLLECTION)
     _logByItemId = {}

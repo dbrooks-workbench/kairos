@@ -337,6 +337,7 @@ async function save() {
     _callbacks.onSaved?.()
   } catch (err) {
     console.error('Save failed:', err)
+  } finally {
     saveBtn.disabled = false
   }
 }
