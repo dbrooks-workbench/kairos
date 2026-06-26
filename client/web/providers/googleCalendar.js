@@ -2,6 +2,7 @@ import { parseEventDescription } from './parsers.js'
 import { loadPrefs, getTaskCalendars } from './kairosPrefs.js'
 import { loadCompletionStore, getCompletedAt } from './completionStore.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
+import { getTaskEvents } from './calendarTasks.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -34,6 +35,9 @@ export async function getCalendars(token) {
 }
 
 function normalizeEvent(event, calendar) {
+  // Task events are owned by calendarTasks.js; skip them here to avoid duplication.
+  if (event.extendedProperties?.private?.isTask === 'true') return null
+
   const allDay = !!event.start?.date
   const start = allDay
     ? new Date(event.start.date + 'T00:00:00')
@@ -139,6 +143,7 @@ export async function createEvent(token, calendarId, body) {
 
 export async function getEvents(token, start, end) {
   await loadPrefs(token)   // must resolve before loadLifeLog reads getLifeLogSheetId()
+  const taskCalendars = getTaskCalendars()
   const [calendars] = await Promise.all([
     getCalendars(token),
     loadCompletionStore(token),
@@ -157,7 +162,20 @@ export async function getEvents(token, start, end) {
         token,
         `${BASE}/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
       )
-      return events.map(e => normalizeEvent(e, calendar))
+      // normalizeEvent returns null for isTask=true events — filter them out.
+      const normalized = events.map(e => normalizeEvent(e, calendar)).filter(Boolean)
+
+      // For task calendars, merge in dated task events for the same range.
+      if (taskCalendars.includes(calendar.id)) {
+        let tasks = []
+        try {
+          tasks = await getTaskEvents(token, calendar.id, start, end)
+        } catch (err) {
+          console.warn(`Task events fetch failed for ${calendar.id}:`, err.message)
+        }
+        return [...normalized, ...tasks]
+      }
+      return normalized
     })
   )
 
