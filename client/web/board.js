@@ -596,7 +596,9 @@ async function handleDrop(evt) {
       await uncompleteTask(token, calendarId, extId)
       if (toListId) await patchTaskProps(token, calendarId, extId, { listId: toListId })
     } else {
-      await patchTaskProps(token, calendarId, extId, { listId: toListId })
+      const srcItem = _boardItems.find(i => i.source.external_id === extId)
+      const extra   = srcItem?.metadata?.unprocessed ? { isTask: 'true' } : {}
+      await patchTaskProps(token, calendarId, extId, { listId: toListId, ...extra })
     }
   } catch (err) {
     console.error('Drop failed:', err)

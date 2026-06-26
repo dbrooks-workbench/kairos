@@ -67,8 +67,9 @@ function _buildEventBody(taskData) {
 
 export function normalizeTask(event, calendarId) {
   const p          = event.extendedProperties?.private ?? {}
-  const dateStr    = event.start?.date
-  const isUndated  = p.noDate === 'true' || dateStr === KAIROS_UNDATED_SENTINEL
+  // All-day events have start.date; timed events have start.dateTime — use date portion for both
+  const dateStr    = event.start?.date ?? event.start?.dateTime?.slice(0, 10)
+  const isUndated  = p.noDate === 'true' || dateStr === KAIROS_UNDATED_SENTINEL || !dateStr
   const start      = isUndated ? null : new Date(dateStr + 'T00:00:00')
   const completedAt = p.completedAt || null
 
@@ -84,7 +85,7 @@ export function normalizeTask(event, calendarId) {
     start,
     end:       null,
     due:       start,
-    all_day:   true,
+    all_day:   !!event.start?.date,
     status:    completedAt ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
     metadata: {
@@ -93,7 +94,7 @@ export function normalizeTask(event, calendarId) {
       order:       p.order != null ? parseFloat(p.order) : null,
       loe:         p.loe         ?? null,
       noDate:      isUndated,
-      unprocessed: p.unprocessed === 'true',
+      unprocessed: p.isTask !== 'true',
       completedAt,
       body:        _stripCompleteLink(event.description ?? ''),
     },
@@ -196,15 +197,7 @@ export async function uncompleteTask(token, calendarId, eventId) {
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
-export async function getTaskEvents(token, calendarId, start, end) {
-  const params = new URLSearchParams({
-    privateExtendedProperty: 'isTask=true',
-    timeMin:       start.toISOString(),
-    timeMax:       end.toISOString(),
-    singleEvents:  'true',
-    orderBy:       'startTime',
-    maxResults:    '2500',
-  })
+async function _fetchPage(token, calendarId, params) {
   const items = []
   let pageToken = null
   do {
@@ -213,21 +206,55 @@ export async function getTaskEvents(token, calendarId, start, end) {
       `${BASE}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
       { headers: { Authorization: `Bearer ${token}` } }
     )
-    if (!res.ok) throw new Error(`getTaskEvents ${res.status}: ${res.statusText}`)
+    if (!res.ok) throw new Error(`Calendar events ${res.status}: ${res.statusText}`)
     const data = await res.json()
     items.push(...(data.items ?? []))
     pageToken = data.nextPageToken ?? null
   } while (pageToken)
-  return items.map(e => normalizeTask(e, calendarId))
+  return items
 }
 
-// Returns all task events on the calendar (dated + undated) for board view.
-export function getAllTaskEvents(token, calendarId) {
-  return getTaskEvents(
-    token, calendarId,
-    new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z'),
-    new Date('2099-12-31T23:59:59Z'),
-  )
+export async function getTaskEvents(token, calendarId, start, end) {
+  const params = new URLSearchParams({
+    privateExtendedProperty: 'isTask=true',
+    timeMin:      start.toISOString(),
+    timeMax:      end.toISOString(),
+    singleEvents: 'true',
+    orderBy:      'startTime',
+    maxResults:   '2500',
+  })
+  return (await _fetchPage(token, calendarId, params)).map(e => normalizeTask(e, calendarId))
+}
+
+// Returns all task events for board view: Kairos-tagged events (full range,
+// including undated sentinel) plus any untagged events in a rolling ±window
+// (so raw calendar events and recurring tasks surface in the Unlisted column).
+export async function getAllTaskEvents(token, calendarId) {
+  const now     = new Date()
+  const past    = new Date(now.getTime() - 30  * 86_400_000)
+  const future  = new Date(now.getTime() + 180 * 86_400_000)
+
+  const [tagged, all] = await Promise.all([
+    _fetchPage(token, calendarId, new URLSearchParams({
+      privateExtendedProperty: 'isTask=true',
+      timeMin:      new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString(),
+      timeMax:      new Date('2099-12-31T23:59:59Z').toISOString(),
+      singleEvents: 'true',
+      orderBy:      'startTime',
+      maxResults:   '2500',
+    })),
+    _fetchPage(token, calendarId, new URLSearchParams({
+      timeMin:      past.toISOString(),
+      timeMax:      future.toISOString(),
+      singleEvents: 'true',
+      orderBy:      'startTime',
+      maxResults:   '2500',
+    })),
+  ])
+
+  const taggedIds = new Set(tagged.map(e => e.id))
+  const untagged  = all.filter(e => !taggedIds.has(e.id))
+  return [...tagged, ...untagged].map(e => normalizeTask(e, calendarId))
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.
