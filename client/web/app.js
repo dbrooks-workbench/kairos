@@ -2,9 +2,10 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, createTaskList } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask } from './providers/googleTasks.js'
+import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
-import { loadLists, getListsForCalendar, createList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
+import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -13,7 +14,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.20.0'
+const VERSION   = '0.20.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -23,11 +24,10 @@ const state = {
   taskCalendars: new Set(),          // calendar IDs designated as task/project calendars
   allDayExpanded: false,        // false = top-3 cap; true = show all
   view: 'calendar',        // 'calendar' | 'board'
-  taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
-  boardItems: [],          // CalendarItem[] — all tasks, no date filter
+  taskLists: [],           // Kairos lists [{id, calendarId, name, order}] for board columns
+  boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
-  primaryListId: null,     // Google Tasks default list ID (cannot be deleted)
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -124,12 +124,15 @@ async function handleToggleTask(item) {
   const isDone = item.status === 'COMPLETED'
   const verb   = isDone ? 'uncompleted' : 'completed'
   try {
+    const isCalTask = item.source.provider === 'google-calendar-task'
     if (isDone) {
-      await uncompleteTask(token, item.source.account_id, item.source.external_id)
+      if (isCalTask) await calUncompleteTask(token, item.source.account_id, item.source.external_id)
+      else           await uncompleteTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'NEEDS_ACTION'
     } else {
-      await completeTask(token, item.source.account_id, item.source.external_id)
+      if (isCalTask) await calCompleteTask(token, item.source.account_id, item.source.external_id)
+      else           await completeTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'COMPLETED'
     }
@@ -317,7 +320,9 @@ document.addEventListener('visibilitychange', () => {
 
 function boardCallbacks() {
   return {
-    onCreate:     listId  => openCreateModal(getTaskCalendars()[0] ?? null, listId, { onSaved: loadBoardData }),
+    onCreate:     (calendarId, listId) => openCreateModal(
+      calendarId ?? getTaskCalendars()[0] ?? null, listId, { onSaved: loadBoardData },
+    ),
     onEdit:       item    => openModal(item, {
       onSaved:      loadBoardData,
       onDeleted:    loadBoardData,
@@ -328,9 +333,12 @@ function boardCallbacks() {
     onCreateList: async name => {
       const token = await getToken()
       if (!token) return
+      const calId = getTaskCalendars()[0] ?? null
+      if (!calId) return
       try {
-        const newList = await createTaskList(token, name)
-        setTaskCalendars([...getTaskCalendars(), newList.id])
+        const calLists = getListsForCalendar(calId)
+        const maxOrder = calLists.length ? Math.max(...calLists.map(l => l.order ?? 0)) : 0
+        await createList(token, calId, name, maxOrder + 10)
         await loadBoardData()
       } catch (err) {
         console.error('Create list failed:', err)
@@ -343,14 +351,21 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
-    const [{ lists, tasks }] = await Promise.all([
-      getAllTasks(token, state.doneWindow),
-      loadPrefs(token),   // idempotent; ensures sort prefs are available before render
+    const taskCalIds = getTaskCalendars()
+    await Promise.all([
+      Promise.all(
+        taskCalIds.map(calId =>
+          getAllTaskEvents(token, calId).catch(err => {
+            console.warn(`Tasks fetch failed for ${calId}:`, err.message)
+            return []
+          })
+        )
+      ).then(results => { state.boardItems = results.flat() }),
+      loadPrefs(token),
+      loadLists(token),
     ])
-    state.taskLists     = lists
-    state.boardItems    = tasks
-    state.primaryListId = lists[0]?.id ?? null  // first list from API = "My Tasks" (undeletable)
-    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow, state.primaryListId)
+    state.taskLists = getAllLists()
+    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow)
   } catch (err) {
     console.error('Board data load failed:', err)
   }

@@ -139,6 +139,16 @@ export async function updateTask(token, calendarId, eventId, taskData) {
   return normalizeTask(event, calendarId)
 }
 
+// Changes a task's date (snooze). Patches start/end and clears noDate.
+export async function patchTaskDate(token, calendarId, eventId, newDateStr) {
+  const event = await _patch(token, calendarId, eventId, {
+    start: { date: newDateStr },
+    end:   { date: _nextDay(newDateStr) },
+    extendedProperties: { private: { noDate: null } },
+  })
+  return normalizeTask(event, calendarId)
+}
+
 // Partial update for system-managed properties (order, listId, etc.).
 // Values are coerced to strings; null clears a property from extendedProperties.
 export async function patchTaskProps(token, calendarId, eventId, props) {
