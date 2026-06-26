@@ -250,15 +250,6 @@ function calendarModalCallbacks() {
   return { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems, onToggleDone: refreshCalendarItems }
 }
 
-// Ensure task lists are loaded (needed by the modal's list selector).
-// Called lazily before first modal open if render() hasn't populated them yet.
-async function ensureTaskLists() {
-  if (state.taskLists.length) return
-  const token = await getToken()
-  if (!token) return
-  state.taskLists = await getTaskLists(token)
-}
-
 // ── View switching ────────────────────────────────────────────────────────────
 
 function setView(v) {
@@ -1522,7 +1513,6 @@ async function render() {
     // Fetch items, task lists, and prefs in parallel
     const [items] = await Promise.all([
       fetchItems(state.weekStart, end),
-      getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
       getToken().then(t => t ? loadPrefs(t).then(() => {
         state.hiddenCalendars = new Set(getHiddenCalendars())
         state.taskCalendars   = new Set(getTaskCalendars())
