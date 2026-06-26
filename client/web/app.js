@@ -317,8 +317,8 @@ document.addEventListener('visibilitychange', () => {
 
 function boardCallbacks() {
   return {
-    onCreate:     listId  => openCreateModal(listId, state.taskLists, { onSaved: loadBoardData }),
-    onEdit:       item    => openModal(item, state.taskLists, {
+    onCreate:     listId  => openCreateModal(getTaskCalendars()[0] ?? null, listId, { onSaved: loadBoardData }),
+    onEdit:       item    => openModal(item, {
       onSaved:      loadBoardData,
       onDeleted:    loadBoardData,
       onToggleDone: loadBoardData,
@@ -1006,9 +1006,8 @@ function renderItems(items) {
 
         chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
         chipEl.style.cursor = 'pointer'
-        chipEl.addEventListener('click', async () => {
-          await ensureTaskLists()
-          openModal(item, state.taskLists, calendarModalCallbacks())
+        chipEl.addEventListener('click', () => {
+          openModal(item, calendarModalCallbacks())
         })
 
         chipEl.draggable = true
@@ -1127,9 +1126,8 @@ function renderItems(items) {
       el.append(titleEl, timeEl)
       el.title = item.title
       if (item.item_type === 'TASK') {
-        el.addEventListener('click', async () => {
-          await ensureTaskLists()
-          openModal(item, state.taskLists, calendarModalCallbacks())
+        el.addEventListener('click', () => {
+          openModal(item, calendarModalCallbacks())
         })
       } else {
         el.addEventListener('click', () => {
@@ -1245,7 +1243,7 @@ function renderMobileDay() {
     chip.title       = item.title
     chip.addEventListener('click', () => {
       if (item.item_type === 'TASK') {
-        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+        openModal(item, calendarModalCallbacks())
       } else {
         openEventEditorForEdit(item, calendarModalCallbacks())
       }
@@ -1303,7 +1301,7 @@ function renderMobileDay() {
 
     eventEl.addEventListener('click', () => {
       if (item.item_type === 'TASK') {
-        ensureTaskLists().then(() => openModal(item, state.taskLists, calendarModalCallbacks()))
+        openModal(item, calendarModalCallbacks())
       } else {
         openEventEditorForEdit(item, calendarModalCallbacks())
       }
@@ -1439,12 +1437,11 @@ function initContextMenu() {
     )
   })
 
-  document.getElementById('ctx-new-task').addEventListener('click', async () => {
+  document.getElementById('ctx-new-task').addEventListener('click', () => {
     menu.hidden = true
-    await ensureTaskLists()
     openCreateModal(
-      state.taskLists[0]?.id ?? null,
-      state.taskLists,
+      getTaskCalendars()[0] ?? null,
+      null,
       calendarModalCallbacks(),
       { due: _ctxOpts.date ?? null }
     )
