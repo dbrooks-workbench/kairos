@@ -1,5 +1,5 @@
 import { parseTaskNotes, serializeNotes } from './parsers.js'
-import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, generateKairosId, archiveOrphanedMeta } from './driveTaskMeta.js'
+import { loadTaskMeta, loadTaskArchive, getTaskMeta, hasTaskRecord, syncTaskSnapshot, updateTaskMeta, archiveOrphanedMeta } from './driveTaskMeta.js'
 import { loadPrefs } from './kairosPrefs.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
 

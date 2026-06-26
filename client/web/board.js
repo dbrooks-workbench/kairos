@@ -3,7 +3,7 @@ import { getToken } from './auth.js'
 import {
   completeTask, uncompleteTask, patchTaskProps, patchTaskDate, rebalanceColumn,
 } from './providers/calendarTasks.js'
-import { patchTask } from './providers/googleTasks.js'
+import { patchTask } from './providers/googleTasksIntake.js'
 import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js'
 import { updateList, deleteList } from './providers/kairosLists.js'
 import { appendLogEntry } from './providers/lifeLog.js'

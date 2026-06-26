@@ -1,8 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
-import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask } from './providers/googleTasks.js'
+import { getTasks, completeTask, uncompleteTask } from './providers/googleTasksIntake.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
@@ -15,7 +14,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.21.0'
+const VERSION   = '0.21.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -287,7 +286,6 @@ function startPolling(ms) {
   stopPolling()
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
-    await runSweepAndRefresh()
     await runSpawnScan()
     if (state.view === 'board') {
       await loadBoardData()
@@ -306,8 +304,7 @@ function stopPolling() {
 // Resume immediately when the user returns to the tab
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
-  runSweepAndRefresh()
-    .then(() => runSpawnScan())
+  runSpawnScan()
     .then(() => {
       if (state.view === 'board') loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
@@ -661,8 +658,6 @@ function renderAccountPanel(accounts) {
   const panel     = document.getElementById('account-panel')
   const primary   = accounts.find(a => a.primary)
   const secondaries = accounts.filter(a => !a.primary)
-  const configListId = getSweepTargetListId()
-
   panel.innerHTML = ''
 
   // Primary account
@@ -694,33 +689,10 @@ function renderAccountPanel(accounts) {
   addSec.innerHTML = `<button class="acct-add" id="btn-add-secondary">+ Add secondary account</button>`
   panel.appendChild(addSec)
 
-  // Sweep destination + trigger (only when secondary accounts exist)
-  if (secondaries.length && state.taskLists.length) {
-    const sweepSec = el('div', 'acct-section acct-section-border')
-    sweepSec.innerHTML = `
-      <div class="acct-sweep-config">
-        <label class="acct-sweep-label">Sweep tasks to</label>
-        <select id="sweep-target-list" class="acct-sweep-select">
-          ${state.taskLists.map(l =>
-            `<option value="${escHtml(l.id)}"${l.id === configListId ? ' selected' : ''}>${escHtml(l.title)}</option>`
-          ).join('')}
-        </select>
-      </div>
-      <button class="acct-sweep-now" id="btn-sweep-now">Sweep now</button>`
-    panel.appendChild(sweepSec)
-  }
-
   panel.querySelector('#btn-panel-signout')?.addEventListener('click', logout)
   panel.querySelector('#btn-add-secondary')?.addEventListener('click', addAccount)
   panel.querySelectorAll('.acct-remove').forEach(btn => {
     btn.addEventListener('click', () => logoutAccount(btn.dataset.id))
-  })
-  panel.querySelector('#sweep-target-list')?.addEventListener('change', e => {
-    setSweepTargetListId(e.target.value)
-  })
-  panel.querySelector('#btn-sweep-now')?.addEventListener('click', () => {
-    panel.hidden = true
-    runSweepAndRefresh()
   })
 }
 
@@ -728,28 +700,6 @@ function el(tag, className) {
   const node = document.createElement(tag)
   if (className) node.className = className
   return node
-}
-
-// ── Sweep ─────────────────────────────────────────────────────────────────────
-
-async function runSweepAndRefresh() {
-  const accounts    = await getTokens()
-  const secondaries = accounts.filter(a => !a.primary)
-  if (!secondaries.length) return
-
-  try {
-    const { moved } = await runSweep(accounts, state.taskLists)
-    if (moved > 0) {
-      if (state.view === 'board') {
-        await loadBoardData()
-      } else {
-        state.items = await fetchItems(state.weekStart, addDays(state.weekStart, 7))
-        renderItems(getVisibleItems())
-      }
-    }
-  } catch (err) {
-    console.error('Sweep error:', err)
-  }
 }
 
 // ── Spawn scan ────────────────────────────────────────────────────────────────
@@ -1647,6 +1597,6 @@ render().then(async () => {
   const mobileScroll = document.getElementById('mobile-timed-scroll')
   if (mobileScroll) mobileScroll.scrollTop = Math.max(0, minsNow - 120)
 
-  runSweepAndRefresh().then(() => runSpawnScan())
+  runSpawnScan()
   startPolling(120_000)
 })

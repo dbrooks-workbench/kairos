@@ -1,8 +1,8 @@
-import { createTask } from './providers/googleTasks.js'
+import { createTask } from './providers/googleTasksIntake.js'
 import { updateEvent } from './providers/googleCalendar.js'
 import { serializeNotes, serializeEventDescription, nowTimestamp } from './providers/parsers.js'
 import { getToken } from './auth.js'
-import { getSweepTargetListId } from './sweep.js'
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,10 +35,7 @@ export async function processSpawnDirectives(calendarItems, taskLists) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const configuredId = getSweepTargetListId()
-  const targetListId = (configuredId && taskLists.some(l => l.id === configuredId))
-    ? configuredId
-    : taskLists[0]?.id
+  const targetListId = taskLists[0]?.id
   if (!targetListId) return { spawned: 0 }
 
   let spawned = 0
