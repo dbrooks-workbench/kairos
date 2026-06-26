@@ -118,10 +118,12 @@ export async function fsList(token, collection) {
 // BATCH SET up to 500 documents. writes = [{ path, data }]
 export async function fsBatchWrite(token, writes) {
   if (!writes.length) return
-  const base = _base()
+  // Document name in the request body must be the resource path (no https:// prefix),
+  // e.g. "projects/my-proj/databases/(default)/documents/tasks/abc123"
+  const resourceBase = `projects/${GOOGLE_PROJECT_ID}/databases/(default)/documents`
   const body = {
     writes: writes.map(({ path, data }) => ({
-      update: { name: `${base}/${path}`, ..._toDoc(data) },
+      update: { name: `${resourceBase}/${path}`, ..._toDoc(data) },
     })),
   }
   const res = await fetch(
