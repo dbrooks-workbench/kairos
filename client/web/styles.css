@@ -1219,6 +1219,14 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .board-col-done { opacity: 0.9; }
 
+.board-col-unlisted .board-col-header {
+  border-bottom-color: var(--warning-color, #f59e0b);
+}
+.board-col-unlisted .board-col-title {
+  color: var(--warning-color, #f59e0b);
+  font-style: italic;
+}
+
 /* Ghost placeholder while dragging a column */
 .board-col-ghost { opacity: 0.4; }
 

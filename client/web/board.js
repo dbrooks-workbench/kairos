@@ -8,7 +8,8 @@ import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js
 import { updateList, deleteList } from './providers/kairosLists.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
-const DONE_COL_ID = '__done__'
+const DONE_COL_ID     = '__done__'
+const UNLISTED_COL_ID = '__unlisted__'
 
 let _sortables  = []
 let _callbacks  = {}
@@ -199,18 +200,22 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
   destroyBoard()
   const board = document.getElementById('board')
 
-  // Partition: active tasks keyed by Firestore listId, completed in Done column
-  const activeByList = {}
-  const doneItems    = []
+  // Partition: active tasks keyed by Firestore listId, completed in Done, unassigned in Unlisted
+  const knownListIds  = new Set(taskLists.map(l => l.id))
+  const activeByList  = {}
+  const doneItems     = []
+  const unlistedItems = []
 
   for (const item of boardItems) {
     if (item.status === 'COMPLETED') {
       doneItems.push(item)
     } else {
       const lid = item.metadata?.listId
-      if (lid) {
+      if (lid && knownListIds.has(lid)) {
         if (!activeByList[lid]) activeByList[lid] = []
         activeByList[lid].push(item)
+      } else {
+        unlistedItems.push(item)
       }
     }
   }
@@ -219,7 +224,7 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
   const sorted = [...taskLists].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   for (const list of sorted) {
     const items = sortedItems(activeByList[list.id] ?? [], list.id)
-    const col   = buildCol(list, items, false, doneWindow)
+    const col   = buildCol(list, items, 'user', doneWindow)
     board.appendChild(col)
     _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
       group:      'tasks',
@@ -231,9 +236,24 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     }))
   }
 
+  if (unlistedItems.length > 0) {
+    const unlistedCol = buildCol(
+      { id: UNLISTED_COL_ID, name: 'Unlisted', calendarId: null },
+      unlistedItems, 'unlisted', doneWindow,
+    )
+    board.appendChild(unlistedCol)
+    _sortables.push(Sortable.create(unlistedCol.querySelector('.board-task-list'), {
+      group:      { name: 'tasks', pull: true, put: false },
+      animation:  150,
+      ghostClass: 'board-ghost',
+      sort:       false,
+      onEnd:      handleDrop,
+    }))
+  }
+
   const doneCol = buildCol(
     { id: DONE_COL_ID, name: 'Done', calendarId: null },
-    doneItems.slice(0, 100), true, doneWindow,
+    doneItems.slice(0, 100), 'done', doneWindow,
   )
   board.appendChild(doneCol)
   board.appendChild(buildAddListCol(callbacks))
@@ -260,15 +280,19 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
-function buildCol(list, items, isDone, doneWindow) {
+function buildCol(list, items, colType, doneWindow) {
+  const isUser     = colType === 'user'
+  const isDone     = colType === 'done'
+  const isUnlisted = colType === 'unlisted'
+
   const col = document.createElement('div')
-  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}`
-  if (!isDone) col.dataset.listId = list.id
+  col.className = `board-col${isDone ? ' board-col-done' : isUnlisted ? ' board-col-unlisted' : ' board-col-reorderable'}`
+  if (isUser) col.dataset.listId = list.id
 
   const hdr = document.createElement('div')
   hdr.className = 'board-col-header'
 
-  if (!isDone) {
+  if (isUser) {
     const dragHandle = document.createElement('span')
     dragHandle.className   = 'board-col-drag-handle'
     dragHandle.textContent = '⠿'
@@ -286,7 +310,7 @@ function buildCol(list, items, isDone, doneWindow) {
 
   hdr.append(titleEl, countEl)
 
-  if (!isDone) {
+  if (isUser) {
     titleEl.title        = 'Click to rename'
     titleEl.style.cursor = 'text'
     titleEl.addEventListener('click', () => {
@@ -358,7 +382,7 @@ function buildCol(list, items, isDone, doneWindow) {
     hdr.appendChild(delBtn)
   }
 
-  if (isDone) {
+  if (isDone) {  // Done-window toggle only on sentinel Done column
     const toggle = document.createElement('div')
     toggle.className = 'done-window-toggle'
     for (const days of [7, 30, 90]) {
