@@ -1762,8 +1762,48 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .editor-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 2px;
+  gap: 4px;
+}
+
+.editor-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.editor-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.editor-btn:hover { background: #f1f3f4; border-color: var(--border); color: var(--text); }
+.editor-btn.is-active { background: #e8f0fe; border-color: #c5d5f5; color: var(--today-color); }
+
+/* Per-button typography so the labels look like their effect */
+.editor-btn[data-tip-name="bold"]   { font-weight: 700; }
+.editor-btn[data-tip-name="italic"] { font-style: italic; }
+.editor-btn[data-tip-name="strike"] { text-decoration: line-through; }
+
+.editor-btn-sep {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
 }
 
 .editor-mode-btn {
@@ -1774,6 +1814,7 @@ body.resize-active * { cursor: ns-resize !important; }
   background: var(--bg);
   color: var(--text-muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 .editor-mode-btn:hover { background: #f1f3f4; }
 

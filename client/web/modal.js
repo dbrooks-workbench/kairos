@@ -22,6 +22,18 @@ let _callbacks                 = {}
 let _defaultDue                = null
 let _editor                    = null   // Tiptap editor instance (created once in initModal)
 let _rawMode                   = false  // true = textarea visible, editor hidden
+let _rawBtn                    = null   // Raw/Rich toggle button reference
+
+// ── Toolbar config ────────────────────────────────────────────────────────────
+
+const TOOLBAR = [
+  { name: 'bold',       label: 'B',  title: 'Bold',           cmd: e => { e.chain().focus().toggleBold().run() } },
+  { name: 'italic',     label: 'I',  title: 'Italic',         cmd: e => { e.chain().focus().toggleItalic().run() } },
+  { name: 'strike',     label: 'S',  title: 'Strikethrough',  cmd: e => { e.chain().focus().toggleStrike().run() } },
+  null,
+  { name: 'bulletList', label: '≡',  title: 'Bullet list',    cmd: e => { e.chain().focus().toggleBulletList().run() } },
+  { name: 'taskList',   label: '☑',  title: 'Checklist',      cmd: e => { e.chain().focus().toggleTaskList().run() } },
+]
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -40,8 +52,6 @@ export function initModal() {
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('task-modal').hidden) close() })
 
-  el('modal-editor-toggle').addEventListener('click', _toggleMode)
-
   // Create the Tiptap editor once and keep it alive
   _editor = new Editor({
     element: el('modal-editor'),
@@ -57,6 +67,9 @@ export function initModal() {
       attributes: { class: 'modal-editor-content' },
     },
   })
+
+  _buildToolbar()
+  _editor.on('transaction', _updateToolbar)
 }
 
 export function openModal(item, taskLists, callbacks) {
@@ -95,6 +108,51 @@ function close() { el('task-modal').hidden = true }
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// ── Toolbar ───────────────────────────────────────────────────────────────────
+
+function _buildToolbar() {
+  const toolbar = el('modal-editor-toolbar')
+
+  // Formatting buttons (left)
+  const group = document.createElement('div')
+  group.className = 'editor-btn-group'
+
+  for (const item of TOOLBAR) {
+    if (!item) {
+      const sep = document.createElement('span')
+      sep.className = 'editor-btn-sep'
+      group.appendChild(sep)
+      continue
+    }
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'editor-btn'
+    btn.dataset.tipName = item.name
+    btn.textContent = item.label
+    btn.title = item.title
+    // mousedown prevents the editor from losing focus before the command runs
+    btn.addEventListener('mousedown', e => { e.preventDefault(); item.cmd(_editor) })
+    group.appendChild(btn)
+  }
+  toolbar.appendChild(group)
+
+  // Raw/Rich toggle (right)
+  _rawBtn = document.createElement('button')
+  _rawBtn.type = 'button'
+  _rawBtn.className = 'editor-mode-btn'
+  _rawBtn.title = 'Toggle raw markdown'
+  _rawBtn.textContent = 'Raw'
+  _rawBtn.addEventListener('click', _toggleMode)
+  toolbar.appendChild(_rawBtn)
+}
+
+function _updateToolbar() {
+  if (!_editor) return
+  for (const btn of el('modal-editor-toolbar').querySelectorAll('.editor-btn[data-tip-name]')) {
+    btn.classList.toggle('is-active', _editor.isActive(btn.dataset.tipName))
+  }
 }
 
 // ── Populate ──────────────────────────────────────────────────────────────────
@@ -177,10 +235,10 @@ function _toggleMode() {
 function _switchToRaw() {
   if (_rawMode) return
   _rawMode = true
-  el('modal-notes-raw').value = _editor ? _editor.storage.markdown.getMarkdown() : ''
-  el('modal-editor').hidden       = true
-  el('modal-notes-raw').hidden    = false
-  el('modal-editor-toggle').textContent = 'Rich'
+  el('modal-notes-raw').value  = _editor ? _editor.storage.markdown.getMarkdown() : ''
+  el('modal-editor').hidden    = true
+  el('modal-notes-raw').hidden = false
+  if (_rawBtn) _rawBtn.textContent = 'Rich'
 }
 
 function _switchToRich() {
@@ -188,9 +246,9 @@ function _switchToRich() {
   _rawMode = false
   const md = el('modal-notes-raw').value
   if (_editor) _editor.commands.setContent(md, false)
-  el('modal-notes-raw').hidden    = true
-  el('modal-editor').hidden       = false
-  el('modal-editor-toggle').textContent = 'Raw'
+  el('modal-notes-raw').hidden = true
+  el('modal-editor').hidden    = false
+  if (_rawBtn) _rawBtn.textContent = 'Raw'
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
