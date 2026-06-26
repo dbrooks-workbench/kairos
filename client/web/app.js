@@ -12,7 +12,7 @@ import { initEventEditor, openEventEditor, openEventEditorForEdit } from './even
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.18.4'
+const VERSION   = '0.18.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -27,6 +27,30 @@ const state = {
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
   primaryListId: null,     // Google Tasks default list ID (cannot be deleted)
+}
+
+// ── Color helpers ─────────────────────────────────────────────────────────────
+
+// Returns '#000000' or '#ffffff' — whichever has better contrast against the
+// given hex background color. Uses the WCAG relative luminance formula.
+function contrastColor(hex) {
+  if (!hex?.startsWith('#')) return null
+  const h    = hex.slice(1)
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h
+  const r    = parseInt(full.slice(0, 2), 16) / 255
+  const g    = parseInt(full.slice(2, 4), 16) / 255
+  const b    = parseInt(full.slice(4, 6), 16) / 255
+  const lin  = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  const L    = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  return L > 0.179 ? '#000000' : '#ffffff'
+}
+
+// Apply background color and an auto-contrasted foreground color to an element.
+function applyColor(el, color) {
+  if (!color) return
+  el.style.background = color
+  const fg = contrastColor(color)
+  if (fg) el.style.color = fg
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -839,7 +863,7 @@ function renderItems(items) {
 
       if (isTask) {
         if (isDone) chipEl.style.background = 'transparent'
-        else if (item.color) chipEl.style.background = item.color
+        else if (item.color) applyColor(chipEl, item.color)
 
         const check = document.createElement('button')
         check.className = `task-check${isDone ? ' done' : ''}`
@@ -881,7 +905,7 @@ function renderItems(items) {
         })
       } else if (isCommitment) {
         if (isDone) chipEl.style.background = 'transparent'
-        else if (item.color) chipEl.style.background = item.color
+        else if (item.color) applyColor(chipEl, item.color)
 
         const check = document.createElement('button')
         check.className = `task-check${isDone ? ' done' : ''}`
@@ -911,7 +935,7 @@ function renderItems(items) {
           openEventEditorForEdit(item, calendarModalCallbacks())
         })
       } else {
-        if (item.color) chipEl.style.background = item.color
+        if (item.color) applyColor(chipEl, item.color)
         chipEl.textContent = item.title
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
@@ -957,7 +981,7 @@ function renderItems(items) {
       const el     = document.createElement('div')
       el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
       el.dataset.itemId = item.id
-      if (item.color) el.style.background = item.color
+      if (item.color) applyColor(el, item.color)
       el.style.top    = `${topMin}px`
       el.style.height = `${durMin - 2}px`
       if (numCols === 1) {
@@ -1098,7 +1122,7 @@ function renderMobileDay() {
 
     const chip = document.createElement('div')
     chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}`
-    if (item.color) chip.style.background = item.color
+    if (item.color) applyColor(chip, item.color)
     chip.textContent = item.title
     chip.title       = item.title
     chip.addEventListener('click', () => {
@@ -1131,7 +1155,7 @@ function renderMobileDay() {
 
     const eventEl = document.createElement('div')
     eventEl.className = `mobile-cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
-    if (item.color) eventEl.style.background = item.color
+    if (item.color) applyColor(eventEl, item.color)
     eventEl.style.top    = `${topMin}px`
     eventEl.style.height = `${durMin - 2}px`
 
