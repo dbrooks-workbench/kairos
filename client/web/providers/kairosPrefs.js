@@ -3,20 +3,18 @@
 // Shape:
 //   {
 //     version: 1,
-//     hiddenCalendars:     string[],
-//     commitmentCalendars: string[],
-//     boardColumnSort:     { [listId]: 'manual' | 'date' },
-//     taskListOrder:       string[],
+//     hiddenCalendars: string[],
+//     taskCalendars:   string[],   // ordered project/task calendars
+//     taskColumnSort:  { [calId]: 'manual' | 'date' },
 //   }
 
 import { fsGet, fsSet } from './firestore.js'
 
 const DEFAULTS = () => ({
-  version:             1,
-  hiddenCalendars:     [],
-  commitmentCalendars: [],
-  boardColumnSort:     {},
-  taskListOrder:       [],
+  version:        1,
+  hiddenCalendars: [],
+  taskCalendars:   [],
+  taskColumnSort:  {},
 })
 
 let _prefs       = null
@@ -39,7 +37,6 @@ async function _doLoad(token) {
     if (data) {
       _prefs = { ...DEFAULTS(), ...data }
     } else {
-      // First run — create default prefs
       _prefs = DEFAULTS()
       await fsSet(token, 'prefs/main', _prefs)
     }
@@ -56,10 +53,9 @@ async function _doLoad(token) {
 
 // ── Getters ───────────────────────────────────────────────────────────────────
 
-export function getHiddenCalendars()     { return _prefs?.hiddenCalendars     ?? [] }
-export function getCommitmentCalendars() { return _prefs?.commitmentCalendars ?? [] }
-export function getBoardColumnSort()     { return _prefs?.boardColumnSort     ?? {} }
-export function getTaskListOrder()       { return _prefs?.taskListOrder       ?? [] }
+export function getHiddenCalendars() { return _prefs?.hiddenCalendars ?? [] }
+export function getTaskCalendars()   { return _prefs?.taskCalendars   ?? [] }
+export function getTaskColumnSort()  { return _prefs?.taskColumnSort  ?? {} }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -70,24 +66,17 @@ export function setHiddenCalendars(cals) {
   _scheduleSave()
 }
 
-export function setCommitmentCalendars(cals) {
+export function setTaskCalendars(cals) {
   if (!_prefs) return
-  _prefs.commitmentCalendars = [...cals]
+  _prefs.taskCalendars = [...cals]
   _dirty = true
   _scheduleSave()
 }
 
-export function setBoardColumnSort(listId, mode) {
+export function setTaskColumnSort(calId, mode) {
   if (!_prefs) return
-  if (!_prefs.boardColumnSort) _prefs.boardColumnSort = {}
-  _prefs.boardColumnSort[listId] = mode
-  _dirty = true
-  _flushNow()
-}
-
-export function setTaskListOrder(order) {
-  if (!_prefs) return
-  _prefs.taskListOrder = [...order]
+  if (!_prefs.taskColumnSort) _prefs.taskColumnSort = {}
+  _prefs.taskColumnSort[calId] = mode
   _dirty = true
   _flushNow()
 }

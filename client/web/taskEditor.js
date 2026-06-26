@@ -8,7 +8,7 @@ import { Markdown } from 'tiptap-markdown'
 import { getToken } from './auth.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot, serializeNotesFromMarkdown } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask } from './providers/googleTasks.js'
-import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
+import { generateKairosId, updateTaskMeta } from './providers/driveTaskMeta.js'
 import { appendLogEntry, getItemLog, deleteLogEntry } from './providers/lifeLog.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -333,7 +333,7 @@ async function save() {
     const dueStr = el('modal-due').value
     const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-    const kid          = _item?.metadata?.kid ?? generateKid()
+    const kid          = _item?.metadata?.kid ?? generateKairosId()
     const userComments = _comments.filter(c => !c._readonly)
     const snapshot     = userComments.length > 0 ? buildSnapshot({ loe, comments: userComments }) : null
 

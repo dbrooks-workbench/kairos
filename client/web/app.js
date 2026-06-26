@@ -3,23 +3,23 @@ import { runSweep, getSweepTargetListId, setSweepTargetListId } from './sweep.js
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getTasks, completeTask, uncompleteTask, patchTask, getAllTasks, getTaskLists, createTaskList } from './providers/googleTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskListOrder, setTaskListOrder, getCommitmentCalendars, setCommitmentCalendars } from './providers/drivePrefs.js'
-import { setEventCompleted, setEventUncompleted } from './providers/driveEventTaskMeta.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
+import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
-import { initModal, openModal, openCreateModal } from './modal.js'
+import { initModal, openModal, openCreateModal } from './taskEditor.js'
 import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.19.2'
+const VERSION   = '0.20.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
   items: [],
   calendars: [],
   hiddenCalendars:     new Set(),   // populated from Drive prefs after auth
-  commitmentCalendars: new Set(),   // calendar IDs designated as commitment calendars
+  taskCalendars: new Set(),          // calendar IDs designated as task/project calendars
   allDayExpanded: false,        // false = top-3 cap; true = show all
   view: 'calendar',        // 'calendar' | 'board'
   taskLists: [],           // raw Google Tasks list objects (for board columns + modal)
@@ -155,8 +155,8 @@ async function handleToggleCommitment(item) {
   const eventId = item.source.external_id
 
   try {
-    if (isDone) await setEventUncompleted(token, eventId)
-    else        await setEventCompleted(token, eventId)
+    if (isDone) await setUncompleted(token, eventId)
+    else        await setCompleted(token, eventId)
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'CONFIRMED' : 'COMPLETED'
     renderItems(getVisibleItems())
@@ -329,7 +329,7 @@ function boardCallbacks() {
       if (!token) return
       try {
         const newList = await createTaskList(token, name)
-        setTaskListOrder([...getTaskListOrder(), newList.id])
+        setTaskCalendars([...getTaskCalendars(), newList.id])
         await loadBoardData()
       } catch (err) {
         console.error('Create list failed:', err)
@@ -380,7 +380,7 @@ function renderCalendarPicker() {
   }
 
   panel.innerHTML = state.calendars.map(cal => {
-    const isCommitment = state.commitmentCalendars.has(cal.id)
+    const isTaskCal = state.taskCalendars.has(cal.id)
     return `
       <div class="cal-picker-item">
         <label class="cal-picker-vis">
@@ -389,9 +389,9 @@ function renderCalendarPicker() {
           <span class="cal-swatch" style="background:${escHtml(cal.backgroundColor ?? '#1a73e8')}"></span>
           <span class="cal-name" title="${escHtml(cal.summary)}">${escHtml(cal.summary)}</span>
         </label>
-        <button class="cal-commitment-toggle${isCommitment ? ' active' : ''}"
+        <button class="cal-task-toggle${isTaskCal ? ' active' : ''}"
                 data-cal-id="${escHtml(cal.id)}"
-                title="Use as commitment calendar">commitment</button>
+                title="Use as task calendar">tasks</button>
       </div>`
   }).join('')
 
@@ -406,18 +406,18 @@ function renderCalendarPicker() {
     })
   })
 
-  panel.querySelectorAll('.cal-commitment-toggle').forEach(btn => {
+  panel.querySelectorAll('.cal-task-toggle').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation()
       const id = btn.dataset.calId
-      if (state.commitmentCalendars.has(id)) {
-        state.commitmentCalendars.delete(id)
+      if (state.taskCalendars.has(id)) {
+        state.taskCalendars.delete(id)
         btn.classList.remove('active')
       } else {
-        state.commitmentCalendars.add(id)
+        state.taskCalendars.add(id)
         btn.classList.add('active')
       }
-      setCommitmentCalendars([...state.commitmentCalendars])
+      setTaskCalendars([...state.taskCalendars])
       refreshCalendarItems()
     })
   })
@@ -1395,7 +1395,7 @@ async function render() {
       getToken().then(t => t ? getTaskLists(t).then(l => { state.taskLists = l }) : null),
       getToken().then(t => t ? loadPrefs(t).then(() => {
         state.hiddenCalendars     = new Set(getHiddenCalendars())
-        state.commitmentCalendars = new Set(getCommitmentCalendars())
+        state.taskCalendars = new Set(getTaskCalendars())
       }) : null),
     ])
     state.items = items

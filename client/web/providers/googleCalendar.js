@@ -1,6 +1,6 @@
 import { parseEventDescription } from './parsers.js'
-import { loadPrefs, getCommitmentCalendars } from './drivePrefs.js'
-import { loadEventTaskMeta, getEventCompletedAt } from './driveEventTaskMeta.js'
+import { loadPrefs, getTaskCalendars } from './kairosPrefs.js'
+import { loadCompletionStore, getCompletedAt } from './completionStore.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
@@ -45,8 +45,8 @@ function normalizeEvent(event, calendar) {
 
   const { prose, config } = parseEventDescription(event.description ?? '')
 
-  const isCommitment = getCommitmentCalendars().includes(calendar.id)
-  const completedAt  = isCommitment ? getEventCompletedAt(event.id) : null
+  const isTaskCal   = getTaskCalendars().includes(calendar.id)
+  const completedAt = isTaskCal ? getCompletedAt(event.id) : null
   const itemId       = `gcal:${calendar.id}:${event.id}`
 
   // Comments sourced exclusively from the life log Sheet (single source of truth).
@@ -81,7 +81,7 @@ function normalizeEvent(event, calendar) {
       calendar_color: calendar.backgroundColor ?? null,
       recurring_event_id: event.recurringEventId ?? null,
       location: event.location ?? null,
-      task_calendar: isCommitment,
+      task_calendar: isTaskCal,
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
     editable: event.organizer?.self === true,
@@ -141,7 +141,7 @@ export async function getEvents(token, start, end) {
   await loadPrefs(token)   // must resolve before loadLifeLog reads getLifeLogSheetId()
   const [calendars] = await Promise.all([
     getCalendars(token),
-    loadEventTaskMeta(token),   // ensures getEventCompletedAt() returns correct data
+    loadCompletionStore(token),
     loadLifeLog(token),         // ensures getItemLog() returns correct data
   ])
   const results = await Promise.allSettled(

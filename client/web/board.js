@@ -2,8 +2,8 @@ import Sortable from 'sortablejs'
 import { getToken } from './auth.js'
 import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, renameTaskList, deleteTaskList } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'
-import { getBoardColumnSort, setBoardColumnSort, getTaskListOrder, setTaskListOrder } from './providers/drivePrefs.js'
-import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
+import { getTaskColumnSort, setTaskColumnSort, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
+import { generateKairosId, updateTaskMeta } from './providers/driveTaskMeta.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
 const DONE_COL_ID = '__done__'
@@ -16,13 +16,13 @@ let _doneWindow     = 30
 let _primaryListId  = null
 
 function setColSort(listId, mode) {
-  if (getBoardColumnSort()[listId] === mode) return
-  setBoardColumnSort(listId, mode)
+  if (getTaskColumnSort()[listId] === mode) return
+  setTaskColumnSort(listId, mode)
   renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow, _primaryListId)
 }
 
 function colSortMode(listId) {
-  return getBoardColumnSort()[listId] ?? 'manual'
+  return getTaskColumnSort()[listId] ?? 'manual'
 }
 
 function sortedItems(items, listId) {
@@ -37,7 +37,7 @@ function sortedItems(items, listId) {
 
 // Apply the saved list order, appending any new lists not yet in the order array.
 function orderedLists(lists) {
-  const order  = getTaskListOrder()
+  const order  = getTaskCalendars()
   if (!order.length) return lists
   const known   = new Set(order)
   const ordered = order.map(id => lists.find(l => l.id === id)).filter(Boolean)
@@ -83,7 +83,7 @@ async function executeSnooze(daysOverride) {
   const newDateStr = `${newDue.getFullYear()}-${pad(newDue.getMonth()+1)}-${pad(newDue.getDate())}`
   const newDueIso  = `${newDateStr}T00:00:00.000Z`
 
-  const kid = item.metadata?.kid ?? generateKid()
+  const kid = item.metadata?.kid ?? generateKairosId()
   updateTaskMeta(kid, { loe: item.metadata.loe ?? null })
 
   const notes = serializeNotes({
@@ -271,7 +271,7 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30, p
     onEnd: () => {
       const newOrder = [...board.querySelectorAll('.board-col-reorderable')]
         .map(col => col.dataset.listId)
-      setTaskListOrder(newOrder)
+      setTaskCalendars(newOrder)
     },
   }))
 
@@ -390,7 +390,7 @@ function buildCol(list, items, isDone, doneWindow) {
           const token = await getToken()
           if (!token) return
           await deleteTaskList(token, list.id)
-          setTaskListOrder(getTaskListOrder().filter(id => id !== list.id))
+          setTaskCalendars(getTaskCalendars().filter(id => id !== list.id))
           _callbacks.onRefresh?.()
         } catch (err) {
           console.error('Delete list failed:', err)

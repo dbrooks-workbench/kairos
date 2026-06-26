@@ -7,9 +7,8 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { getToken } from './auth.js'
 import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
 import { nowTimestamp, displayTimestamp } from './providers/parsers.js'
-import { setEventCompleted, setEventUncompleted, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
+import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { getItemLog, appendLogEntry, deleteLogEntry } from './providers/lifeLog.js'
-import { getCommitmentCalendars } from './providers/drivePrefs.js'
 import { openSnoozePopover } from './board.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -575,8 +574,8 @@ async function handleCommitmentToggle() {
 
   el('event-modal-complete').disabled = true
   try {
-    if (isDone) await setEventUncompleted(token, eventId)
-    else        await setEventCompleted(token, eventId)
+    if (isDone) await setUncompleted(token, eventId)
+    else        await setCompleted(token, eventId)
     appendLogEntry(token, {
       item_id:       _editItem.id,
       item_type:     'EVENT',
