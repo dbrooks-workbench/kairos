@@ -1,57 +1,237 @@
+import { Editor } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import Placeholder from '@tiptap/extension-placeholder'
+
 import { getToken } from './auth.js'
 import { createEvent, updateEvent, getEvent, deleteEvent } from './providers/googleCalendar.js'
-import { serializeNotes, buildSnapshot } from './providers/parsers.js'
+import { nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { setEventCompleted, setEventUncompleted, getEventCompletedAt } from './providers/driveEventTaskMeta.js'
-import { getItemLog } from './providers/lifeLog.js'
+import { getItemLog, appendLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { getCommitmentCalendars } from './providers/drivePrefs.js'
-import { appendLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
 
+// ── Module state ──────────────────────────────────────────────────────────────
+
 let _callbacks     = {}
-let _editItem      = null   // CalendarItem being edited; null = create mode
-let _preserveRrule = null   // original RRULE to keep when "Custom" is not re-configured
-let _pendingBody   = null   // body held while scope-picker modal is open
-let _pendingAction = null   // 'save' | 'delete' — which action the scope modal is responding to
+let _editItem      = null
+let _preserveRrule = null
+let _pendingBody   = null
+let _pendingAction = null
+let _locLink       = null
 
-// DOM nodes created once in initEventEditor, reused on every open
-let _locLink     = null
-let _descPreview = null
+// Tiptap (HTML mode — Google Calendar stores HTML descriptions)
+let _editorEvent  = null
+let _evRawMode    = false
+let _evRawBtn     = null
 
-// ── URL linkification ─────────────────────────────────────────────────────────
+// Comments
+let _evComments           = []
+let _evOriginalTimestamps = new Set()
 
-function escHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+// ── Toolbar config ────────────────────────────────────────────────────────────
+
+const EV_TOOLBAR = [
+  { name: 'bold',       label: 'B', title: 'Bold',           cmd: e => e.chain().focus().toggleBold().run() },
+  { name: 'italic',     label: 'I', title: 'Italic',         cmd: e => e.chain().focus().toggleItalic().run() },
+  { name: 'strike',     label: 'S', title: 'Strikethrough',  cmd: e => e.chain().focus().toggleStrike().run() },
+  null,
+  { name: 'bulletList', label: '≡', title: 'Bullet list',    cmd: e => e.chain().focus().toggleBulletList().run() },
+  { name: 'taskList',   label: '☑', title: 'Checklist',      cmd: e => e.chain().focus().toggleTaskList().run() },
+]
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+
+function el(id) { return document.getElementById(id) }
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-const _URL_RE = /https?:\/\/[^\s<>"']+/g
+function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m }
+function minutesToTime(n) { return `${String(Math.floor(n/60)%24).padStart(2,'0')}:${String(n%60).padStart(2,'0')}` }
 
-function linkify(text) {
-  _URL_RE.lastIndex = 0
-  let out = '', last = 0, m
-  while ((m = _URL_RE.exec(text)) !== null) {
-    out += escHtml(text.slice(last, m.index))
-    out += `<a href="${escHtml(m[0])}" target="_blank" rel="noopener noreferrer">${escHtml(m[0])}</a>`
-    last = _URL_RE.lastIndex
+function setAllDayUI(allDay) {
+  el('event-modal-panel').classList.toggle('all-day', allDay)
+}
+
+// ── Description helpers ───────────────────────────────────────────────────────
+
+// Convert plain text to HTML paragraphs for loading into the Tiptap editor.
+// Existing Google Calendar HTML descriptions are passed through unchanged.
+function _textToHtml(text) {
+  if (!text?.trim()) return ''
+  if (/<[a-z][\s\S]*>/i.test(text.trim())) return text
+  return text.trim().split(/\n\n+/)
+    .map(p => `<p>${p.trim().replace(/\n/g, '<br>')}</p>`)
+    .join('')
+}
+
+// Strip the Kairos-written snapshot div from a description HTML string before
+// loading into the editor. The snapshot is delimited by data-kairos="snapshot".
+function _stripEvSnapshot(html) {
+  if (!html) return ''
+  return html.replace(/<div[^>]*data-kairos="snapshot"[^>]*>[\s\S]*?<\/div>/gi, '').trim()
+}
+
+// Build an HTML snapshot block for commitment events — appended to the
+// description on save so other calendar clients see comment count.
+// Returns '' when there are no comments (skip the block entirely).
+function _buildEvSnapshotHtml(comments) {
+  if (!comments?.length) return ''
+  const count = comments.length
+  const date  = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const text  = `${count} comment${count !== 1 ? 's' : ''} · Updated ${date}`
+  return `<div data-kairos="snapshot" style="font-size:11px;color:#888;border-top:1px solid #ddd;margin-top:12px;padding-top:8px">${text}</div>`
+}
+
+function _evGetHtml() {
+  if (_evRawMode) return el('event-modal-desc-raw').value.trim()
+  if (!_editorEvent) return ''
+  const html = _editorEvent.getHTML()
+  return html === '<p></p>' ? '' : html
+}
+
+// ── Toolbar helpers ───────────────────────────────────────────────────────────
+
+function _buildEvToolbar() {
+  const toolbar = el('event-modal-editor-toolbar')
+
+  const group = document.createElement('div')
+  group.className = 'editor-btn-group'
+  for (const item of EV_TOOLBAR) {
+    if (!item) {
+      const sep = document.createElement('span')
+      sep.className = 'editor-btn-sep'
+      group.appendChild(sep)
+      continue
+    }
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'editor-btn'
+    btn.dataset.tipName = item.name
+    btn.textContent = item.label
+    btn.title = item.title
+    btn.addEventListener('mousedown', e => { e.preventDefault(); item.cmd(_editorEvent) })
+    group.appendChild(btn)
   }
-  return (out + escHtml(text.slice(last))).replace(/\n/g, '<br>')
+  toolbar.appendChild(group)
+
+  _evRawBtn = document.createElement('button')
+  _evRawBtn.type = 'button'
+  _evRawBtn.className = 'editor-mode-btn'
+  _evRawBtn.title = 'Toggle raw HTML'
+  _evRawBtn.textContent = 'Raw'
+  _evRawBtn.addEventListener('click', _evToggleMode)
+  toolbar.appendChild(_evRawBtn)
 }
 
-function _refreshDescPreview() {
-  if (!_descPreview) return
-  const ta = el('event-modal-desc')
-  if (!/https?:\/\//.test(ta.value) || document.activeElement === ta) {
-    _descPreview.hidden = true
-  } else {
-    _descPreview.innerHTML = linkify(ta.value)
-    _descPreview.hidden = false
+function _updateEvToolbar() {
+  if (!_editorEvent) return
+  for (const btn of el('event-modal-editor-toolbar').querySelectorAll('.editor-btn[data-tip-name]')) {
+    btn.classList.toggle('is-active', _editorEvent.isActive(btn.dataset.tipName))
   }
 }
 
-const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
+function _evToggleMode() { _evRawMode ? _evSwitchToRich() : _evSwitchToRaw() }
+
+function _evSwitchToRaw() {
+  if (_evRawMode) return
+  _evRawMode = true
+  el('event-modal-desc-raw').value = _editorEvent ? _editorEvent.getHTML() : ''
+  el('event-modal-editor').hidden    = true
+  el('event-modal-desc-raw').hidden  = false
+  if (_evRawBtn) _evRawBtn.textContent = 'Rich'
+}
+
+function _evSwitchToRich() {
+  if (!_evRawMode) return
+  _evRawMode = false
+  const html = el('event-modal-desc-raw').value
+  if (_editorEvent) _editorEvent.commands.setContent(html, false)
+  el('event-modal-desc-raw').hidden = true
+  el('event-modal-editor').hidden   = false
+  if (_evRawBtn) _evRawBtn.textContent = 'Raw'
+}
+
+// ── Comments helpers ──────────────────────────────────────────────────────────
+
+function _renderEventComments() {
+  const container = el('event-modal-comments-items')
+  container.innerHTML = ''
+  const sorted = [..._evComments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  sorted.forEach(c => {
+    const row = document.createElement('div')
+    row.className = 'modal-comment-row' + (c._readonly ? ' modal-comment-readonly' : '')
+
+    const ts = document.createElement('span')
+    ts.className   = 'modal-comment-ts'
+    ts.textContent = displayTimestamp(c.timestamp)
+
+    const del = document.createElement('button')
+    del.className   = 'modal-row-del'
+    del.textContent = '×'
+    del.addEventListener('click', async () => {
+      _evComments = _evComments.filter(x => x !== c)
+      _renderEventComments()
+      if (c._id && _editItem) {
+        const token = await getToken()
+        if (token) deleteLogEntry(token, _editItem.id, c._id)
+      }
+    })
+
+    if (c._readonly) {
+      const txt = document.createElement('span')
+      txt.className   = 'modal-comment-text'
+      txt.textContent = c.text
+      row.append(ts, txt, del)
+    } else {
+      const txt = document.createElement('input')
+      txt.type      = 'text'
+      txt.className = 'modal-comment-text'
+      txt.value     = c.text
+      txt.addEventListener('input', () => {
+        const orig = _evComments.find(x => x === c)
+        if (orig) orig.text = txt.value
+      })
+      row.append(ts, txt, del)
+    }
+    container.appendChild(row)
+  })
+  el('event-modal-comments-count').textContent = _evComments.length ? `(${_evComments.length})` : ''
+}
+
+function _addEventComment() {
+  const inp  = el('event-modal-comment-input')
+  const text = inp.value.trim()
+  if (!text) return
+  _evComments.push({ _id: null, timestamp: nowTimestamp(), text })
+  inp.value = ''
+  _renderEventComments()
+  el('event-modal-comments-section').open = true
+}
+
+async function _logNewEvComments(token, itemId, title) {
+  const newComments = _evComments.filter(c => !c._readonly && !_evOriginalTimestamps.has(c.timestamp))
+  for (const c of newComments) {
+    appendLogEntry(token, {
+      item_id:       itemId,
+      item_type:     'EVENT',
+      title,
+      verb:          'comment',
+      action_detail: { verb: 'comment', text: c.text },
+      narrative:     c.text,
+      context:       '',
+    })
+    _evOriginalTimestamps.add(c.timestamp)
+  }
+}
 
 // ── Recurrence helpers ────────────────────────────────────────────────────────
 
-// Match an existing RRULE string to one of our simple preset keys (or 'CUSTOM')
+const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
+
 function matchRrulePreset(rrule) {
   if (!rrule) return ''
   if (rrule === 'RRULE:FREQ=DAILY')   return 'DAILY'
@@ -92,23 +272,6 @@ function buildCustomRrule() {
   if (_crpEndType === 'count' && _crpEndCount) rule += `;COUNT=${_crpEndCount}`
   return rule
 }
-
-// ── DOM helpers ───────────────────────────────────────────────────────────────
-
-function el(id) { return document.getElementById(id) }
-
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m }
-function minutesToTime(n) { return `${String(Math.floor(n/60)%24).padStart(2,'0')}:${String(n%60).padStart(2,'0')}` }
-
-function setAllDayUI(allDay) {
-  el('event-modal-panel').classList.toggle('all-day', allDay)
-}
-
-// ── Custom recurrence panel init ──────────────────────────────────────────────
 
 function initCustomRecur() {
   el('crp-freq').addEventListener('change', e => {
@@ -164,7 +327,7 @@ export function initEventEditor() {
 
   el('event-modal-recur').addEventListener('change', e => {
     el('custom-recur-panel').hidden = e.target.value !== 'CUSTOM'
-    _preserveRrule = null  // user changed the selector — don't preserve original anymore
+    _preserveRrule = null
   })
 
   el('event-modal-delete')?.addEventListener('click', confirmDelete)
@@ -180,8 +343,9 @@ export function initEventEditor() {
   })
 
   el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
 
-  // ── Location link ──────────────────────────────────────────────────────────
+  // Location URL link
   _locLink = document.createElement('a')
   _locLink.className = 'field-url-link'
   _locLink.target    = '_blank'
@@ -189,25 +353,17 @@ export function initEventEditor() {
   _locLink.textContent = '↗'
   _locLink.hidden    = true
   el('event-modal-location').parentNode.appendChild(_locLink)
-
   el('event-modal-location').addEventListener('input', e => {
     const v = e.target.value.trim()
     _locLink.hidden = !/^https?:\/\//i.test(v)
     _locLink.href   = v
   })
 
-  // ── Description URL preview ────────────────────────────────────────────────
-  _descPreview = document.createElement('div')
-  _descPreview.className = 'notes-preview'
-  _descPreview.hidden    = true
-  el('event-modal-desc').closest('.modal-field').after(_descPreview)
+  // Comments
+  el('event-modal-comment-add').addEventListener('click', _addEventComment)
+  el('event-modal-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addEventComment() })
 
-  el('event-modal-desc').addEventListener('input', _refreshDescPreview)
-  el('event-modal-desc').addEventListener('focus', () => { if (_descPreview) _descPreview.hidden = true })
-  el('event-modal-desc').addEventListener('blur',  _refreshDescPreview)
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
-
-  // Recurring-event scope picker (guard against stale-cache HTML/JS mismatch)
+  // Recurring-event scope picker
   el('recur-scope-cancel')?.addEventListener('click', () => {
     el('recur-scope-modal').hidden = true
     _pendingBody   = null
@@ -220,6 +376,21 @@ export function initEventEditor() {
   ))
 
   initCustomRecur()
+
+  // Tiptap editor — HTML mode (Google Calendar natively stores HTML descriptions)
+  _editorEvent = new Editor({
+    element: el('event-modal-editor'),
+    extensions: [
+      StarterKit,
+      TaskList,
+      TaskItem.configure({ nested: false }),
+      Placeholder.configure({ placeholder: 'Description…' }),
+    ],
+    content: '',
+    editorProps: { attributes: { class: 'modal-editor-content' } },
+  })
+  _buildEvToolbar()
+  _editorEvent.on('transaction', _updateEvToolbar)
 }
 
 export async function openEventEditor(opts = {}, callbacks = {}) {
@@ -245,13 +416,20 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
 
   el('event-modal-title').value    = ''
   el('event-modal-location').value = ''
-  el('event-modal-desc').value     = ''
   el('event-modal-recur').value    = ''
   el('custom-recur-panel').hidden  = true
   el('event-modal-delete').hidden  = true
+  if (_locLink) _locLink.hidden    = true
+
+  if (_editorEvent) _editorEvent.commands.setContent('', false)
+  if (_evRawMode) _evSwitchToRich()
+
+  _evComments           = []
+  _evOriginalTimestamps = new Set()
+  el('event-modal-comments-section').hidden = true   // comments only in edit mode
+
   resetCustomRecur(today)
 
-  // Populate calendar list (create mode — always writable calendars only)
   const calSelect = el('event-modal-calendar')
   calSelect.disabled = false
   if (opts.calendars?.length) {
@@ -269,14 +447,10 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
     }
   }
 
-  if (_locLink) { _locLink.hidden = true }
-  if (_descPreview) { _descPreview.hidden = true }
-
   el('event-modal').hidden = false
   el('event-modal-title').focus()
 }
 
-// Open the editor pre-populated with an existing CalendarItem for editing.
 export async function openEventEditorForEdit(item, callbacks = {}) {
   _editItem      = item
   _preserveRrule = null
@@ -288,7 +462,6 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
 
   const start      = new Date(item.start)
   const endRaw     = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
-  // All-day end from Google Calendar is exclusive — show inclusive to the user
   const displayEnd = allDay ? new Date(endRaw.getTime() - 86_400_000) : endRaw
 
   const toDate = d => d.toLocaleDateString('en-CA')
@@ -298,24 +471,37 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   el('event-modal-end-date').value   = toDate(displayEnd)
   el('event-modal-start-time').value = toTime(start)
   el('event-modal-end-time').value   = toTime(endRaw)
+  el('event-modal-title').value      = item.title
+  el('event-modal-location').value   = item.metadata?.location ?? ''
 
-  el('event-modal-title').value    = item.title
-  el('event-modal-location').value = item.metadata?.location ?? ''
-  el('event-modal-desc').value     = item.metadata?.body ?? ''
+  // Load description into editor — strip any Kairos snapshot then convert plain text → HTML
+  if (_editorEvent) _editorEvent.commands.setContent(_textToHtml(_stripEvSnapshot(item.metadata?.body ?? '')), false)
+  if (_evRawMode) _evSwitchToRich()
 
-  // Recurrence — match to preset or fall back to CUSTOM (preserving original)
+  // Load activity log
+  _evComments = getItemLog(item.id).map(e => ({
+    _id:       e._id,
+    timestamp: e.timestamp,
+    text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
+    _readonly: e.verb !== 'comment',
+  }))
+  _evOriginalTimestamps = new Set(_evComments.map(c => c.timestamp))
+  el('event-modal-comments-section').hidden = false
+  _renderEventComments()
+  el('event-modal-comments-section').open = _evComments.length > 0
+
+  // Recurrence
   const preset = matchRrulePreset(item.recurrence)
   el('event-modal-recur').value = preset
   el('custom-recur-panel').hidden = preset !== 'CUSTOM'
   if (preset === 'CUSTOM' && item.recurrence) _preserveRrule = item.recurrence
-
   resetCustomRecur(toDate(start))
 
-  // Populate calendar list and, for recurring instances, load master RRULE
+  // Calendar selector (locked in edit mode)
   const calSelect = el('event-modal-calendar')
-  // Calendar is always locked in edit mode — moving requires a separate API call
   calSelect.disabled  = true
   calSelect.innerHTML = `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Loading…')}</option>`
+
   const token = await getToken()
   if (token) {
     const calendarPromise = (async () => {
@@ -324,10 +510,9 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
         const cals = await getCalendars(token)
         const cal  = cals.find(c => c.id === item.source.account_id)
         if (cal) calSelect.innerHTML = `<option value="${esc(cal.id)}" selected>${esc(cal.summary)}</option>`
-      } catch { /* keep the metadata name already shown */ }
+      } catch { /* keep the metadata name */ }
     })()
 
-    // Instances don't carry recurrence — fetch the master to show the correct RRULE
     const masterPromise = item.metadata?.recurring_event_id
       ? getEvent(token, item.source.account_id, item.metadata.recurring_event_id).catch(() => null)
       : Promise.resolve(null)
@@ -342,7 +527,7 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
     }
   }
 
-  el('event-modal-delete').hidden  = false
+  el('event-modal-delete').hidden   = false
   el('event-modal-delete').disabled = false
 
   if (item.metadata?.task_calendar) {
@@ -353,21 +538,19 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
     el('event-modal-snooze').hidden = isDone
   }
 
-  // Refresh location link and description preview for the loaded values
   const locVal = (item.metadata?.location ?? '').trim()
   if (_locLink) {
     _locLink.hidden = !/^https?:\/\//i.test(locVal)
     _locLink.href   = locVal
   }
-  _refreshDescPreview()
 
   el('event-modal').hidden = false
   el('event-modal-title').focus()
 }
 
 function populateCalendars(select, calendars, preferredId) {
-  select.disabled  = false
-  const writable = calendars.filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')
+  select.disabled = false
+  const writable  = calendars.filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')
   select.innerHTML = writable
     .map(c => `<option value="${esc(c.id)}"${c.primary ? ' selected' : ''}>${esc(c.summary)}</option>`)
     .join('')
@@ -375,7 +558,7 @@ function populateCalendars(select, calendars, preferredId) {
 }
 
 function close() {
-  el('event-modal').hidden = true
+  el('event-modal').hidden          = true
   el('event-modal-complete').hidden = true
   el('event-modal-snooze').hidden   = true
 }
@@ -388,8 +571,8 @@ async function handleCommitmentToggle() {
   if (!token) return
   const isDone  = _editItem.status === 'COMPLETED'
   const eventId = _editItem.source.external_id
+  const verb    = isDone ? 'uncompleted' : 'completed'
 
-  const verb = isDone ? 'uncompleted' : 'completed'
   el('event-modal-complete').disabled = true
   try {
     if (isDone) await setEventUncompleted(token, eventId)
@@ -456,13 +639,15 @@ async function save() {
   const endTime   = el('event-modal-end-time').value
   const freq      = el('event-modal-recur').value
   const location  = el('event-modal-location').value.trim()
-  const prose     = el('event-modal-desc').value.trim()
+  const html      = _evGetHtml()
+  const snapHtml  = _buildEvSnapshotHtml(_evComments)
+  const fullDesc  = snapHtml ? `${html}${snapHtml}` : html
   const tz        = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   const body = {
     summary: title,
-    ...(location && { location }),
-    ...(prose    && { description: prose }),
+    ...(location  && { location }),
+    ...(fullDesc  && { description: fullDesc }),
   }
 
   if (allDay) {
@@ -476,8 +661,6 @@ async function save() {
     body.end   = { dateTime: `${endDate}T${endTime}:00`,     timeZone: tz }
   }
 
-  // Recurrence: CUSTOM in edit mode preserves the original RRULE unless the user
-  // re-configured the custom panel (signaled by _preserveRrule being cleared).
   let rrule
   if (freq === 'CUSTOM') {
     rrule = _preserveRrule ?? buildCustomRrule()
@@ -487,7 +670,6 @@ async function save() {
   if (rrule) {
     body.recurrence = [rrule]
   } else if (_editItem && freq === '') {
-    // Explicitly removing recurrence from an existing event
     body.recurrence = []
   }
 
@@ -497,19 +679,16 @@ async function save() {
   const saveBtn = el('event-modal-save')
   saveBtn.disabled = true
 
-  // For recurring event instances, pause and show the scope picker
   if (_editItem?.metadata?.recurring_event_id) {
     const scopeModal = el('recur-scope-modal')
     if (scopeModal) {
       _pendingBody = body
       document.querySelector('input[name="recur-scope"][value="this"]').checked = true
       scopeModal.hidden = false
-      return  // executeWithScope() will finish the save after the user picks
+      return
     }
-    // Scope modal missing (stale cache) — fall through and save as 'this event'
   }
 
-  // Non-recurring edit or new event — save immediately
   try {
     let savedId = _editItem?.source.external_id ?? null
     if (_editItem) {
@@ -518,17 +697,7 @@ async function save() {
       const created = await createEvent(token, calendarId, body)
       savedId = created.id
     }
-
-    // Write snapshot to description so standard clients see current state
-    const isCommitment = getCommitmentCalendars().includes(calendarId)
-    if (savedId && isCommitment) {
-      const comments    = getItemLog(_editItem?.id ?? `gcal:${calendarId}:${savedId}`)
-      const completedAt = getEventCompletedAt(savedId)
-      const snapshot    = buildSnapshot({ completedAt, comments })
-      const snapDesc    = prose ? `${prose.trim()}\n\n${snapshot}` : snapshot
-      await updateEvent(token, calendarId, savedId, { description: snapDesc }).catch(() => {})
-    }
-
+    await _logNewEvComments(token, _editItem?.id ?? `gcal:${calendarId}:${savedId}`, title)
     close()
     _callbacks.onSaved?.()
   } catch (err) {
@@ -553,7 +722,6 @@ async function confirmDelete() {
     }
   }
 
-  // Non-recurring event — delete immediately
   const token = await getToken()
   if (!token) { deleteBtn.disabled = false; _pendingAction = null; return }
   try {
@@ -598,21 +766,12 @@ async function executeWithScope(scope) {
   if (!token || !body) { saveBtn.disabled = false; return }
   const calId   = _editItem.source.account_id
   const eventId = _editItem.source.external_id
+  const title   = body.summary ?? _editItem.title
   try {
     if (scope === 'all')            await saveAllEvents(token, body)
     else if (scope === 'following') await saveThisAndFollowing(token, body)
     else                            await updateEvent(token, calId, eventId, body)
-
-    // Snapshot for commitment events
-    if (getCommitmentCalendars().includes(calId)) {
-      const comments    = getItemLog(_editItem?.id ?? `gcal:${calId}:${eventId}`)
-      const completedAt = getEventCompletedAt(eventId)
-      const prose       = el('event-modal-desc').value.trim()
-      const snapshot    = buildSnapshot({ completedAt, comments })
-      const snapDesc    = prose ? `${prose}\n\n${snapshot}` : snapshot
-      await updateEvent(token, calId, eventId, { description: snapDesc }).catch(() => {})
-    }
-
+    await _logNewEvComments(token, _editItem?.id ?? `gcal:${calId}:${eventId}`, title)
     close()
     _callbacks.onSaved?.()
   } catch (err) {
@@ -627,43 +786,28 @@ async function executeWithScope(scope) {
 async function saveAllEvents(token, body) {
   const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurring_event_id
-
-  // Fetch the master so we can preserve its original start date while
-  // optionally applying a time-of-day change from the editor.
-  const master = await getEvent(token, calId, masterId)
-
-  // Build a safe patch body: text fields only, plus optional time update.
+  const master   = await getEvent(token, calId, masterId)
   const masterBody = {}
   if (body.summary)     masterBody.summary     = body.summary
   if (body.location)    masterBody.location    = body.location
   if (body.description !== undefined) masterBody.description = body.description
   if (body.recurrence?.length) masterBody.recurrence = body.recurrence
-
-  // Apply time-of-day change to the master's original start/end date.
-  // We do this only for timed (non-all-day) events; all-day events have no
-  // meaningful time component to carry over.
   if (body.start?.dateTime && master.start?.dateTime) {
-    const newTime  = body.start.dateTime.slice(11)   // 'HH:MM:SS'
-    const origDate = master.start.dateTime.slice(0, 11) // 'YYYY-MM-DDT'
+    const newTime  = body.start.dateTime.slice(11)
+    const origDate = master.start.dateTime.slice(0, 11)
     masterBody.start = { dateTime: origDate + newTime, timeZone: body.start.timeZone }
-
     const newEndTime  = body.end.dateTime.slice(11)
     const origEndDate = master.end?.dateTime?.slice(0, 11) ?? origDate
     masterBody.end = { dateTime: origEndDate + newEndTime, timeZone: body.end.timeZone }
   }
-
   await updateEvent(token, calId, masterId, masterBody)
 }
 
 async function saveThisAndFollowing(token, body) {
   const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurring_event_id
-
-  // Fetch master to get its current RRULE
   const master      = await getEvent(token, calId, masterId)
   const masterRrule = master.recurrence?.[0]
-
-  // Truncate master: UNTIL = day before this instance's original start (UTC)
   if (masterRrule) {
     const cutoff = new Date(_editItem.start)
     cutoff.setUTCDate(cutoff.getUTCDate() - 1)
@@ -674,9 +818,6 @@ async function saveThisAndFollowing(token, body) {
     const truncated = masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '') + `;UNTIL=${untilStr}`
     await updateEvent(token, calId, masterId, { recurrence: [truncated] })
   }
-
-  // Create new forward series starting at this instance's (possibly edited) date
-  // Carry forward the master's RRULE (stripped of UNTIL/COUNT) if user didn't set one
   if (!body.recurrence && masterRrule) {
     body.recurrence = [masterRrule.replace(/;?(UNTIL|COUNT)=[^;]*/g, '')]
   }
@@ -686,18 +827,14 @@ async function saveThisAndFollowing(token, body) {
 // ── Recurring delete helpers ──────────────────────────────────────────────────
 
 async function deleteAllEvents(token) {
-  const calId    = _editItem.source.account_id
-  const masterId = _editItem.metadata.recurring_event_id
-  await deleteEvent(token, calId, masterId)
+  await deleteEvent(token, _editItem.source.account_id, _editItem.metadata.recurring_event_id)
 }
 
 async function deleteThisAndFollowing(token) {
   const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurring_event_id
-
   const master      = await getEvent(token, calId, masterId)
   const masterRrule = master.recurrence?.[0]
-
   if (masterRrule) {
     const cutoff = new Date(_editItem.start)
     cutoff.setUTCDate(cutoff.getUTCDate() - 1)

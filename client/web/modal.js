@@ -335,7 +335,7 @@ async function save() {
 
     const kid          = _item?.metadata?.kid ?? generateKid()
     const userComments = _comments.filter(c => !c._readonly)
-    const snapshot     = buildSnapshot({ loe, comments: userComments })
+    const snapshot     = userComments.length > 0 ? buildSnapshot({ loe, comments: userComments }) : null
 
     const bodyMarkdown = _getRawMarkdown()
     const notes = serializeNotesFromMarkdown(bodyMarkdown, { kid, snapshot })
