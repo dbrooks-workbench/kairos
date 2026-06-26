@@ -1756,23 +1756,106 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .field-url-link:hover { background: #e8f0fe; }
 
-.notes-preview {
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.6;
-  padding: 6px 8px;
+/* ── Tiptap editor ───────────────────────────────────── */
+
+.modal-editor-field { gap: 4px; }
+
+.editor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.editor-mode-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.editor-mode-btn:hover { background: #f1f3f4; }
+
+.modal-editor {
   border: 1px solid var(--border);
   border-radius: 5px;
-  background: #f8f9fa;
-  word-break: break-all;
+  min-height: 100px;
+  max-height: 320px;
+  overflow-y: auto;
+  cursor: text;
+}
+.modal-editor:focus-within { border-color: var(--today-color); }
+
+.modal-editor-content {
+  padding: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  line-height: 1.6;
+  outline: none;
 }
 
-.notes-preview a {
-  color: var(--today-color);
-  text-decoration: underline;
+/* Prose elements */
+.modal-editor-content p { margin: 0 0 6px; }
+.modal-editor-content p:last-child { margin-bottom: 0; }
+.modal-editor-content ul,
+.modal-editor-content ol { padding-left: 20px; margin: 0 0 6px; }
+.modal-editor-content li { margin: 2px 0; }
+.modal-editor-content strong { font-weight: 600; }
+.modal-editor-content em { font-style: italic; }
+.modal-editor-content code {
+  font-family: monospace;
+  font-size: 12px;
+  background: #f1f3f4;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.modal-editor-content blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0 0 6px;
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+.modal-editor-content h1,
+.modal-editor-content h2,
+.modal-editor-content h3 { margin: 0 0 6px; font-weight: 600; }
+.modal-editor-content h1 { font-size: 16px; }
+.modal-editor-content h2 { font-size: 14px; }
+.modal-editor-content h3 { font-size: 13px; }
+
+/* Task list (GFM checkboxes) */
+.modal-editor-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 4px;
+}
+.modal-editor-content ul[data-type="taskList"] li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.modal-editor-content ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.modal-editor-content ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+.modal-editor-content ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  color: var(--text-muted);
 }
 
-.notes-preview a:hover { opacity: 0.8; }
+/* Placeholder */
+.modal-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-muted);
+  pointer-events: none;
+  height: 0;
+}
+
+.modal-notes-raw { resize: vertical; }
 
 /* ── Snooze popover ──────────────────────────────────── */
 

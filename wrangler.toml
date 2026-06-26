@@ -1,5 +1,6 @@
 name = "kairos"
-pages_build_output_dir = "client/web"
+# Build command (set in Cloudflare Pages dashboard): npm run build
+pages_build_output_dir = "dist"
 compatibility_date = "2024-09-23"
 
 [vars]

@@ -1,4 +1,4 @@
-import Sortable from 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/+esm'
+import Sortable from 'sortablejs'
 import { getToken } from './auth.js'
 import { completeTask, uncompleteTask, moveTask, patchTask, reorderTask, renameTaskList, deleteTaskList } from './providers/googleTasks.js'
 import { serializeNotes, nowTimestamp } from './providers/parsers.js'

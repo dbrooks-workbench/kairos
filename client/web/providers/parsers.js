@@ -63,6 +63,15 @@ export function serializeNotes({ body, checklist, kid, snapshot }) {
   return result
 }
 
+// Serialize notes from a full markdown body string produced by the Tiptap editor.
+// Appends the [kid:xxx] anchor and snapshot block (same position as serializeNotes).
+export function serializeNotesFromMarkdown(bodyMarkdown, { kid, snapshot }) {
+  let result = bodyMarkdown?.trim() ?? ''
+  if (kid) result = result ? `${result}\n\n[kid:${kid}]` : `[kid:${kid}]`
+  if (snapshot) result = result ? `${result}\n\n${snapshot}` : snapshot
+  return result
+}
+
 // Build the write-only --- Kairos --- snapshot appended to notes/descriptions.
 // Standard clients see this; Kairos never reads it back (stripped in parseTaskNotes).
 export function buildSnapshot({ completedAt, loe, comments }) {

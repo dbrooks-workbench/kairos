@@ -14,3 +14,7 @@ Thumbs.db
 
 # Wrangler
 .wrangler/
+
+# Node / Vite
+node_modules/
+dist/

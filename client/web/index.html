@@ -108,21 +108,13 @@
           <input id="modal-loe" class="modal-input" type="text" placeholder="1d 4h 30m">
           <span id="modal-loe-error" class="modal-loe-error" hidden>Invalid format (use 1d 4h 30m)</span>
         </div>
-        <div class="modal-field">
-          <textarea id="modal-notes" class="modal-notes" placeholder="Notes…" rows="4"></textarea>
-        </div>
-        <details class="modal-section" id="modal-checklist-section">
-          <summary>
-            <span class="modal-chevron">›</span>
-            Checklist
-            <span id="modal-checklist-count" class="modal-section-count"></span>
-          </summary>
-          <div id="modal-checklist-items"></div>
-          <div class="modal-add-row">
-            <input id="modal-checklist-input" type="text" placeholder="Add item…">
-            <button id="modal-checklist-add">Add</button>
+        <div class="modal-field modal-editor-field">
+          <div class="editor-toolbar">
+            <button id="modal-editor-toggle" class="editor-mode-btn" type="button" title="Toggle raw markdown">Raw</button>
           </div>
-        </details>
+          <div id="modal-editor" class="modal-editor"></div>
+          <textarea id="modal-notes-raw" class="modal-notes modal-notes-raw" placeholder="Markdown…" rows="8" hidden></textarea>
+        </div>
         <details class="modal-section" id="modal-comments-section">
           <summary>
             <span class="modal-chevron">›</span>

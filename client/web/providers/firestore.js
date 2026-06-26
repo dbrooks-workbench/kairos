@@ -2,7 +2,7 @@
 // Project is read from /config (a Pages Function that serves GOOGLE_PROJECT_ID from env).
 // All functions throw on non-404 HTTP errors — callers should catch.
 
-import { GOOGLE_PROJECT_ID } from '/config'
+import { GOOGLE_PROJECT_ID } from './config.js'
 
 function _base() {
   if (!GOOGLE_PROJECT_ID) throw new Error('GOOGLE_PROJECT_ID not set — add it to Cloudflare env vars and re-deploy')

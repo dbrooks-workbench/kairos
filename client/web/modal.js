@@ -1,5 +1,12 @@
+import { Editor } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import Placeholder from '@tiptap/extension-placeholder'
+import { Markdown } from 'tiptap-markdown'
+
 import { getToken } from './auth.js'
-import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot } from './providers/parsers.js'
+import { normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot, serializeNotesFromMarkdown } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask } from './providers/googleTasks.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
 import { appendLogEntry, getItemLog, deleteLogEntry } from './providers/lifeLog.js'
@@ -9,42 +16,12 @@ import { appendLogEntry, getItemLog, deleteLogEntry } from './providers/lifeLog.
 let _item                      = null   // null → create mode
 let _listId                    = null
 let _taskLists                 = []
-let _checklist                 = []
 let _comments                  = []
-let _originalCommentTimestamps = new Set()  // timestamps present when modal opened; new ones logged on save
+let _originalCommentTimestamps = new Set()
 let _callbacks                 = {}
-let _defaultDue                = null   // 'yyyy-mm-dd' pre-fill for create mode
-let _notesPreview              = null   // created once in initModal
-
-// ── URL linkification ─────────────────────────────────────────────────────────
-
-function escHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-const _URL_RE = /https?:\/\/[^\s<>"']+/g
-
-function linkify(text) {
-  _URL_RE.lastIndex = 0
-  let out = '', last = 0, m
-  while ((m = _URL_RE.exec(text)) !== null) {
-    out += escHtml(text.slice(last, m.index))
-    out += `<a href="${escHtml(m[0])}" target="_blank" rel="noopener noreferrer">${escHtml(m[0])}</a>`
-    last = _URL_RE.lastIndex
-  }
-  return (out + escHtml(text.slice(last))).replace(/\n/g, '<br>')
-}
-
-function _refreshNotesPreview() {
-  if (!_notesPreview) return
-  const ta = el('modal-notes')
-  if (!/https?:\/\//.test(ta.value) || document.activeElement === ta) {
-    _notesPreview.hidden = true
-  } else {
-    _notesPreview.innerHTML = linkify(ta.value)
-    _notesPreview.hidden = false
-  }
-}
+let _defaultDue                = null
+let _editor                    = null   // Tiptap editor instance (created once in initModal)
+let _rawMode                   = false  // true = textarea visible, editor hidden
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -55,9 +32,6 @@ export function initModal() {
   el('modal-delete').addEventListener('click', doDelete)
   el('modal-toggle-complete').addEventListener('click', toggleComplete)
 
-  el('modal-checklist-add').addEventListener('click', addChecklistItem)
-  el('modal-checklist-input').addEventListener('keydown', e => { if (e.key === 'Enter') addChecklistItem() })
-
   el('modal-comment-add').addEventListener('click', addComment)
   el('modal-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') addComment() })
 
@@ -66,23 +40,29 @@ export function initModal() {
   el('task-modal').addEventListener('click', e => { if (e.target === el('task-modal')) close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('task-modal').hidden) close() })
 
-  // ── Notes URL preview ──────────────────────────────────────────────────────
-  _notesPreview = document.createElement('div')
-  _notesPreview.className = 'notes-preview'
-  _notesPreview.hidden    = true
-  el('modal-notes').closest('.modal-field').after(_notesPreview)
+  el('modal-editor-toggle').addEventListener('click', _toggleMode)
 
-  el('modal-notes').addEventListener('input', _refreshNotesPreview)
-  el('modal-notes').addEventListener('focus', () => { if (_notesPreview) _notesPreview.hidden = true })
-  el('modal-notes').addEventListener('blur',  _refreshNotesPreview)
+  // Create the Tiptap editor once and keep it alive
+  _editor = new Editor({
+    element: el('modal-editor'),
+    extensions: [
+      StarterKit,
+      TaskList,
+      TaskItem.configure({ nested: false }),
+      Placeholder.configure({ placeholder: 'Notes…' }),
+      Markdown.configure({ html: false, tightLists: true }),
+    ],
+    content: '',
+    editorProps: {
+      attributes: { class: 'modal-editor-content' },
+    },
+  })
 }
 
 export function openModal(item, taskLists, callbacks) {
   _item       = item
   _listId     = item.source.account_id
   _taskLists  = taskLists
-  _checklist  = (item.metadata?.checklist ?? []).map(i => ({ ...i }))
-  // Comments sourced from life log Sheet (single source of truth)
   _comments   = getItemLog(item.id).map(e => ({
     _id:       e._id,
     timestamp: e.timestamp,
@@ -99,7 +79,6 @@ export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
   _item       = null
   _listId     = listId
   _taskLists  = taskLists
-  _checklist  = []
   _comments   = []
   _originalCommentTimestamps = new Set()
   _callbacks  = callbacks
@@ -111,7 +90,7 @@ export function openCreateModal(listId, taskLists, callbacks, opts = {}) {
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
 function el(id) { return document.getElementById(id) }
-function show()  { el('task-modal').hidden = false; el('modal-title').focus() }
+function show()  { el('task-modal').hidden = false; _editor?.commands.focus() }
 function close() { el('task-modal').hidden = true }
 
 function esc(s) {
@@ -133,22 +112,22 @@ function populate() {
     ? new Date(_item.due).toLocaleDateString('en-CA')
     : (_defaultDue ?? '')
 
-  el('modal-loe').value     = _item?.metadata?.loe ?? ''
+  el('modal-loe').value        = _item?.metadata?.loe ?? ''
   el('modal-loe-error').hidden = true
-  el('modal-notes').value   = _item?.metadata?.body ?? ''
-  _refreshNotesPreview()
+  el('modal-comment-input').value = ''
 
-  el('modal-checklist-input').value = ''
-  el('modal-comment-input').value   = ''
+  // Load body + checklist into the editor
+  _setEditorContent(_itemToMarkdown(_item))
+  if (_rawMode) _switchToRich()   // always open in rich mode
 
-  renderChecklist()
   renderComments()
-
-  el('modal-checklist-section').open = _checklist.length > 0
-  el('modal-comments-section').open  = _comments.length  > 0
+  el('modal-comments-section').open = _comments.length > 0
 
   el('modal-delete').hidden          = !isEdit
   el('modal-toggle-complete').hidden = !isEdit
+
+  const saveBtn = el('modal-save')
+  saveBtn.disabled = false
 
   const taskIdEl = el('modal-task-id')
   if (isEdit) {
@@ -165,48 +144,53 @@ function populate() {
   }
 }
 
-// ── Checklist ─────────────────────────────────────────────────────────────────
-
-function renderChecklist() {
-  const container = el('modal-checklist-items')
-  container.innerHTML = ''
-
-  _checklist.forEach((ci, idx) => {
-    const row = document.createElement('div')
-    row.className = 'modal-cl-row'
-
-    const cb = document.createElement('input')
-    cb.type    = 'checkbox'
-    cb.checked = ci.checked
-    cb.addEventListener('change', () => { _checklist[idx].checked = cb.checked })
-
-    const txt = document.createElement('input')
-    txt.type      = 'text'
-    txt.className = 'modal-cl-text'
-    txt.value     = ci.text
-    txt.addEventListener('input', () => { _checklist[idx].text = txt.value })
-
-    const del = document.createElement('button')
-    del.className   = 'modal-row-del'
-    del.textContent = '×'
-    del.addEventListener('click', () => { _checklist.splice(idx, 1); renderChecklist() })
-
-    row.append(cb, txt, del)
-    container.appendChild(row)
-  })
-
-  const count = _checklist.length
-  el('modal-checklist-count').textContent = count ? `(${count})` : ''
+// Build the combined markdown string that goes into the editor.
+function _itemToMarkdown(item) {
+  if (!item) return ''
+  const body      = item.metadata?.body ?? ''
+  const checklist = item.metadata?.checklist ?? []
+  const parts     = []
+  if (body.trim()) parts.push(body.trim())
+  if (checklist.length)
+    parts.push(checklist.map(c => `- [${c.checked ? 'x' : ' '}] ${c.text}`).join('\n'))
+  return parts.join('\n\n')
 }
 
-function addChecklistItem() {
-  const inp  = el('modal-checklist-input')
-  const text = inp.value.trim()
-  if (!text) return
-  _checklist.push({ text, checked: false })
-  inp.value = ''
-  renderChecklist()
-  el('modal-checklist-section').open = true
+// ── Editor helpers ────────────────────────────────────────────────────────────
+
+function _setEditorContent(markdown) {
+  if (!_editor) return
+  _editor.commands.setContent(markdown ?? '', false)
+  if (_rawMode) el('modal-notes-raw').value = markdown ?? ''
+}
+
+function _getRawMarkdown() {
+  if (_rawMode) return el('modal-notes-raw').value
+  return _editor ? _editor.storage.markdown.getMarkdown() : ''
+}
+
+function _toggleMode() {
+  if (_rawMode) _switchToRich()
+  else _switchToRaw()
+}
+
+function _switchToRaw() {
+  if (_rawMode) return
+  _rawMode = true
+  el('modal-notes-raw').value = _editor ? _editor.storage.markdown.getMarkdown() : ''
+  el('modal-editor').hidden       = true
+  el('modal-notes-raw').hidden    = false
+  el('modal-editor-toggle').textContent = 'Rich'
+}
+
+function _switchToRich() {
+  if (!_rawMode) return
+  _rawMode = false
+  const md = el('modal-notes-raw').value
+  if (_editor) _editor.commands.setContent(md, false)
+  el('modal-notes-raw').hidden    = true
+  el('modal-editor').hidden       = false
+  el('modal-editor-toggle').textContent = 'Raw'
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────────
@@ -230,7 +214,6 @@ function renderComments() {
     del.addEventListener('click', async () => {
       _comments = _comments.filter(x => x !== c)
       renderComments()
-      // If the entry has a Firestore ID, delete it from the life log
       if (c._id && _item) {
         const token = await getToken()
         if (token) deleteLogEntry(token, _item.id, c._id)
@@ -248,7 +231,7 @@ function renderComments() {
       txt.className = 'modal-comment-text'
       txt.value     = c.text
       txt.addEventListener('input', () => {
-        const orig = _comments.find(x => x.timestamp === c.timestamp)
+        const orig = _comments.find(x => x === c)
         if (orig) orig.text = txt.value
       })
       row.append(ts, txt, del)
@@ -264,7 +247,7 @@ function addComment() {
   const inp  = el('modal-comment-input')
   const text = inp.value.trim()
   if (!text) return
-  _comments.push({ timestamp: nowTimestamp(), text })
+  _comments.push({ _id: null, timestamp: nowTimestamp(), text })
   inp.value = ''
   renderComments()
   el('modal-comments-section').open = true
@@ -292,23 +275,18 @@ async function save() {
     const dueStr = el('modal-due').value
     const due    = dueStr ? `${dueStr}T00:00:00.000Z` : null
 
-    const kid           = _item?.metadata?.kid ?? generateKid()
-    const userComments  = _comments.filter(c => !c._readonly)
-    const snapshot      = buildSnapshot({ loe, comments: userComments })
+    const kid          = _item?.metadata?.kid ?? generateKid()
+    const userComments = _comments.filter(c => !c._readonly)
+    const snapshot     = buildSnapshot({ loe, comments: userComments })
 
-    const notes = serializeNotes({
-      body:      el('modal-notes').value.trim(),
-      checklist: _checklist,
-      kid,
-      snapshot,
-    })
+    const bodyMarkdown = _getRawMarkdown()
+    const notes = serializeNotesFromMarkdown(bodyMarkdown, { kid, snapshot })
 
     const token = await getToken()
     if (!token) return
 
     updateTaskMeta(kid, { loe })
 
-    // Log new user comments (added this session) to the life log Sheet
     const newUserComments = userComments.filter(c => !_originalCommentTimestamps.has(c.timestamp))
     for (const c of newUserComments) {
       appendLogEntry(token, {
@@ -320,7 +298,6 @@ async function save() {
         narrative:     c.text,
         context:       _item?.metadata?.list_title ?? '',
       })
-      // Mark as logged so a re-save within the same session doesn't duplicate
       _originalCommentTimestamps.add(c.timestamp)
     }
 
@@ -365,7 +342,6 @@ async function toggleComplete() {
   const token = await getToken()
   if (!token) return
   const isDone = _item.status === 'COMPLETED'
-
   try {
     if (isDone) {
       await uncompleteTask(token, _listId, _item.source.external_id)

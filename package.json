@@ -1,0 +1,22 @@
+{
+  "name": "kairos",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tiptap/core": "^2.7.0",
+    "@tiptap/extension-placeholder": "^2.7.0",
+    "@tiptap/extension-task-item": "^2.7.0",
+    "@tiptap/extension-task-list": "^2.7.0",
+    "@tiptap/starter-kit": "^2.7.0",
+    "sortablejs": "^1.15.4",
+    "tiptap-markdown": "^0.8.10"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
