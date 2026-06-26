@@ -23,6 +23,7 @@ const DEFAULTS = () => ({
   boardColumnSort:     {},
   taskListOrder:       [],
   lifeLogSheetId:      null,
+  activityMigratedAt:  null,   // set after Sheets → Firestore activity migration
 })
 
 let _prefs       = null
@@ -69,7 +70,15 @@ export function getHiddenCalendars()    { return _prefs?.hiddenCalendars    ?? [
 export function getCommitmentCalendars(){ return _prefs?.commitmentCalendars ?? [] }
 export function getBoardColumnSort()    { return _prefs?.boardColumnSort     ?? {} }
 export function getTaskListOrder()      { return _prefs?.taskListOrder       ?? [] }
-export function getLifeLogSheetId()     { return _prefs?.lifeLogSheetId      ?? null }
+export function getLifeLogSheetId()        { return _prefs?.lifeLogSheetId      ?? null }
+export function getActivityMigratedAt()    { return _prefs?.activityMigratedAt  ?? null }
+
+export function markActivityMigrated() {
+  if (!_prefs) return
+  _prefs.activityMigratedAt = new Date().toISOString()
+  _dirty = true
+  _flushNow()
+}
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 

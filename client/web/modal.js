@@ -2,7 +2,7 @@ import { getToken } from './auth.js'
 import { serializeNotes, normalizeLoe, nowTimestamp, displayTimestamp, buildSnapshot } from './providers/parsers.js'
 import { createTask, patchTask, deleteTask, moveTask, completeTask, uncompleteTask } from './providers/googleTasks.js'
 import { generateKid, updateTaskMeta } from './providers/driveTaskMeta.js'
-import { appendLogEntry, getItemLog } from './providers/lifeLog.js'
+import { appendLogEntry, getItemLog, deleteLogEntry } from './providers/lifeLog.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -84,6 +84,7 @@ export function openModal(item, taskLists, callbacks) {
   _checklist  = (item.metadata?.checklist ?? []).map(i => ({ ...i }))
   // Comments sourced from life log Sheet (single source of truth)
   _comments   = getItemLog(item.id).map(e => ({
+    _id:       e._id,
     timestamp: e.timestamp,
     text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
     _readonly: e.verb !== 'comment',
@@ -223,11 +224,24 @@ function renderComments() {
     ts.className   = 'modal-comment-ts'
     ts.textContent = displayTimestamp(c.timestamp)
 
+    const del = document.createElement('button')
+    del.className   = 'modal-row-del'
+    del.textContent = '×'
+    del.addEventListener('click', async () => {
+      _comments = _comments.filter(x => x.timestamp !== c.timestamp)
+      renderComments()
+      // If the entry has a Firestore ID, delete it from the life log
+      if (c._id && _item) {
+        const token = await getToken()
+        if (token) deleteLogEntry(token, _item.id, c._id)
+      }
+    })
+
     if (c._readonly) {
       const txt = document.createElement('span')
       txt.className   = 'modal-comment-text'
       txt.textContent = c.text
-      row.append(ts, txt)
+      row.append(ts, txt, del)
     } else {
       const txt = document.createElement('input')
       txt.type      = 'text'
@@ -237,15 +251,6 @@ function renderComments() {
         const orig = _comments.find(x => x.timestamp === c.timestamp)
         if (orig) orig.text = txt.value
       })
-
-      const del = document.createElement('button')
-      del.className   = 'modal-row-del'
-      del.textContent = '×'
-      del.addEventListener('click', () => {
-        _comments = _comments.filter(x => x.timestamp !== c.timestamp)
-        renderComments()
-      })
-
       row.append(ts, txt, del)
     }
 

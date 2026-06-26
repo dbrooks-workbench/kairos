@@ -84,6 +84,7 @@ export async function fsSet(token, path, data, { keepalive = false } = {}) {
 }
 
 // CREATE a document with an auto-generated ID in a collection.
+// Returns the stored data plus _id (the Firestore-assigned document ID).
 export async function fsAdd(token, collection, data) {
   const res = await fetch(`${_base()}/${collection}`, {
     method:  'POST',
@@ -91,7 +92,19 @@ export async function fsAdd(token, collection, data) {
     body:    JSON.stringify(_toDoc(data)),
   })
   if (!res.ok) throw new Error(`Firestore ADD ${collection}: ${res.status} ${await res.text().catch(() => '')}`)
-  return _fromDoc(await res.json())
+  const doc = await res.json()
+  return { _id: doc.name.split('/').pop(), ..._fromDoc(doc) }
+}
+
+// DELETE a document by path. 404 is treated as success (already gone).
+export async function fsDelete(token, path) {
+  const res = await fetch(`${_base()}/${path}`, {
+    method:  'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Firestore DELETE ${path}: ${res.status} ${await res.text().catch(() => '')}`)
+  }
 }
 
 // LIST all documents in a collection (auto-paginates).

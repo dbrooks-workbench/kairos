@@ -106,7 +106,9 @@ export function nowTimestamp() {
 
 export function displayTimestamp(ts) {
   if (!ts) return ''
-  const d = new Date(ts.includes('T') ? ts : ts + 'T00:00:00')
+  // Normalize space-separated datetime (e.g. from Sheets) to ISO format
+  const normalized = String(ts).replace(' ', 'T')
+  const d = new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00')
   if (isNaN(d)) return ts
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
