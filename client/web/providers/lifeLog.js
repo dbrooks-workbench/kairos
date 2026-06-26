@@ -6,20 +6,15 @@
 // verb          — machine token: completed, uncompleted, snoozed, comment, ...
 // action_detail — object with verb-specific fields
 // narrative     — human-readable prose
-//
-// On first load, if the activity collection is empty and a legacy Google Sheets
-// life log exists (lifeLogSheetId in prefs), rows are migrated to Firestore.
 
 import { fsList, fsAdd, fsDelete } from './firestore.js'
-import { getLifeLogSheetId, getActivityMigratedAt, markActivityMigrated } from './drivePrefs.js'
 
-const SHEETS_BASE  = 'https://sheets.googleapis.com/v4'
-const COLLECTION   = 'activity'
+const COLLECTION = 'activity'
 
 // { [item_id]: [{ _id, timestamp, verb, action_detail, narrative }] }
 // null until loadLifeLog has run
-let _logByItemId  = null
-let _loadPromise  = null   // deduplicates concurrent calls (e.g. from parallel getEvents+getTasks)
+let _logByItemId = null
+let _loadPromise = null   // deduplicates concurrent calls (e.g. from parallel getEvents+getTasks)
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -42,11 +37,6 @@ async function _doLoad(token) {
       if (!_logByItemId[item_id]) _logByItemId[item_id] = []
       _logByItemId[item_id].push({ _id, ...entry })
     }
-
-    // Migrate from Google Sheets on first run (one-time, idempotent flag in prefs)
-    if (docs.length === 0 && !getActivityMigratedAt()) {
-      await _migrateFromSheet(token)
-    }
   } catch (err) {
     console.warn('Life log load failed:', err.message)
     _logByItemId = {}
@@ -65,17 +55,17 @@ export async function appendLogEntry(token, entry) {
   const timestamp = new Date().toISOString()
   const doc = {
     timestamp,
-    source:   'kairos',
-    item_id:  entry.item_id  ?? '',
-    item_type:entry.item_type ?? '',
-    title:    entry.title    ?? '',
-    verb:     entry.verb,
+    source:        'kairos',
+    item_id:       entry.item_id       ?? '',
+    item_type:     entry.item_type     ?? '',
+    title:         entry.title         ?? '',
+    verb:          entry.verb,
     action_detail: entry.action_detail ?? {},
-    narrative:entry.narrative ?? '',
-    context:  entry.context  ?? '',
+    narrative:     entry.narrative     ?? '',
+    context:       entry.context       ?? '',
   }
 
-  // Update in-memory cache immediately (with _id = null; backfilled after write)
+  // Update in-memory cache immediately (_id backfilled after write)
   if (_logByItemId !== null && entry.item_id) {
     if (!_logByItemId[entry.item_id]) _logByItemId[entry.item_id] = []
     _logByItemId[entry.item_id].push({ _id: null, ...doc })
@@ -106,54 +96,4 @@ export async function deleteLogEntry(token, itemId, entryId) {
   } catch (err) {
     console.warn('Life log delete failed:', err.message)
   }
-}
-
-// ── Sheets migration ──────────────────────────────────────────────────────────
-
-async function _migrateFromSheet(token) {
-  const sheetId = getLifeLogSheetId()
-  if (!sheetId) {
-    markActivityMigrated()   // no sheet to migrate; mark done so we don't check again
-    return
-  }
-
-  try {
-    console.log('[migration] Migrating Google Sheets life log → Firestore activity')
-    const res = await fetch(
-      `${SHEETS_BASE}/spreadsheets/${encodeURIComponent(sheetId)}/values/A:I`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    )
-    if (!res.ok) throw new Error(`Sheet read failed: ${res.status}`)
-    const { values = [] } = await res.json()
-    const rows = values.slice(1)   // skip header row
-
-    console.log(`[migration] Migrating ${rows.length} activity rows`)
-
-    // Write in parallel batches of 20
-    const BATCH = 20
-    for (let i = 0; i < rows.length; i += BATCH) {
-      await Promise.all(
-        rows.slice(i, i + BATCH).map(row => {
-          const [timestamp, source, item_id, item_type, title, verb, action_detail_str, narrative, context] = row
-          if (!item_id && !verb) return Promise.resolve()
-          let action_detail = {}
-          try { action_detail = JSON.parse(action_detail_str) } catch { /* ignore */ }
-          const doc = { timestamp, source: source || 'kairos', item_id, item_type, title, verb, action_detail, narrative, context }
-          return fsAdd(token, COLLECTION, doc).then(written => {
-            // Populate cache with migrated entries
-            if (_logByItemId && item_id) {
-              if (!_logByItemId[item_id]) _logByItemId[item_id] = []
-              _logByItemId[item_id].push({ _id: written._id, ...doc })
-            }
-          }).catch(err => console.warn('Migration row failed:', err.message))
-        })
-      )
-    }
-
-    console.log('[migration] Sheets → Firestore activity migration complete')
-  } catch (err) {
-    console.warn('[migration] Sheets migration failed:', err.message)
-  }
-
-  markActivityMigrated()   // mark done even on partial failure (idempotent re-run is safe)
 }

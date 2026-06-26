@@ -1,29 +1,22 @@
 // User preferences stored in Firestore (prefs/main document).
 //
-// On first load, if prefs/main doesn't exist, runs a one-time migration
-// from Google Drive appDataFolder (kairos-prefs.json) and writes migratedAt.
-//
 // Shape:
 //   {
 //     version: 1,
-//     hiddenCalendars:   string[],
+//     hiddenCalendars:     string[],
 //     commitmentCalendars: string[],
-//     boardColumnSort:   { [listId]: 'manual' | 'date' },
-//     taskListOrder:     string[],
-//     lifeLogSheetId:    string | null,
-//     migratedAt?:       string   // ISO; set on first Firestore write
+//     boardColumnSort:     { [listId]: 'manual' | 'date' },
+//     taskListOrder:       string[],
 //   }
 
 import { fsGet, fsSet } from './firestore.js'
 
 const DEFAULTS = () => ({
-  version: 1,
+  version:             1,
   hiddenCalendars:     [],
   commitmentCalendars: [],
   boardColumnSort:     {},
   taskListOrder:       [],
-  lifeLogSheetId:      null,
-  activityMigratedAt:  null,   // set after Sheets → Firestore activity migration
 })
 
 let _prefs       = null
@@ -46,11 +39,8 @@ async function _doLoad(token) {
     if (data) {
       _prefs = { ...DEFAULTS(), ...data }
     } else {
-      // First run with Firestore — migrate from Drive then write prefs/main
-      const { runMigration } = await import('./migration.js')
-      const drivePrefs = await runMigration(token)
-      const { version: _v, ...rest } = drivePrefs ?? {}
-      _prefs = { ...DEFAULTS(), ...rest, migratedAt: new Date().toISOString() }
+      // First run — create default prefs
+      _prefs = DEFAULTS()
       await fsSet(token, 'prefs/main', _prefs)
     }
   } catch (err) {
@@ -66,19 +56,10 @@ async function _doLoad(token) {
 
 // ── Getters ───────────────────────────────────────────────────────────────────
 
-export function getHiddenCalendars()    { return _prefs?.hiddenCalendars    ?? [] }
-export function getCommitmentCalendars(){ return _prefs?.commitmentCalendars ?? [] }
-export function getBoardColumnSort()    { return _prefs?.boardColumnSort     ?? {} }
-export function getTaskListOrder()      { return _prefs?.taskListOrder       ?? [] }
-export function getLifeLogSheetId()        { return _prefs?.lifeLogSheetId      ?? null }
-export function getActivityMigratedAt()    { return _prefs?.activityMigratedAt  ?? null }
-
-export function markActivityMigrated() {
-  if (!_prefs) return
-  _prefs.activityMigratedAt = new Date().toISOString()
-  _dirty = true
-  _flushNow()
-}
+export function getHiddenCalendars()     { return _prefs?.hiddenCalendars     ?? [] }
+export function getCommitmentCalendars() { return _prefs?.commitmentCalendars ?? [] }
+export function getBoardColumnSort()     { return _prefs?.boardColumnSort     ?? {} }
+export function getTaskListOrder()       { return _prefs?.taskListOrder       ?? [] }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -94,13 +75,6 @@ export function setCommitmentCalendars(cals) {
   _prefs.commitmentCalendars = [...cals]
   _dirty = true
   _scheduleSave()
-}
-
-export function setLifeLogSheetId(id) {
-  if (!_prefs) return
-  _prefs.lifeLogSheetId = id
-  _dirty = true
-  _flushNow()
 }
 
 export function setBoardColumnSort(listId, mode) {
