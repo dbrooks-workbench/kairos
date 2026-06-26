@@ -147,34 +147,34 @@
     </div>
 
     <!-- Event editor modal -->
-    <div id="event-modal" hidden>
-      <div class="modal-panel" id="event-modal-panel">
+    <div id="event-editor" hidden>
+      <div class="modal-panel" id="event-editor-panel">
         <div class="modal-header">
-          <input id="event-modal-title" class="modal-title-input" type="text" placeholder="Event title…">
-          <button id="event-modal-close" class="modal-close-btn" title="Close">×</button>
+          <input id="event-editor-title" class="modal-title-input" type="text" placeholder="Event title…">
+          <button id="event-editor-close" class="modal-close-btn" title="Close">×</button>
         </div>
         <div class="modal-body">
           <div class="modal-field-row">
             <label class="modal-label">Calendar</label>
-            <select id="event-modal-calendar" class="modal-select"></select>
+            <select id="event-editor-calendar" class="modal-select"></select>
           </div>
           <div class="modal-field-row">
             <label class="modal-label">All day</label>
-            <input id="event-modal-allday" type="checkbox">
+            <input id="event-editor-allday" type="checkbox">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Start</label>
-            <input id="event-modal-start-date" class="modal-input event-date-input" type="date">
-            <input id="event-modal-start-time" class="modal-input event-time-input" type="time">
+            <input id="event-editor-start-date" class="modal-input event-date-input" type="date">
+            <input id="event-editor-start-time" class="modal-input event-time-input" type="time">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">End</label>
-            <input id="event-modal-end-date" class="modal-input event-date-input" type="date">
-            <input id="event-modal-end-time" class="modal-input event-time-input" type="time">
+            <input id="event-editor-end-date" class="modal-input event-date-input" type="date">
+            <input id="event-editor-end-time" class="modal-input event-time-input" type="time">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Repeats</label>
-            <select id="event-modal-recur" class="modal-select">
+            <select id="event-editor-recur" class="modal-select">
               <option value="">Does not repeat</option>
               <option value="DAILY">Daily</option>
               <option value="WEEKLY">Weekly</option>
@@ -228,35 +228,35 @@
 
           <div class="modal-field-row">
             <label class="modal-label">Location</label>
-            <input id="event-modal-location" class="modal-input" type="text" placeholder="Add location…">
+            <input id="event-editor-location" class="modal-input" type="text" placeholder="Add location…">
           </div>
           <div class="modal-field modal-editor-field">
-            <div id="event-modal-editor-toolbar" class="editor-toolbar"></div>
-            <div id="event-modal-editor" class="modal-editor"></div>
-            <textarea id="event-modal-desc-raw" class="modal-notes modal-notes-raw" placeholder="HTML…" rows="8" hidden></textarea>
+            <div id="event-editor-toolbar" class="editor-toolbar"></div>
+            <div id="event-editor-content" class="modal-editor"></div>
+            <textarea id="event-editor-raw" class="modal-notes modal-notes-raw" placeholder="HTML…" rows="8" hidden></textarea>
           </div>
-          <details class="modal-section" id="event-modal-comments-section">
+          <details class="modal-section" id="event-editor-comments-section">
             <summary>
               <span class="modal-chevron">›</span>
               Activity
-              <span id="event-modal-comments-count" class="modal-section-count"></span>
+              <span id="event-editor-comments-count" class="modal-section-count"></span>
             </summary>
-            <div id="event-modal-comments-items"></div>
+            <div id="event-editor-comments-items"></div>
             <div class="modal-add-row">
-              <input id="event-modal-comment-input" type="text" placeholder="Add comment…">
-              <button id="event-modal-comment-add">Add</button>
+              <input id="event-editor-comment-input" type="text" placeholder="Add comment…">
+              <button id="event-editor-comment-add">Add</button>
             </div>
           </details>
         </div>
         <div class="modal-footer">
           <div class="modal-footer-left">
-            <button id="event-modal-delete"   class="btn-danger"    hidden>Delete</button>
-            <button id="event-modal-complete" class="btn-secondary" hidden>Mark complete</button>
-            <button id="event-modal-snooze"   class="btn-secondary" hidden>Snooze</button>
+            <button id="event-editor-delete"   class="btn-danger"    hidden>Delete</button>
+            <button id="event-editor-complete" class="btn-secondary" hidden>Mark complete</button>
+            <button id="event-editor-snooze"   class="btn-secondary" hidden>Snooze</button>
           </div>
           <div class="modal-footer-right">
-            <button id="event-modal-cancel" class="btn-ghost">Cancel</button>
-            <button id="event-modal-save" class="btn-primary">Save</button>
+            <button id="event-editor-cancel" class="btn-ghost">Cancel</button>
+            <button id="event-editor-save" class="btn-primary">Save</button>
           </div>
         </div>
       </div>

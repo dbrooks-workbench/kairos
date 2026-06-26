@@ -52,7 +52,7 @@ function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 
 function minutesToTime(n) { return `${String(Math.floor(n/60)%24).padStart(2,'0')}:${String(n%60).padStart(2,'0')}` }
 
 function setAllDayUI(allDay) {
-  el('event-modal-panel').classList.toggle('all-day', allDay)
+  el('event-editor-panel').classList.toggle('all-day', allDay)
 }
 
 // ── Description helpers ───────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ function _buildEvSnapshotHtml(comments) {
 }
 
 function _evGetHtml() {
-  if (_evRawMode) return el('event-modal-desc-raw').value.trim()
+  if (_evRawMode) return el('event-editor-raw').value.trim()
   if (!_editorEvent) return ''
   const html = _editorEvent.getHTML()
   return html === '<p></p>' ? '' : html
@@ -95,7 +95,7 @@ function _evGetHtml() {
 // ── Toolbar helpers ───────────────────────────────────────────────────────────
 
 function _buildEvToolbar() {
-  const toolbar = el('event-modal-editor-toolbar')
+  const toolbar = el('event-editor-toolbar')
 
   const group = document.createElement('div')
   group.className = 'editor-btn-group'
@@ -128,7 +128,7 @@ function _buildEvToolbar() {
 
 function _updateEvToolbar() {
   if (!_editorEvent) return
-  for (const btn of el('event-modal-editor-toolbar').querySelectorAll('.editor-btn[data-tip-name]')) {
+  for (const btn of el('event-editor-toolbar').querySelectorAll('.editor-btn[data-tip-name]')) {
     btn.classList.toggle('is-active', _editorEvent.isActive(btn.dataset.tipName))
   }
 }
@@ -138,26 +138,26 @@ function _evToggleMode() { _evRawMode ? _evSwitchToRich() : _evSwitchToRaw() }
 function _evSwitchToRaw() {
   if (_evRawMode) return
   _evRawMode = true
-  el('event-modal-desc-raw').value = _editorEvent ? _editorEvent.getHTML() : ''
-  el('event-modal-editor').hidden    = true
-  el('event-modal-desc-raw').hidden  = false
+  el('event-editor-raw').value = _editorEvent ? _editorEvent.getHTML() : ''
+  el('event-editor-content').hidden    = true
+  el('event-editor-raw').hidden  = false
   if (_evRawBtn) _evRawBtn.textContent = 'Rich'
 }
 
 function _evSwitchToRich() {
   if (!_evRawMode) return
   _evRawMode = false
-  const html = el('event-modal-desc-raw').value
+  const html = el('event-editor-raw').value
   if (_editorEvent) _editorEvent.commands.setContent(html, false)
-  el('event-modal-desc-raw').hidden = true
-  el('event-modal-editor').hidden   = false
+  el('event-editor-raw').hidden = true
+  el('event-editor-content').hidden   = false
   if (_evRawBtn) _evRawBtn.textContent = 'Raw'
 }
 
 // ── Comments helpers ──────────────────────────────────────────────────────────
 
 function _renderEventComments() {
-  const container = el('event-modal-comments-items')
+  const container = el('event-editor-comments-items')
   container.innerHTML = ''
   const sorted = [..._evComments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
   sorted.forEach(c => {
@@ -198,17 +198,17 @@ function _renderEventComments() {
     }
     container.appendChild(row)
   })
-  el('event-modal-comments-count').textContent = _evComments.length ? `(${_evComments.length})` : ''
+  el('event-editor-comments-count').textContent = _evComments.length ? `(${_evComments.length})` : ''
 }
 
 function _addEventComment() {
-  const inp  = el('event-modal-comment-input')
+  const inp  = el('event-editor-comment-input')
   const text = inp.value.trim()
   if (!text) return
   _evComments.push({ _id: null, timestamp: nowTimestamp(), text })
   inp.value = ''
   _renderEventComments()
-  el('event-modal-comments-section').open = true
+  el('event-editor-comments-section').open = true
 }
 
 async function _logNewEvComments(token, itemId, title) {
@@ -318,31 +318,31 @@ function resetCustomRecur(startDateStr) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initEventEditor() {
-  el('event-modal-close').addEventListener('click',  close)
-  el('event-modal-cancel').addEventListener('click', close)
-  el('event-modal-save').addEventListener('click',   save)
+  el('event-editor-close').addEventListener('click',  close)
+  el('event-editor-cancel').addEventListener('click', close)
+  el('event-editor-save').addEventListener('click',   save)
 
-  el('event-modal-allday').addEventListener('change', () => setAllDayUI(el('event-modal-allday').checked))
+  el('event-editor-allday').addEventListener('change', () => setAllDayUI(el('event-editor-allday').checked))
 
-  el('event-modal-recur').addEventListener('change', e => {
+  el('event-editor-recur').addEventListener('change', e => {
     el('custom-recur-panel').hidden = e.target.value !== 'CUSTOM'
     _preserveRrule = null
   })
 
-  el('event-modal-delete')?.addEventListener('click', confirmDelete)
-  el('event-modal-complete')?.addEventListener('click', handleCommitmentToggle)
-  el('event-modal-snooze')?.addEventListener('click', () => {
+  el('event-editor-delete')?.addEventListener('click', confirmDelete)
+  el('event-editor-complete')?.addEventListener('click', handleCommitmentToggle)
+  el('event-editor-snooze')?.addEventListener('click', () => {
     if (!_editItem) return
     openSnoozePopover(
-      el('event-modal-snooze'),
+      el('event-editor-snooze'),
       _editItem,
       () => { close(); _callbacks.onSaved?.() },
       (n, newDate, dateLabel) => handleCommitmentSnooze(n, newDate, dateLabel)
     )
   })
 
-  el('event-modal').addEventListener('click', e => { if (e.target === el('event-modal')) close() })
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-modal').hidden) close() })
+  el('event-editor').addEventListener('click', e => { if (e.target === el('event-editor')) close() })
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('event-editor').hidden) close() })
 
   // Location URL link
   _locLink = document.createElement('a')
@@ -351,24 +351,24 @@ export function initEventEditor() {
   _locLink.rel       = 'noopener noreferrer'
   _locLink.textContent = '↗'
   _locLink.hidden    = true
-  el('event-modal-location').parentNode.appendChild(_locLink)
-  el('event-modal-location').addEventListener('input', e => {
+  el('event-editor-location').parentNode.appendChild(_locLink)
+  el('event-editor-location').addEventListener('input', e => {
     const v = e.target.value.trim()
     _locLink.hidden = !/^https?:\/\//i.test(v)
     _locLink.href   = v
   })
 
   // Comments
-  el('event-modal-comment-add').addEventListener('click', _addEventComment)
-  el('event-modal-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addEventComment() })
+  el('event-editor-comment-add').addEventListener('click', _addEventComment)
+  el('event-editor-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addEventComment() })
 
   // Recurring-event scope picker
   el('recur-scope-cancel')?.addEventListener('click', () => {
     el('recur-scope-modal').hidden = true
     _pendingBody   = null
     _pendingAction = null
-    el('event-modal-save').disabled   = false
-    el('event-modal-delete').disabled = false
+    el('event-editor-save').disabled   = false
+    el('event-editor-delete').disabled = false
   })
   el('recur-scope-ok')?.addEventListener('click', () => executeWithScope(
     document.querySelector('input[name="recur-scope"]:checked')?.value ?? 'this'
@@ -378,7 +378,7 @@ export function initEventEditor() {
 
   // Tiptap editor — HTML mode (Google Calendar natively stores HTML descriptions)
   _editorEvent = new Editor({
-    element: el('event-modal-editor'),
+    element: el('event-editor-content'),
     extensions: [
       StarterKit,
       TaskList,
@@ -398,26 +398,26 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
   _callbacks     = callbacks
 
   const allDay = opts.allDay ?? false
-  el('event-modal-allday').checked = allDay
+  el('event-editor-allday').checked = allDay
   setAllDayUI(allDay)
 
   const today = opts.date ?? new Date().toLocaleDateString('en-CA')
-  el('event-modal-start-date').value = today
-  el('event-modal-end-date').value   = today
+  el('event-editor-start-date').value = today
+  el('event-editor-end-date').value   = today
 
   if (opts.startTime) {
-    el('event-modal-start-time').value = opts.startTime
-    el('event-modal-end-time').value   = opts.endTime ?? minutesToTime(timeToMinutes(opts.startTime) + 30)
+    el('event-editor-start-time').value = opts.startTime
+    el('event-editor-end-time').value   = opts.endTime ?? minutesToTime(timeToMinutes(opts.startTime) + 30)
   } else {
-    el('event-modal-start-time').value = '09:00'
-    el('event-modal-end-time').value   = '09:30'
+    el('event-editor-start-time').value = '09:00'
+    el('event-editor-end-time').value   = '09:30'
   }
 
-  el('event-modal-title').value    = ''
-  el('event-modal-location').value = ''
-  el('event-modal-recur').value    = ''
+  el('event-editor-title').value    = ''
+  el('event-editor-location').value = ''
+  el('event-editor-recur').value    = ''
   el('custom-recur-panel').hidden  = true
-  el('event-modal-delete').hidden  = true
+  el('event-editor-delete').hidden  = true
   if (_locLink) _locLink.hidden    = true
 
   if (_editorEvent) _editorEvent.commands.setContent('', false)
@@ -425,11 +425,11 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
 
   _evComments           = []
   _evOriginalTimestamps = new Set()
-  el('event-modal-comments-section').hidden = true   // comments only in edit mode
+  el('event-editor-comments-section').hidden = true   // comments only in edit mode
 
   resetCustomRecur(today)
 
-  const calSelect = el('event-modal-calendar')
+  const calSelect = el('event-editor-calendar')
   calSelect.disabled = false
   if (opts.calendars?.length) {
     populateCalendars(calSelect, opts.calendars, opts.calendarId)
@@ -446,8 +446,8 @@ export async function openEventEditor(opts = {}, callbacks = {}) {
     }
   }
 
-  el('event-modal').hidden = false
-  el('event-modal-title').focus()
+  el('event-editor').hidden = false
+  el('event-editor-title').focus()
 }
 
 export async function openEventEditorForEdit(item, callbacks = {}) {
@@ -456,7 +456,7 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   _callbacks     = callbacks
 
   const allDay = item.all_day
-  el('event-modal-allday').checked = allDay
+  el('event-editor-allday').checked = allDay
   setAllDayUI(allDay)
 
   const start      = new Date(item.start)
@@ -466,12 +466,12 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
   const toDate = d => d.toLocaleDateString('en-CA')
   const toTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 
-  el('event-modal-start-date').value = toDate(start)
-  el('event-modal-end-date').value   = toDate(displayEnd)
-  el('event-modal-start-time').value = toTime(start)
-  el('event-modal-end-time').value   = toTime(endRaw)
-  el('event-modal-title').value      = item.title
-  el('event-modal-location').value   = item.metadata?.location ?? ''
+  el('event-editor-start-date').value = toDate(start)
+  el('event-editor-end-date').value   = toDate(displayEnd)
+  el('event-editor-start-time').value = toTime(start)
+  el('event-editor-end-time').value   = toTime(endRaw)
+  el('event-editor-title').value      = item.title
+  el('event-editor-location').value   = item.metadata?.location ?? ''
 
   // Load description into editor — strip any Kairos snapshot then convert plain text → HTML
   if (_editorEvent) _editorEvent.commands.setContent(_textToHtml(_stripEvSnapshot(item.metadata?.body ?? '')), false)
@@ -485,19 +485,19 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
     _readonly: e.verb !== 'comment',
   }))
   _evOriginalTimestamps = new Set(_evComments.map(c => c.timestamp))
-  el('event-modal-comments-section').hidden = false
+  el('event-editor-comments-section').hidden = false
   _renderEventComments()
-  el('event-modal-comments-section').open = _evComments.length > 0
+  el('event-editor-comments-section').open = _evComments.length > 0
 
   // Recurrence
   const preset = matchRrulePreset(item.recurrence)
-  el('event-modal-recur').value = preset
+  el('event-editor-recur').value = preset
   el('custom-recur-panel').hidden = preset !== 'CUSTOM'
   if (preset === 'CUSTOM' && item.recurrence) _preserveRrule = item.recurrence
   resetCustomRecur(toDate(start))
 
   // Calendar selector (locked in edit mode)
-  const calSelect = el('event-modal-calendar')
+  const calSelect = el('event-editor-calendar')
   calSelect.disabled  = true
   calSelect.innerHTML = `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Loading…')}</option>`
 
@@ -520,21 +520,21 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
 
     if (master?.recurrence?.[0]) {
       const masterPreset = matchRrulePreset(master.recurrence[0])
-      el('event-modal-recur').value = masterPreset
+      el('event-editor-recur').value = masterPreset
       el('custom-recur-panel').hidden = masterPreset !== 'CUSTOM'
       _preserveRrule = masterPreset === 'CUSTOM' ? master.recurrence[0] : null
     }
   }
 
-  el('event-modal-delete').hidden   = false
-  el('event-modal-delete').disabled = false
+  el('event-editor-delete').hidden   = false
+  el('event-editor-delete').disabled = false
 
   if (item.metadata?.task_calendar) {
     const isDone = item.status === 'COMPLETED'
-    const completeBtn = el('event-modal-complete')
+    const completeBtn = el('event-editor-complete')
     completeBtn.textContent = isDone ? 'Mark incomplete' : 'Mark complete'
     completeBtn.hidden      = false
-    el('event-modal-snooze').hidden = isDone
+    el('event-editor-snooze').hidden = isDone
   }
 
   const locVal = (item.metadata?.location ?? '').trim()
@@ -543,8 +543,8 @@ export async function openEventEditorForEdit(item, callbacks = {}) {
     _locLink.href   = locVal
   }
 
-  el('event-modal').hidden = false
-  el('event-modal-title').focus()
+  el('event-editor').hidden = false
+  el('event-editor-title').focus()
 }
 
 function populateCalendars(select, calendars, preferredId) {
@@ -557,9 +557,9 @@ function populateCalendars(select, calendars, preferredId) {
 }
 
 function close() {
-  el('event-modal').hidden          = true
-  el('event-modal-complete').hidden = true
-  el('event-modal-snooze').hidden   = true
+  el('event-editor').hidden          = true
+  el('event-editor-complete').hidden = true
+  el('event-editor-snooze').hidden   = true
 }
 
 // ── Commitment complete / snooze ──────────────────────────────────────────────
@@ -572,7 +572,7 @@ async function handleCommitmentToggle() {
   const eventId = _editItem.source.external_id
   const verb    = isDone ? 'uncompleted' : 'completed'
 
-  el('event-modal-complete').disabled = true
+  el('event-editor-complete').disabled = true
   try {
     if (isDone) await setUncompleted(token, eventId)
     else        await setCompleted(token, eventId)
@@ -589,7 +589,7 @@ async function handleCommitmentToggle() {
     _callbacks.onSaved?.()
   } catch (err) {
     console.error('Commitment toggle failed:', err)
-    el('event-modal-complete').disabled = false
+    el('event-editor-complete').disabled = false
   }
 }
 
@@ -625,19 +625,19 @@ async function handleCommitmentSnooze(n, newDate, dateLabel) {
 // ── Save ──────────────────────────────────────────────────────────────────────
 
 async function save() {
-  const title = el('event-modal-title').value.trim()
-  if (!title) { el('event-modal-title').focus(); return }
+  const title = el('event-editor-title').value.trim()
+  if (!title) { el('event-editor-title').focus(); return }
 
-  const calendarId = el('event-modal-calendar').value
+  const calendarId = el('event-editor-calendar').value
   if (!calendarId) return
 
-  const allDay    = el('event-modal-allday').checked
-  const startDate = el('event-modal-start-date').value
-  const endDate   = el('event-modal-end-date').value || startDate
-  const startTime = el('event-modal-start-time').value
-  const endTime   = el('event-modal-end-time').value
-  const freq      = el('event-modal-recur').value
-  const location  = el('event-modal-location').value.trim()
+  const allDay    = el('event-editor-allday').checked
+  const startDate = el('event-editor-start-date').value
+  const endDate   = el('event-editor-end-date').value || startDate
+  const startTime = el('event-editor-start-time').value
+  const endTime   = el('event-editor-end-time').value
+  const freq      = el('event-editor-recur').value
+  const location  = el('event-editor-location').value.trim()
   const html      = _evGetHtml()
   const snapHtml  = _buildEvSnapshotHtml(_evComments)
   const fullDesc  = snapHtml ? `${html}${snapHtml}` : html
@@ -675,7 +675,7 @@ async function save() {
   const token = await getToken()
   if (!token) return
 
-  const saveBtn = el('event-modal-save')
+  const saveBtn = el('event-editor-save')
   saveBtn.disabled = true
 
   if (_editItem?.metadata?.recurring_event_id) {
@@ -707,7 +707,7 @@ async function save() {
 }
 
 async function confirmDelete() {
-  const deleteBtn = el('event-modal-delete')
+  const deleteBtn = el('event-editor-delete')
   deleteBtn.disabled = true
   _pendingAction = 'delete'
 
@@ -744,7 +744,7 @@ async function executeWithScope(scope) {
 
   if (action === 'delete') {
     const token = await getToken()
-    if (!token) { el('event-modal-delete').disabled = false; return }
+    if (!token) { el('event-editor-delete').disabled = false; return }
     try {
       if (scope === 'all')            await deleteAllEvents(token)
       else if (scope === 'following') await deleteThisAndFollowing(token)
@@ -753,14 +753,14 @@ async function executeWithScope(scope) {
       _callbacks.onDeleted?.()
     } catch (err) {
       console.error('Event delete failed:', err)
-      el('event-modal-delete').disabled = false
+      el('event-editor-delete').disabled = false
     }
     return
   }
 
   const body    = _pendingBody
   _pendingBody  = null
-  const saveBtn = el('event-modal-save')
+  const saveBtn = el('event-editor-save')
   const token   = await getToken()
   if (!token || !body) { saveBtn.disabled = false; return }
   const calId   = _editItem.source.account_id
