@@ -14,7 +14,7 @@ import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parser
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getListsForCalendar } from './providers/kairosLists.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
-import { getItemLog, appendLogEntry, deleteLogEntry } from './providers/lifeLog.js'
+import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -171,17 +171,22 @@ function _getHtml() {
 
 // ── Activity log / comments ───────────────────────────────────────────────────
 
+function _toDatetimeLocal(isoStr) {
+  if (!isoStr) return ''
+  const d   = new Date(isoStr)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function _renderComments() {
   const container = el('ue-activity-items')
   container.innerHTML = ''
-  const sorted = [..._comments].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  const sorted = [..._comments].sort((a, b) =>
+    (a.event_date ?? a.timestamp).localeCompare(b.event_date ?? b.timestamp)
+  )
   sorted.forEach(c => {
     const row = document.createElement('div')
     row.className = 'modal-comment-row' + (c._readonly ? ' modal-comment-readonly' : '')
-
-    const ts = document.createElement('span')
-    ts.className   = 'modal-comment-ts'
-    ts.textContent = displayTimestamp(c.timestamp)
 
     const del = document.createElement('button')
     del.className   = 'modal-row-del'
@@ -196,18 +201,42 @@ function _renderComments() {
     })
 
     if (c._readonly) {
+      const ts = document.createElement('span')
+      ts.className   = 'modal-comment-ts'
+      ts.textContent = displayTimestamp(c.event_date ?? c.timestamp)
       const txt = document.createElement('span')
       txt.className   = 'modal-comment-text'
       txt.textContent = c.text
       row.append(ts, txt, del)
     } else {
+      const ts = document.createElement('input')
+      ts.type      = 'datetime-local'
+      ts.className = 'modal-comment-ts modal-comment-ts-input'
+      ts.value     = _toDatetimeLocal(c.event_date ?? c.timestamp)
+      ts.addEventListener('blur', async () => {
+        if (!ts.value || !c._id || !_editItem) return
+        const newDate = new Date(ts.value).toISOString()
+        if (newDate === (c.event_date ?? c.timestamp)) return
+        c.event_date = newDate
+        const token = await getToken()
+        if (token) updateLogEntry(token, _editItem.id, c._id, { event_date: newDate })
+      })
+
       const txt = document.createElement('input')
       txt.type      = 'text'
       txt.className = 'modal-comment-text'
       txt.value     = c.text
-      txt.addEventListener('input', () => {
-        const orig = _comments.find(x => x === c)
-        if (orig) orig.text = txt.value
+      txt.addEventListener('input', () => { c.text = txt.value })
+      txt.addEventListener('blur', async () => {
+        if (!c._id || !_editItem) return
+        const newText = txt.value.trim()
+        if (!newText || newText === c.text) return
+        c.text = newText
+        const token = await getToken()
+        if (token) updateLogEntry(token, _editItem.id, c._id, {
+          narrative:     newText,
+          action_detail: { verb: 'comment', text: newText },
+        })
       })
       row.append(ts, txt, del)
     }
@@ -216,14 +245,29 @@ function _renderComments() {
   el('ue-activity-count').textContent = _comments.length ? `(${_comments.length})` : ''
 }
 
-function _addComment() {
+async function _addComment() {
   const inp  = el('ue-comment-input')
   const text = inp.value.trim()
-  if (!text) return
-  _comments.push({ _id: null, timestamp: nowTimestamp(), text })
+  if (!text || !_editItem) return
+  const ts = nowTimestamp()
+  const c  = { _id: null, timestamp: ts, event_date: ts, text }
+  _comments.push(c)
   inp.value = ''
   _renderComments()
   el('ue-activity-section').open = true
+
+  const token = await getToken()
+  if (!token) return
+  c._id = await appendLogEntry(token, {
+    item_id:       _editItem.id,
+    item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
+    title:         _editItem.title,
+    verb:          'comment',
+    action_detail: { verb: 'comment', text: c.text },
+    narrative:     c.text,
+    context:       '',
+  })
+  _originalTimestamps.add(ts)
 }
 
 async function _logNewComments(token, itemId, title) {
@@ -607,10 +651,11 @@ export async function openEditorForEdit(item, callbacks = {}) {
 
   // Load activity log
   _comments = getItemLog(item.id).map(e => ({
-    _id:       e._id,
-    timestamp: e.timestamp,
-    text:      e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
-    _readonly: e.verb !== 'comment',
+    _id:        e._id,
+    timestamp:  e.timestamp,
+    event_date: e.event_date ?? e.timestamp,
+    text:       e.verb === 'comment' ? (e.action_detail?.text ?? e.narrative) : e.narrative,
+    _readonly:  e.verb !== 'comment',
   }))
   _originalTimestamps = new Set(_comments.map(c => c.timestamp))
 

@@ -7,7 +7,7 @@
 // action_detail — object with verb-specific fields
 // narrative     — human-readable prose
 
-import { fsList, fsAdd, fsDelete } from './firestore.js'
+import { fsList, fsAdd, fsSet, fsDelete } from './firestore.js'
 
 const COLLECTION = 'activity'
 
@@ -49,12 +49,13 @@ export function getItemLog(itemId) {
   return (_logByItemId[itemId] ?? []).slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp))
 }
 
-// Append an activity entry. Fire-and-forget — a failed write never blocks the UI.
-// entry: { item_id, item_type, title, verb, action_detail, narrative, context }
+// Append an activity entry. Returns the new Firestore _id (null on failure).
+// entry: { item_id, item_type, title, verb, action_detail, narrative, context, event_date? }
 export async function appendLogEntry(token, entry) {
   const timestamp = new Date().toISOString()
   const doc = {
-    timestamp,
+    timestamp,                                   // immutable create time
+    event_date:    entry.event_date ?? timestamp, // editable "when it happened"
     source:        'kairos',
     item_id:       entry.item_id       ?? '',
     item_type:     entry.item_type     ?? '',
@@ -79,8 +80,29 @@ export async function appendLogEntry(token, entry) {
       const last = arr?.[arr.length - 1]
       if (last && last._id === null && last.timestamp === timestamp) last._id = written._id
     }
+    return written._id
   } catch (err) {
     console.warn('Life log append failed:', err.message)
+    return null
+  }
+}
+
+// Update mutable fields (narrative, action_detail, event_date) on an existing entry.
+// Uses the in-memory cache to reconstruct the full document for a safe full-replace write.
+export async function updateLogEntry(token, itemId, entryId, updates) {
+  if (!entryId) return
+  const cached = (_logByItemId?.[itemId] ?? []).find(e => e._id === entryId)
+  if (!cached) return
+
+  if ('narrative'     in updates) cached.narrative     = updates.narrative
+  if ('action_detail' in updates) cached.action_detail = updates.action_detail
+  if ('event_date'    in updates) cached.event_date    = updates.event_date
+
+  const { _id: _, ...doc } = cached
+  try {
+    await fsSet(token, `${COLLECTION}/${entryId}`, doc)
+  } catch (err) {
+    console.warn('Life log update failed:', err.message)
   }
 }
 
