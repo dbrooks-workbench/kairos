@@ -39,10 +39,11 @@ function _nextDay(dateStr) {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
 }
 
-function _markDoneFooter(kairosId, webhookToken) {
+function _markDoneFooter(kairosId, webhookToken, completed) {
   const origin = (typeof window !== 'undefined') ? window.location.origin : ''
-  const url = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
-  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">✓ Mark as done in Kairos</a></div>`
+  const url    = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
+  const label  = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
+  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a></div>`
 }
 
 function _stripCompleteLink(html) {
@@ -74,7 +75,7 @@ function _buildEventBody(taskData) {
     endField   = { dateTime: `${endDate ?? dateStr}T${endTime ?? '09:30'}:00`, timeZone: tz }
   }
 
-  const footer = (!isUndated && webhookToken) ? _markDoneFooter(kairosId, webhookToken) : ''
+  const footer = (!isUndated && webhookToken) ? _markDoneFooter(kairosId, webhookToken, !!completed) : ''
   const rawBody = _stripCompleteLink(body ?? '')
   const description = rawBody ? `${rawBody}${footer}` : (footer || undefined)
 
