@@ -591,9 +591,11 @@ async function handleDrop(evt) {
 
   try {
     if (toListId === DONE_COL_ID) {
-      await completeTask(token, calendarId, extId)
+      const srcItem = _boardItems.find(i => i.source.external_id === extId)
+      await completeTask(token, calendarId, extId, srcItem?.title ?? '')
     } else if (fromListId === DONE_COL_ID) {
-      await uncompleteTask(token, calendarId, extId)
+      const srcItem = _boardItems.find(i => i.source.external_id === extId)
+      await uncompleteTask(token, calendarId, extId, srcItem?.title ?? '')
       if (toListId) await patchTaskProps(token, calendarId, extId, { listId: toListId })
     } else {
       const srcItem  = _boardItems.find(i => i.source.external_id === extId)

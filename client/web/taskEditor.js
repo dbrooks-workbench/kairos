@@ -422,6 +422,7 @@ async function save() {
       noDate:       !dateStr,
       webhookToken: wt,
       recurrence,
+      completed:    _item?.status === 'COMPLETED',
     }
 
     const token = await getToken()
@@ -482,9 +483,9 @@ async function toggleComplete() {
   const isDone = _item.status === 'COMPLETED'
   try {
     if (isDone) {
-      await _uncompleteTask(token, _calendarId, _item.source.external_id)
+      await _uncompleteTask(token, _calendarId, _item.source.external_id, _item.title)
     } else {
-      await _completeTask(token, _calendarId, _item.source.external_id)
+      await _completeTask(token, _calendarId, _item.source.external_id, _item.title)
     }
     close()
     _callbacks.onToggleDone?.()

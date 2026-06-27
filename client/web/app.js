@@ -126,12 +126,12 @@ async function handleToggleTask(item) {
   try {
     const isCalTask = item.source.provider === 'google-calendar-task'
     if (isDone) {
-      if (isCalTask) await calUncompleteTask(token, item.source.account_id, item.source.external_id)
+      if (isCalTask) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title)
       else           await uncompleteTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'NEEDS_ACTION'
     } else {
-      if (isCalTask) await calCompleteTask(token, item.source.account_id, item.source.external_id)
+      if (isCalTask) await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title)
       else           await completeTask(token, item.source.account_id, item.source.external_id)
       const target = state.items.find(i => i.id === item.id)
       if (target) target.status = 'COMPLETED'

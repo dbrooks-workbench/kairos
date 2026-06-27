@@ -13,9 +13,24 @@
 
 export const KAIROS_UNDATED_SENTINEL = '1970-01-01'
 
+// Prefix written to the Google Calendar event summary when a task is completed.
+// Lets standard GCal clients show completion state without Kairos open.
+// Stripped from CalendarItem.title at normalization time so Kairos UI never
+// sees it — completion state is authoritative in Drive (completedAt).
+const COMPLETED_PREFIX = '✅ '
+
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Adds or removes COMPLETED_PREFIX from a title to match isCompleted.
+// Safe to call redundantly — only modifies when the prefix state is wrong.
+function _applyPrefix(title, isCompleted) {
+  const has = (title ?? '').startsWith(COMPLETED_PREFIX)
+  if (isCompleted && !has) return COMPLETED_PREFIX + (title ?? '')
+  if (!isCompleted && has)  return (title ?? '').slice(COMPLETED_PREFIX.length)
+  return title ?? ''
+}
 
 function _nextDay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -36,7 +51,7 @@ function _stripCompleteLink(html) {
 }
 
 function _buildEventBody(taskData) {
-  const { title, body, kairosId, listId, order, loe, date, noDate, unprocessed, webhookToken, recurrence } = taskData
+  const { title, body, kairosId, listId, order, loe, date, noDate, unprocessed, webhookToken, recurrence, completed } = taskData
   const isUndated = noDate || !date
   const dateStr   = isUndated ? KAIROS_UNDATED_SENTINEL : date
 
@@ -55,7 +70,7 @@ function _buildEventBody(taskData) {
   if (unprocessed) props.unprocessed = 'true'
 
   return {
-    summary: title,
+    summary: _applyPrefix(title, !!completed),
     ...(description !== undefined && { description }),
     start: { date: dateStr },
     end:   { date: _nextDay(dateStr) },
@@ -76,9 +91,14 @@ export function normalizeTask(event, calendarId) {
   const start      = isUndated ? null : new Date(dateStr + 'T00:00:00')
   const completedAt = p.completedAt || null
 
+  const rawTitle = event.summary ?? ''
+  const cleanTitle = rawTitle.startsWith(COMPLETED_PREFIX)
+    ? rawTitle.slice(COMPLETED_PREFIX.length) || '(No title)'
+    : rawTitle || '(No title)'
+
   return {
     id:        `gcal:${calendarId}:${event.id}`,
-    title:     event.summary ?? '(No title)',
+    title:     cleanTitle,
     item_type: 'TASK',
     source: {
       provider:    'google-calendar-task',
@@ -190,13 +210,20 @@ export async function deleteTask(token, calendarId, eventId) {
 
 // ── Completion ────────────────────────────────────────────────────────────────
 
-export async function completeTask(token, calendarId, eventId) {
-  return patchTaskProps(token, calendarId, eventId, { completedAt: new Date().toISOString() })
+export async function completeTask(token, calendarId, eventId, title = '') {
+  const event = await _patch(token, calendarId, eventId, {
+    summary: _applyPrefix(title, true),
+    extendedProperties: { private: { completedAt: new Date().toISOString() } },
+  })
+  return normalizeTask(event, calendarId)
 }
 
-// null clears the completedAt key from extendedProperties.private
-export async function uncompleteTask(token, calendarId, eventId) {
-  return patchTaskProps(token, calendarId, eventId, { completedAt: null })
+export async function uncompleteTask(token, calendarId, eventId, title = '') {
+  const event = await _patch(token, calendarId, eventId, {
+    summary: _applyPrefix(title, false),
+    extendedProperties: { private: { completedAt: null } },
+  })
+  return normalizeTask(event, calendarId)
 }
 
 // ── Queries ───────────────────────────────────────────────────────────────────

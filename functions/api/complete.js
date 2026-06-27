@@ -49,11 +49,12 @@ export async function onRequestGet(context) {
       return _html('Already done ✓', `This task was marked as complete on ${when}.`)
     }
 
-    // Mark complete via extendedProperties.private.completedAt
-    await _markComplete(accessToken, found.calendarId, found.event.id)
+    // Mark complete: write completedAt and prefix the title for standard clients
+    const rawTitle = found.event.summary ?? ''
+    await _markComplete(accessToken, found.calendarId, found.event.id, rawTitle)
 
-    const title = found.event.summary ?? 'Task'
-    return _html('Done ✓', `"${_esc(title)}" has been marked as complete.`)
+    const cleanTitle = rawTitle.startsWith('✅ ') ? rawTitle.slice(2) : rawTitle
+    return _html('Done ✓', `"${_esc(cleanTitle || 'Task')}" has been marked as complete.`)
 
   } catch (err) {
     console.error('[/api/complete]', err)
@@ -106,13 +107,15 @@ async function _findByKairosId(accessToken, kairosId) {
   return null
 }
 
-async function _markComplete(accessToken, calendarId, eventId) {
+async function _markComplete(accessToken, calendarId, eventId, currentTitle) {
+  const prefixed = currentTitle.startsWith('✅ ') ? currentTitle : '✅ ' + currentTitle
   const res = await fetch(
     `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
       method:  'PATCH',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        summary: prefixed,
         extendedProperties: { private: { completedAt: new Date().toISOString() } },
       }),
     }
