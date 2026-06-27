@@ -60,6 +60,12 @@ function normalizeEvent(event, calendar) {
     _readonly: e.verb !== 'comment',
   }))
 
+  // DEBUG
+  const _debugColor = event.colorId
+    ? `colorId=${event.colorId} → ${resolveColor(event.colorId)}`
+    : `cal default → ${calendar.backgroundColor ?? 'none'}`
+  console.debug(`[color] "${event.summary}" on "${calendar.summary}" | ${_debugColor}`)
+
   return {
     id: itemId,
     title: event.summary ?? '(No title)',
@@ -88,6 +94,10 @@ function normalizeEvent(event, calendar) {
       task_calendar: isTaskCal,
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
+    // DEBUG – remove once color source is understood
+    _colorDebug: event.colorId
+      ? `event colorId=${event.colorId} → ${resolveColor(event.colorId)}`
+      : `calendar default → ${calendar.backgroundColor ?? 'none'} (cal: ${calendar.summary})`,
     editable: event.organizer?.self === true,
   }
 }

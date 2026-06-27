@@ -113,14 +113,14 @@
             <input id="ue-allday" type="checkbox">
           </div>
           <div class="modal-field-row">
-            <label class="modal-label">Start</label>
-            <input id="ue-start-date" class="modal-input event-date-input" type="date">
-            <input id="ue-start-time" class="modal-input event-time-input" type="time">
-          </div>
-          <div class="modal-field-row">
-            <label class="modal-label">End</label>
-            <input id="ue-end-date" class="modal-input event-date-input" type="date">
-            <input id="ue-end-time" class="modal-input event-time-input" type="time">
+            <label class="modal-label">When</label>
+            <div class="when-fields">
+              <input id="ue-start-date" class="modal-input event-date-input" type="date">
+              <input id="ue-start-time" class="modal-input event-time-input" type="time">
+              <span class="when-sep">–</span>
+              <input id="ue-end-date" class="modal-input event-date-input" type="date">
+              <input id="ue-end-time" class="modal-input event-time-input" type="time">
+            </div>
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Repeats</label>
@@ -217,12 +217,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Context menu for new event / new task -->
-    <div id="context-menu" hidden>
-      <button class="ctx-item" id="ctx-new-event">📅 New event</button>
-      <button class="ctx-item" id="ctx-new-task">✓ New task</button>
     </div>
 
     <!-- Recurring-event scope picker — shown after Save on a recurring event -->

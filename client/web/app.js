@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.22.2'
+const VERSION   = '0.22.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1396,60 +1396,33 @@ function initCalendarDrag() {
   })
 }
 
-// ── Context menu (new event / new task) ──────────────────────────────────────
+// ── Create handlers (+ button, all-day click, timed-col click) ───────────────
 
-let _ctxOpts = {}
-
-function showContextMenu(x, y, opts = {}) {
-  _ctxOpts = opts
-  const menu = document.getElementById('context-menu')
-  menu.hidden = false
-  // Keep within viewport
-  menu.style.left = `${Math.min(x, window.innerWidth  - menu.offsetWidth  - 8)}px`
-  menu.style.top  = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`
-}
-
-function initContextMenu() {
-  const menu = document.getElementById('context-menu')
-
-  document.getElementById('ctx-new-event').addEventListener('click', () => {
-    menu.hidden = true
+function initCreateHandlers() {
+  // "+" header button → open editor (user chooses mode via toggle in editor)
+  document.getElementById('btn-add').addEventListener('click', e => {
+    e.stopPropagation()
     openEditor(
-      { mode: 'event', date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? true, calendars: state.calendars },
+      { mode: 'event', calendars: state.calendars },
       { onSaved: refreshCalendarItems }
     )
   })
 
-  document.getElementById('ctx-new-task').addEventListener('click', () => {
-    menu.hidden = true
-    openEditor(
-      { mode: 'task', calendarId: getTaskCalendars()[0] ?? null, date: _ctxOpts.date ?? null },
-      calendarModalCallbacks()
-    )
-  })
-
-  // + button
-  document.getElementById('btn-add').addEventListener('click', e => {
-    e.stopPropagation()
-    showContextMenu(e.clientX, e.clientY)
-  })
-
-  // All-day col background click → context menu with date
+  // All-day col background click → new all-day event for that date
   document.getElementById('allday-cols').addEventListener('click', e => {
     if (e.target.closest('.allday-event') || e.target.closest('.allday-more')) return
     const col = e.target.closest('.allday-col')
     if (!col) return
-    e.stopPropagation()
-    // Toggle: a second click anywhere in the all-day area closes the menu
-    if (!menu.hidden) { menu.hidden = true; return }
     const dayIdx = parseInt(col.dataset.day, 10)
     const date   = addDays(state.weekStart, dayIdx).toLocaleDateString('en-CA')
-    showContextMenu(e.clientX, e.clientY, { date, allDay: true })
+    openEditor(
+      { mode: 'event', date, allDay: true, calendars: state.calendars },
+      { onSaved: refreshCalendarItems }
+    )
   })
 
-  // Timed col background click → straight to event editor for that 30-min block
+  // Timed col background click → new timed event at the clicked time slot
   document.getElementById('timed-cols').addEventListener('click', e => {
-    if (!menu.hidden) { menu.hidden = true; return }
     if (e.target.closest('.cal-event')) return
     const col = e.target.closest('.timed-col')
     if (!col) return
@@ -1465,11 +1438,6 @@ function initContextMenu() {
       { onSaved: refreshCalendarItems }
     )
   })
-
-  // Close on outside click or ESC
-  document.addEventListener('click', () => { menu.hidden = true })
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') menu.hidden = true })
-  menu.addEventListener('click', e => e.stopPropagation())
 }
 
 // ── Full render pass ─────────────────────────────────────────────────────────
@@ -1535,7 +1503,7 @@ document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 initEditor()
 initSnooze()
 initCalendarDrag()
-initContextMenu()
+initCreateHandlers()
 initTimeIndicator()
 initMobileDayView()
 

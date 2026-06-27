@@ -24,6 +24,7 @@ let _editItem      = null      // null = create mode
 let _callbacks     = {}
 let _kairosId           = null   // task mode: stable ID (null until first save)
 let _originalCalendarId = null   // calendar ID at open time, for move detection
+let _endDateExplicit    = false  // true once user has manually changed end date
 let _preserveRrule      = null
 let _pendingBody   = null      // pending save body while scope modal is open
 let _pendingAction = null      // 'delete' | null
@@ -429,6 +430,21 @@ export function initEditor() {
   })
 
   el('ue-allday').addEventListener('change', () => _setAllDayUI(el('ue-allday').checked))
+
+  // End date follows start date in create mode; clamps to start if dragged before it.
+  el('ue-start-date').addEventListener('change', () => {
+    const s = el('ue-start-date').value
+    const e = el('ue-end-date').value
+    if (!_endDateExplicit) {
+      el('ue-end-date').value = s
+    } else if (e < s) {
+      el('ue-end-date').value = s
+      _endDateExplicit = false
+    }
+  })
+  el('ue-end-date').addEventListener('change', () => {
+    _endDateExplicit = el('ue-end-date').value !== el('ue-start-date').value
+  })
   el('ue-recur').addEventListener('change', e => {
     el('custom-recur-panel').hidden = e.target.value !== 'CUSTOM'
     _preserveRrule = null
@@ -498,8 +514,9 @@ export async function openEditor(opts = {}, callbacks = {}) {
   _originalTimestamps = new Set()
 
   const mode   = opts.mode ?? 'event'
-  const allDay = opts.allDay ?? (mode === 'task')
+  const allDay = opts.allDay ?? true   // both modes default all-day; grid click passes allDay:false
   const today  = opts.date ?? new Date().toLocaleDateString('en-CA')
+  _endDateExplicit = false
 
   _setMode(mode)
   _setAllDayUI(allDay)
@@ -566,6 +583,11 @@ export async function openEditorForEdit(item, callbacks = {}) {
   const displayEnd = (allDay && endRaw) ? new Date(endRaw.getTime() - 86_400_000) : endRaw
 
   _originalCalendarId = item.source.account_id
+  // Multi-day items have an end date the user set intentionally; single-day items
+  // can have end track start if the user moves the date.
+  _endDateExplicit = !!item.end && _fmtDate(item.start) !== _fmtDate(
+    item.all_day && item.end ? new Date(new Date(item.end).getTime() - 86_400_000) : item.end
+  )
   _setMode(mode, { locked: true })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
