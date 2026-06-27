@@ -1,4 +1,4 @@
-import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
+import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate } from './providers/calendarTasks.js'
@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.14'
+const VERSION   = '0.23.15'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -278,9 +278,11 @@ function stopPolling() {
   if (_pollHandle !== null) { clearInterval(_pollHandle); _pollHandle = null }
 }
 
-// Resume immediately when the user returns to the tab
+// Resume immediately when the user returns to the tab; force-refresh the token
+// so returning after any idle period doesn't carry a stale access token.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
+  invalidateCache()
   runSpawnScan()
     .then(() => {
       if (state.view === 'board') loadBoardData()

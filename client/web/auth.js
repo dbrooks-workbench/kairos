@@ -29,7 +29,7 @@ async function fetchAccounts() {
   _expiresAt = Date.now() + 55 * 60 * 1000
 }
 
-function invalidateCache() { _accounts = null; _expiresAt = 0 }
+export function invalidateCache() { _accounts = null; _expiresAt = 0 }
 
 // All connected accounts as [{ id, email, primary, token }].
 export async function getTokens() {
