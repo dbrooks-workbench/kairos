@@ -1007,8 +1007,28 @@ body.resize-active * { cursor: ns-resize !important; }
   flex-shrink: 0;
 }
 
-/* All-day: single row [start date] – [end date] */
+/* All-day: single start date; end row + sep hidden until multiday */
 #unified-editor-panel.all-day .event-time-input { display: none; }
+#unified-editor-panel.all-day #ue-end-row       { display: none; }
+#unified-editor-panel.all-day .when-sep          { display: none; }
+#unified-editor-panel.all-day.multiday #ue-end-row { display: flex; }
+#unified-editor-panel.all-day.multiday .when-sep   { display: inline; }
+
+/* Multi-day toggle buttons: only in all-day mode */
+.multiday-btn {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  white-space: nowrap;
+}
+.multiday-btn:hover { color: var(--today-color); }
+#unified-editor-panel.all-day           #ue-multiday-btn  { display: inline; }
+#unified-editor-panel.all-day.multiday  #ue-multiday-btn  { display: none; }
+#unified-editor-panel.all-day.multiday  #ue-singleday-btn { display: inline; }
 
 /* Timed: two rows — start on top, end below; sep hidden */
 #unified-editor-panel:not(.all-day) .when-fields {

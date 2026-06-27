@@ -74,7 +74,10 @@ function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 
 function minutesToTime(n) { return `${String(Math.floor(n/60)%24).padStart(2,'0')}:${String(n%60).padStart(2,'0')}` }
 
 function _setAllDayUI(allDay) {
-  el('unified-editor-panel').classList.toggle('all-day', allDay)
+  const panel = el('unified-editor-panel')
+  panel.classList.toggle('all-day', allDay)
+  // multiday class only meaningful in all-day mode; timed always shows both rows
+  panel.classList.toggle('multiday', allDay && _endDateExplicit)
 }
 
 // ── Description helpers ───────────────────────────────────────────────────────
@@ -531,6 +534,16 @@ export function initEditor() {
   })
 
   el('ue-allday').addEventListener('change', () => _setAllDayUI(el('ue-allday').checked))
+
+  el('ue-multiday-btn').addEventListener('click', () => {
+    _endDateExplicit = true
+    el('unified-editor-panel').classList.add('multiday')
+  })
+  el('ue-singleday-btn').addEventListener('click', () => {
+    _endDateExplicit = false
+    el('unified-editor-panel').classList.remove('multiday')
+    el('ue-end-date').value = el('ue-start-date').value
+  })
 
   // End date follows start date in create mode; clamps to start if dragged before it.
   el('ue-start-date').addEventListener('change', () => {

@@ -117,22 +117,24 @@
             <select id="ue-list" class="modal-select"></select>
           </div>
           <div class="modal-field-row">
-            <label class="modal-label">All day</label>
-            <input id="ue-allday" type="checkbox">
-          </div>
-          <div class="modal-field-row">
             <label class="modal-label">When</label>
             <div class="when-fields">
               <div class="when-row">
                 <input id="ue-start-date" class="modal-input event-date-input" type="date">
                 <input id="ue-start-time" class="modal-input event-time-input" type="time">
+                <button type="button" id="ue-multiday-btn" class="multiday-btn">multi-day →</button>
               </div>
               <span class="when-sep">–</span>
-              <div class="when-row">
+              <div class="when-row" id="ue-end-row">
                 <input id="ue-end-date" class="modal-input event-date-input" type="date">
                 <input id="ue-end-time" class="modal-input event-time-input" type="time">
+                <button type="button" id="ue-singleday-btn" class="multiday-btn">← single day</button>
               </div>
             </div>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">All day</label>
+            <input id="ue-allday" type="checkbox">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Repeats</label>
