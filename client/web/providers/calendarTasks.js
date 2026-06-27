@@ -121,9 +121,6 @@ export function normalizeTask(event, calendarId) {
   // For timed: surface the actual end dateTime.
   const end = event.end?.dateTime ? new Date(event.end.dateTime) : null
 
-  // DEBUG
-  console.log(`[color/task] "${cleanTitle}" cal=${calendarId} colorId=${event.colorId ?? 'none'} → color:null (CSS fallback)`)
-
   return {
     id:        `gcal:${calendarId}:${event.id}`,
     title:     cleanTitle,

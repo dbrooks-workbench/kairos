@@ -60,12 +60,6 @@ function normalizeEvent(event, calendar) {
     _readonly: e.verb !== 'comment',
   }))
 
-  // DEBUG
-  const _debugColor = event.colorId
-    ? `colorId=${event.colorId} → ${resolveColor(event.colorId)}`
-    : `cal default → ${calendar.backgroundColor ?? 'none'}`
-  console.log(`[color] "${event.summary}" on "${calendar.summary}" | ${_debugColor}`)
-
   return {
     id: itemId,
     title: event.summary ?? '(No title)',
@@ -94,10 +88,6 @@ function normalizeEvent(event, calendar) {
       task_calendar: isTaskCal,
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
-    // DEBUG – remove once color source is understood
-    _colorDebug: event.colorId
-      ? `event colorId=${event.colorId} → ${resolveColor(event.colorId)}`
-      : `calendar default → ${calendar.backgroundColor ?? 'none'} (cal: ${calendar.summary})`,
     editable: event.organizer?.self === true,
   }
 }
@@ -185,10 +175,14 @@ export async function getEvents(token, start, end) {
       const normalized = events.map(e => normalizeEvent(e, calendar)).filter(Boolean)
 
       // For task calendars, merge in dated task events for the same range.
+      // Stamp the calendar's background color onto task items so they match
+      // non-tagged events on the same calendar (normalizeTask has no calendar object).
       if (taskCalendars.includes(calendar.id)) {
         let tasks = []
         try {
-          tasks = await getTaskEvents(token, calendar.id, start, end)
+          const calColor = calendar.backgroundColor ?? null
+          tasks = (await getTaskEvents(token, calendar.id, start, end))
+            .map(t => ({ ...t, color: t.color ?? calColor }))
         } catch (err) {
           console.warn(`Task events fetch failed for ${calendar.id}:`, err.message)
         }
