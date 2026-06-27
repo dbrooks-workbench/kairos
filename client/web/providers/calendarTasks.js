@@ -89,14 +89,15 @@ export function normalizeTask(event, calendarId) {
     status:    completedAt ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: null,
     metadata: {
-      kairosId:    p.kairosId    ?? null,
-      listId:      p.listId      || null,
-      order:       p.order != null ? parseFloat(p.order) : null,
-      loe:         p.loe         ?? null,
-      noDate:      isUndated,
-      unprocessed: p.isTask !== 'true',
+      kairosId:         p.kairosId    ?? null,
+      listId:           p.listId      || null,
+      order:            p.order != null ? parseFloat(p.order) : null,
+      loe:              p.loe         ?? null,
+      noDate:           isUndated,
+      unprocessed:      p.isTask !== 'true',
+      recurringEventId: event.recurringEventId ?? null,
       completedAt,
-      body:        _stripCompleteLink(event.description ?? ''),
+      body:             _stripCompleteLink(event.description ?? ''),
     },
     color:    null,
     editable: true,
@@ -253,7 +254,19 @@ export async function getAllTaskEvents(token, calendarId) {
   ])
 
   const taggedIds = new Set(tagged.map(e => e.id))
-  const untagged  = all.filter(e => !taggedIds.has(e.id))
+
+  // Deduplicate recurring instances in the untagged set: keep only the first
+  // (earliest) instance per series. Events are ordered by startTime so the first
+  // hit is the soonest upcoming occurrence — one Unlisted card per series.
+  const seenSeries = new Set()
+  const untagged   = all.filter(e => {
+    if (taggedIds.has(e.id)) return false
+    const seriesKey = e.recurringEventId ?? e.id
+    if (seenSeries.has(seriesKey)) return false
+    seenSeries.add(seriesKey)
+    return true
+  })
+
   return [...tagged, ...untagged].map(e => normalizeTask(e, calendarId))
 }
 

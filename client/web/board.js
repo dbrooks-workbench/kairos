@@ -596,9 +596,15 @@ async function handleDrop(evt) {
       await uncompleteTask(token, calendarId, extId)
       if (toListId) await patchTaskProps(token, calendarId, extId, { listId: toListId })
     } else {
-      const srcItem = _boardItems.find(i => i.source.external_id === extId)
-      const extra   = srcItem?.metadata?.unprocessed ? { isTask: 'true' } : {}
-      await patchTaskProps(token, calendarId, extId, { listId: toListId, ...extra })
+      const srcItem  = _boardItems.find(i => i.source.external_id === extId)
+      if (srcItem?.metadata?.unprocessed) {
+        // Adopt: tag the master event (or the event itself if non-recurring) so
+        // all instances are picked up by the isTask=true query on next load.
+        const masterEventId = srcItem.metadata.recurringEventId ?? extId
+        await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', listId: toListId })
+      } else {
+        await patchTaskProps(token, calendarId, extId, { listId: toListId })
+      }
     }
   } catch (err) {
     console.error('Drop failed:', err)
