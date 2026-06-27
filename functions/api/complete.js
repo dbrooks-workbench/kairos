@@ -108,7 +108,7 @@ async function _findByKairosId(accessToken, kairosId) {
 }
 
 function _buildFooter(kairosId, wt, completed) {
-  const origin = 'https://kairos.pages.dev'
+  const origin = 'https://kairos.inlandsoftware.com'
   const url    = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(wt)}`
   const label  = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
   return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a></div>`
