@@ -31,7 +31,26 @@ let _defaultDue = null
 let _editor     = null   // Tiptap editor (created once in initModal)
 let _rawMode    = false
 let _rawBtn     = null
-let _webhookToken = null // cached after first fetch
+let _webhookToken   = null  // cached after first fetch
+let _preserveRrule  = null  // holds a custom RRULE that can't be represented as a preset
+
+// ── Recurrence helpers ────────────────────────────────────────────────────────
+
+const RECUR_PRESETS = {
+  DAILY:    'RRULE:FREQ=DAILY',
+  WEEKDAYS: 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+  WEEKLY:   'RRULE:FREQ=WEEKLY',
+  MONTHLY:  'RRULE:FREQ=MONTHLY',
+  ANNUALLY: 'RRULE:FREQ=YEARLY',
+}
+
+function _matchPreset(rrule) {
+  if (!rrule) return ''
+  for (const [key, val] of Object.entries(RECUR_PRESETS)) {
+    if (rrule.startsWith(val)) return key
+  }
+  return 'CUSTOM'
+}
 
 // ── Toolbar config ────────────────────────────────────────────────────────────
 
@@ -192,6 +211,21 @@ function populate() {
   el('modal-due').value = _item?.due
     ? _fmtDate(_item.due)
     : _fmtDate(_defaultDue)
+
+  // Recurrence — master events carry recurrence[0]; instances have null (series rule
+  // lives on the master, not on individual instances fetched via singleEvents=true)
+  const rrule  = _item?.recurrence ?? null
+  const preset = _matchPreset(rrule)
+  _preserveRrule = (preset === 'CUSTOM') ? rrule : null
+  const recurSel = el('modal-recur')
+  recurSel.querySelector('option[value="CUSTOM"]')?.remove()
+  if (preset === 'CUSTOM') {
+    const opt = document.createElement('option')
+    opt.value       = 'CUSTOM'
+    opt.textContent = 'Custom (preserved)'
+    recurSel.appendChild(opt)
+  }
+  recurSel.value = preset
 
   el('modal-loe').value        = _item?.metadata?.loe ?? ''
   el('modal-loe-error').hidden = true
@@ -364,6 +398,12 @@ async function save() {
     const dateStr      = el('modal-due').value || null  // YYYY-MM-DD or null
     const selectedList = el('modal-list').value || null
 
+    // Recurrence: read the select; CUSTOM means preserve the original RRULE unchanged.
+    const recurVal  = el('modal-recur').value
+    const recurrence = recurVal === 'CUSTOM'
+      ? undefined                       // don't include — preserve existing via PATCH
+      : (RECUR_PRESETS[recurVal] ?? null)  // null clears recurrence; RRULE string sets it
+
     // Assign a kairosId on first save and remember it for subsequent edits.
     const kairosId = _kairosId ?? generateKairosId()
     _kairosId      = kairosId
@@ -381,6 +421,7 @@ async function save() {
       date:         dateStr,
       noDate:       !dateStr,
       webhookToken: wt,
+      recurrence,
     }
 
     const token = await getToken()

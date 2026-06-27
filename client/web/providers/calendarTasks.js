@@ -36,7 +36,7 @@ function _stripCompleteLink(html) {
 }
 
 function _buildEventBody(taskData) {
-  const { title, body, kairosId, listId, order, loe, date, noDate, unprocessed, webhookToken } = taskData
+  const { title, body, kairosId, listId, order, loe, date, noDate, unprocessed, webhookToken, recurrence } = taskData
   const isUndated = noDate || !date
   const dateStr   = isUndated ? KAIROS_UNDATED_SENTINEL : date
 
@@ -60,6 +60,9 @@ function _buildEventBody(taskData) {
     start: { date: dateStr },
     end:   { date: _nextDay(dateStr) },
     extendedProperties: { private: props },
+    // recurrence: undefined means "don't touch existing rule" (safe for PATCH).
+    // An RRULE string sets the series; an empty array clears it.
+    ...(recurrence !== undefined && { recurrence: recurrence ? [recurrence] : [] }),
   }
 }
 
@@ -87,7 +90,7 @@ export function normalizeTask(event, calendarId) {
     due:       start,
     all_day:   !!event.start?.date,
     status:    completedAt ? 'COMPLETED' : 'NEEDS_ACTION',
-    recurrence: null,
+    recurrence: event.recurrence?.[0] ?? null,
     metadata: {
       kairosId:         p.kairosId    ?? null,
       listId:           p.listId      || null,

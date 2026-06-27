@@ -104,6 +104,17 @@
           <input id="modal-due" class="modal-input" type="date">
         </div>
         <div class="modal-field-row">
+          <label class="modal-label">Repeats</label>
+          <select id="modal-recur" class="modal-select">
+            <option value="">Does not repeat</option>
+            <option value="DAILY">Daily</option>
+            <option value="WEEKDAYS">Every weekday (Mon–Fri)</option>
+            <option value="WEEKLY">Weekly</option>
+            <option value="MONTHLY">Monthly</option>
+            <option value="ANNUALLY">Annually</option>
+          </select>
+        </div>
+        <div class="modal-field-row">
           <label class="modal-label">LOE</label>
           <input id="modal-loe" class="modal-input" type="text" placeholder="1d 4h 30m">
           <span id="modal-loe-error" class="modal-loe-error" hidden>Invalid format (use 1d 4h 30m)</span>
