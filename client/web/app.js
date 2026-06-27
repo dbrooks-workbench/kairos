@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.11'
+const VERSION   = '0.23.12'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -901,6 +901,9 @@ let _calDragItem = null  // task being dragged in the calendar all-day area
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
+  const _now = new Date()
+  const _todayMidnight = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate())
+
   const timedByDay = Array.from({ length: 7 }, () => [])
   const allDayItems = []
 
@@ -987,14 +990,19 @@ function renderItems(items) {
       const { item } = span
       const isTask = item.item_type === 'TASK' || (item.item_type === 'EVENT' && !!item.metadata?.task_calendar)
       const isDone = item.status === 'COMPLETED'
+      // All-day: end is exclusive midnight of day-after-last, so end <= todayMidnight means fully past
+      const isPast    = item.end ? new Date(item.end) <= _todayMidnight : new Date(item.start) < _todayMidnight
+      const isPastDue = isTask && isPast && !isDone
 
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
         isTask ? 'type-task' : '',
-        isDone                   ? 'completed'       : '',
-        span.startsEarly         ? 'continues-left'  : '',
-        span.endsLate            ? 'continues-right' : '',
+        isDone    ? 'completed' : '',
+        isPast && !isTask && !isDone ? 'is-past'   : '',
+        isPastDue                    ? 'past-due'   : '',
+        span.startsEarly             ? 'continues-left'  : '',
+        span.endsLate                ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
       chipEl.title = item.title
 
@@ -1107,8 +1115,16 @@ function renderItems(items) {
     for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedByDay[dayIdx])) {
       const topMin = start.getHours() * 60 + start.getMinutes()
       const durMin = Math.max((end - start) / 60_000, 15)
-      const el     = document.createElement('div')
-      el.className = `cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+      const el          = document.createElement('div')
+      const _timedPast  = end <= _now
+      const _timedTask  = item.item_type === 'TASK' || (item.item_type === 'EVENT' && !!item.metadata?.task_calendar)
+      const _timedDone  = item.status === 'COMPLETED'
+      el.className = [
+        'cal-event',
+        _timedTask ? 'type-task' : '',
+        _timedPast && !_timedTask && !_timedDone ? 'is-past'  : '',
+        _timedTask && _timedPast  && !_timedDone ? 'past-due' : '',
+      ].filter(Boolean).join(' ')
       el.dataset.itemId = item.id
       if (item.color) applyColor(el, item.color)
       el.style.top    = `${topMin}px`

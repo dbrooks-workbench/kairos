@@ -842,6 +842,18 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .allday-event.completed span { text-decoration: line-through; }
 
+/* Past events — subtle fade matching Google Calendar's treatment */
+.allday-event.is-past,
+.cal-event.is-past {
+  opacity: 0.45;
+}
+
+/* Past-due incomplete task chips — red urgency ring */
+.allday-event.past-due,
+.cal-event.past-due {
+  box-shadow: 0 0 0 2px #c5221f;
+}
+
 /* Calendar drag-to-move */
 .allday-event.type-task[draggable="true"] { cursor: grab; }
 .allday-event.type-task.drag-source { opacity: 0.4; }
