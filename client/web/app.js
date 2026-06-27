@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.22.6'
+const VERSION   = '0.23.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -239,9 +239,10 @@ function calendarModalCallbacks() {
 
 function setView(v) {
   state.view = v
-  document.getElementById('calendar').hidden   = v !== 'calendar'
-  document.getElementById('mobile-cal').hidden = v !== 'calendar'
-  document.getElementById('board').hidden      = v !== 'board'
+  document.getElementById('calendar').hidden    = v !== 'calendar'
+  document.getElementById('mobile-cal').hidden  = v !== 'calendar'
+  document.getElementById('board-toolbar').hidden = v !== 'board'
+  document.getElementById('board').hidden       = v !== 'board'
   document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
   document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
 
@@ -321,6 +322,12 @@ function boardCallbacks() {
   }
 }
 
+function getBoardItems() {
+  const showRecurring = localStorage.getItem('kairos:showRecurring') === 'true'
+  if (showRecurring) return state.boardItems
+  return state.boardItems.filter(i => !i.metadata?.recurringEventId)
+}
+
 async function loadBoardData() {
   const token = await getToken()
   if (!token) return
@@ -339,7 +346,7 @@ async function loadBoardData() {
       loadLists(token),
     ])
     state.taskLists = getAllLists()
-    renderBoard(state.taskLists, state.boardItems, boardCallbacks(), state.doneWindow)
+    renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
   } catch (err) {
     console.error('Board data load failed:', err)
   }
@@ -1495,6 +1502,14 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 // View toggle
 document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
 document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
+
+// Board recurring-task filter
+const _recurringToggle = document.getElementById('board-show-recurring')
+_recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
+_recurringToggle.addEventListener('change', e => {
+  localStorage.setItem('kairos:showRecurring', e.target.checked)
+  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+})
 
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
