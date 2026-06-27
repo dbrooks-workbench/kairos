@@ -1798,16 +1798,21 @@ body.resize-active * { cursor: ns-resize !important; }
   min-width: 100px;
 }
 
+.modal-comment-ts-display {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
 .modal-comment-ts-input {
   border: none;
+  border-bottom: 1px solid var(--today-color);
   background: transparent;
   font-family: inherit;
-  cursor: text;
+  font-size: 11px;
+  color: var(--text-muted);
   padding: 0;
-  width: 136px;
-  min-width: 0;
+  width: 100%;
+  outline: none;
 }
-.modal-comment-ts-input:focus { outline: none; border-bottom: 1px solid var(--today-color); }
 
 .modal-comment-text {
   flex: 1;

@@ -209,18 +209,38 @@ function _renderComments() {
       txt.textContent = c.text
       row.append(ts, txt, del)
     } else {
-      const ts = document.createElement('input')
-      ts.type      = 'datetime-local'
-      ts.className = 'modal-comment-ts modal-comment-ts-input'
-      ts.value     = _toDatetimeLocal(c.event_date ?? c.timestamp)
-      ts.addEventListener('blur', async () => {
-        if (!ts.value || !c._id || !_editItem) return
-        const newDate = new Date(ts.value).toISOString()
+      // Timestamp: display span (formatted) swaps to datetime-local input on click, back on blur
+      const tsWrap    = document.createElement('span')
+      tsWrap.className = 'modal-comment-ts'
+
+      const tsDisplay = document.createElement('span')
+      tsDisplay.className   = 'modal-comment-ts-display'
+      tsDisplay.textContent = displayTimestamp(c.event_date ?? c.timestamp)
+      tsDisplay.title       = 'Click to edit date/time'
+
+      const tsInput = document.createElement('input')
+      tsInput.type      = 'datetime-local'
+      tsInput.className = 'modal-comment-ts-input'
+      tsInput.value     = _toDatetimeLocal(c.event_date ?? c.timestamp)
+      tsInput.hidden    = true
+
+      tsDisplay.addEventListener('click', () => {
+        tsDisplay.hidden = true
+        tsInput.hidden   = false
+        tsInput.focus()
+      })
+      tsInput.addEventListener('blur', async () => {
+        tsDisplay.hidden = false
+        tsInput.hidden   = true
+        if (!tsInput.value || !c._id || !_editItem) return
+        const newDate = new Date(tsInput.value).toISOString()
         if (newDate === (c.event_date ?? c.timestamp)) return
-        c.event_date = newDate
+        c.event_date          = newDate
+        tsDisplay.textContent = displayTimestamp(newDate)
         const token = await getToken()
         if (token) updateLogEntry(token, _editItem.id, c._id, { event_date: newDate })
       })
+      tsWrap.append(tsDisplay, tsInput)
 
       const txt = document.createElement('input')
       txt.type      = 'text'
@@ -238,7 +258,7 @@ function _renderComments() {
           action_detail: { verb: 'comment', text: newText },
         })
       })
-      row.append(ts, txt, del)
+      row.append(tsWrap, txt, del)
     }
     container.appendChild(row)
   })
