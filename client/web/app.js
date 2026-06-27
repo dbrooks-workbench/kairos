@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.1'
+const VERSION   = '0.23.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -324,8 +324,34 @@ function boardCallbacks() {
 
 function getBoardItems() {
   const showRecurring = localStorage.getItem('kairos:showRecurring') === 'true'
-  if (showRecurring) return state.boardItems
-  return state.boardItems.filter(i => !i.metadata?.recurringEventId)
+  if (!showRecurring) return state.boardItems.filter(i => !i.metadata?.recurringEventId)
+
+  // Recurring tasks are shown as one card per series: the next upcoming non-completed
+  // instance. Falls back to the most recent past non-completed instance if none upcoming.
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const bestBySeries = new Map()
+
+  for (const item of state.boardItems) {
+    const sid = item.metadata?.recurringEventId
+    if (!sid || item.status === 'COMPLETED') continue
+
+    const prev     = bestBySeries.get(sid)
+    const itemStart = item.start ?? new Date(0)
+    const prevStart = prev?.start  ?? new Date(0)
+    const itemAhead = itemStart >= today
+    const prevAhead = prevStart >= today
+
+    if (!prev
+      || (itemAhead && !prevAhead)                            // upcoming beats past
+      || (itemAhead && prevAhead && itemStart < prevStart)    // earlier upcoming wins
+      || (!itemAhead && !prevAhead && itemStart > prevStart)  // more-recent past wins
+    ) bestBySeries.set(sid, item)
+  }
+
+  return [
+    ...state.boardItems.filter(i => !i.metadata?.recurringEventId),
+    ...[...bestBySeries.values()],
+  ]
 }
 
 async function loadBoardData() {
