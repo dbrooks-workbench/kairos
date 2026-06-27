@@ -321,6 +321,47 @@ function _resetCustomRecur(startDateStr) {
   }
 }
 
+function _applyRruleToCustomPanel(rrule) {
+  if (!rrule) return
+  const params = {}
+  rrule.replace(/^RRULE:/, '').split(';').forEach(part => {
+    const [k, v] = part.split('=')
+    if (k) params[k] = v ?? ''
+  })
+
+  const freq = params.FREQ ?? 'WEEKLY'
+  _crpFreq = freq
+  el('crp-freq').value = freq
+  el('crp-days-row').hidden = freq !== 'WEEKLY'
+
+  const interval = parseInt(params.INTERVAL ?? '1', 10) || 1
+  _crpInterval = interval
+  el('crp-interval').value = interval
+
+  if (params.BYDAY) {
+    _crpByDay = new Set(params.BYDAY.split(','))
+    document.querySelectorAll('.crp-day').forEach(btn =>
+      btn.classList.toggle('active', _crpByDay.has(btn.dataset.day))
+    )
+  }
+
+  if (params.UNTIL) {
+    const raw = params.UNTIL.replace(/T.*$/, '')
+    _crpEndType  = 'date'
+    _crpEndDate  = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`
+    el('crp-end-date').value    = _crpEndDate
+    el('crp-end-date').disabled = false
+    document.querySelector('input[name="crp-end"][value="date"]').checked = true
+  } else if (params.COUNT) {
+    _crpEndType  = 'count'
+    _crpEndCount = parseInt(params.COUNT, 10) || 10
+    el('crp-end-count').value    = _crpEndCount
+    el('crp-end-count').disabled = false
+    document.querySelector('input[name="crp-end"][value="count"]').checked = true
+  }
+  // 'never' is already set by the preceding _resetCustomRecur call
+}
+
 // ── Mode toggle ───────────────────────────────────────────────────────────────
 
 function _setMode(mode, { locked = false } = {}) {
@@ -622,6 +663,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   el('custom-recur-panel').hidden = preset !== 'CUSTOM'
   _preserveRrule = preset === 'CUSTOM' ? item.recurrence : null
   _resetCustomRecur(_fmtDate(start))
+  if (preset === 'CUSTOM' && item.recurrence) _applyRruleToCustomPanel(item.recurrence)
 
   el('ue-delete').hidden   = false
   el('ue-delete').disabled = false
@@ -639,10 +681,12 @@ export async function openEditorForEdit(item, callbacks = {}) {
   if (token && item.metadata?.recurringEventId) {
     const master = await getEvent(token, item.source.account_id, item.metadata.recurringEventId).catch(() => null)
     if (master?.recurrence?.[0]) {
-      const mp = _matchPreset(master.recurrence[0])
+      const rrule = master.recurrence[0]
+      const mp = _matchPreset(rrule)
       el('ue-recur').value = mp
       el('custom-recur-panel').hidden = mp !== 'CUSTOM'
-      _preserveRrule = mp === 'CUSTOM' ? master.recurrence[0] : null
+      _preserveRrule = mp === 'CUSTOM' ? rrule : null
+      if (mp === 'CUSTOM') _applyRruleToCustomPanel(rrule)
     }
   }
 
