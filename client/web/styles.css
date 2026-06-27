@@ -1732,6 +1732,8 @@ body.resize-active * { cursor: ns-resize !important; }
   overflow-y: auto;
 }
 
+#ue-activity-items { padding: 6px 12px 2px; }
+
 .modal-add-row {
   display: flex;
   gap: 6px;
