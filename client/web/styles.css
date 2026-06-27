@@ -983,7 +983,7 @@ body.resize-active * { cursor: ns-resize !important; }
 
 /* ── Event editor modal ──────────────────────────────────── */
 
-#event-modal {
+#event-editor {
   position: fixed;
   inset: 0;
   z-index: 200;
@@ -992,7 +992,7 @@ body.resize-active * { cursor: ns-resize !important; }
   align-items: center;
   justify-content: center;
 }
-#event-modal[hidden] { display: none; }
+#event-editor[hidden] { display: none; }
 
 /* Time inputs: fixed-width so they don't stretch */
 .event-time-input {
@@ -1001,7 +1001,7 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 
 /* When all-day is active, hide both time inputs */
-#event-modal-panel.all-day .event-time-input { display: none; }
+#event-editor-panel.all-day .event-time-input { display: none; }
 
 /* ── Spawn entries ───────────────────────────────────────── */
 
@@ -2212,13 +2212,13 @@ body.resize-active * { cursor: ns-resize !important; }
      Override max-height from .modal-panel and re-anchor the overlay
      so the panel sits flush against all edges. */
   #task-modal,
-  #event-modal {
+  #event-editor {
     align-items: flex-start;
     justify-content: flex-start;
   }
 
   #task-modal .modal-panel,
-  #event-modal .modal-panel {
+  #event-editor .modal-panel {
     width: 100vw;
     max-width: 100vw;
     height: 100dvh;
