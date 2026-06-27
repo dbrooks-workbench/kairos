@@ -83,7 +83,7 @@ function normalizeEvent(event, calendar) {
       spawn_prototypes: config?.spawn ?? [],
       calendar_name: calendar.summary,
       calendar_color: calendar.backgroundColor ?? null,
-      recurring_event_id: event.recurringEventId ?? null,
+      recurringEventId: event.recurringEventId ?? null,
       location: event.location ?? null,
       task_calendar: isTaskCal,
     },

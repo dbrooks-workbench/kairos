@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.6'
+const VERSION   = '0.23.7'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1019,7 +1019,7 @@ function renderItems(items) {
         const titleSpan = document.createElement('span')
         titleSpan.textContent = item.title
 
-        const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId || item.metadata?.recurring_event_id)
+        const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
         const recurIcon = isRecurring ? (() => {
           const s = document.createElement('span')
           s.className   = 'task-recur-icon'
@@ -1064,7 +1064,8 @@ function renderItems(items) {
         }
       } else {
         if (item.color) applyColor(chipEl, item.color)
-        chipEl.textContent = item.title
+        const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
+        chipEl.textContent = item.title + (isRecurringEv ? ' ↻' : '')
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
           openEditorForEdit(item, calendarModalCallbacks())
@@ -1128,9 +1129,10 @@ function renderItems(items) {
           el.style.right = 'auto'
         }
       }
+      const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
       const titleEl = document.createElement('div')
       titleEl.className   = 'event-title'
-      titleEl.textContent = item.title
+      titleEl.textContent = item.title + (isRecurringEv ? ' ↻' : '')
       const timeEl  = document.createElement('div')
       timeEl.className   = 'event-time'
       timeEl.textContent = formatTimeRange(start, end)
