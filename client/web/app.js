@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask } from './providers/calendarTasks.js'
+import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.2'
+const VERSION   = '0.23.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1016,6 +1016,15 @@ function renderItems(items) {
         const titleSpan = document.createElement('span')
         titleSpan.textContent = item.title
 
+        const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+        const recurIcon = isRecurring ? (() => {
+          const s = document.createElement('span')
+          s.className   = 'task-recur-icon'
+          s.textContent = '↻'
+          s.title       = 'Recurring'
+          return s
+        })() : null
+
         const snoozeBtn = item.due && !isDone ? (() => {
           const btn = document.createElement('button')
           btn.className   = 'task-snooze'
@@ -1028,7 +1037,7 @@ function renderItems(items) {
           return btn
         })() : null
 
-        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
+        chipEl.append(check, titleSpan, ...(recurIcon ? [recurIcon] : []), ...(snoozeBtn ? [snoozeBtn] : []))
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
           openEditorForEdit(item, calendarModalCallbacks())
@@ -1419,9 +1428,7 @@ function initCalendarDrag() {
     try {
       const token = await getToken()
       if (!token) return
-      await patchTask(token, item.source.account_id, item.source.external_id, {
-        due: `${newDue}T00:00:00.000Z`,
-      })
+      await patchTaskDate(token, item.source.account_id, item.source.external_id, newDue)
       await refreshCalendarItems()
     } catch (err) {
       console.error('Calendar drag move failed:', err)

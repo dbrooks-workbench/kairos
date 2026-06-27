@@ -659,9 +659,11 @@ export async function openEditorForEdit(item, callbacks = {}) {
 // ── Close ─────────────────────────────────────────────────────────────────────
 
 function _close() {
-  el('unified-editor').hidden = true
-  el('ue-complete').hidden    = true
-  el('ue-snooze').hidden      = true
+  el('unified-editor').hidden  = true
+  el('ue-complete').hidden     = true
+  el('ue-snooze').hidden       = true
+  el('ue-save').disabled       = false
+  el('ue-delete').disabled     = false
 }
 
 // ── Complete / Snooze (task mode) ─────────────────────────────────────────────

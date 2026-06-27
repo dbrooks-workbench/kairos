@@ -1514,6 +1514,7 @@ body.resize-active * { cursor: ns-resize !important; }
 .board-chip-due.today      { background: #e6f4ea; color: #188038; }
 .board-chip-due.overdue    { background: #fce8e6; color: #c5221f; }
 .board-chip-loe            { background: #e8eaf6; color: #3949ab; }
+.board-chip-recur          { background: #f1f3f4; color: var(--text-muted); }
 .board-chip-cl             { background: #f1f3f4; color: var(--text-muted); }
 .board-chip-cl.complete    { background: #e6f4ea; color: #188038; }
 .board-chip-comments       { background: #f1f3f4; color: var(--text-muted); }

@@ -528,6 +528,14 @@ function buildChips(item) {
     chips.push(chip)
   }
 
+  if (item.recurrence || item.metadata?.recurringEventId) {
+    const chip = document.createElement('span')
+    chip.className   = 'board-chip board-chip-recur'
+    chip.textContent = '↻ Recurring'
+    chip.title       = item.recurrence ?? ''
+    chips.push(chip)
+  }
+
   return chips
 }
 
