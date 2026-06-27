@@ -5,11 +5,10 @@ import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
 
 import { getToken } from './auth.js'
-import { createEvent, updateEvent, getEvent, deleteEvent, getCalendars } from './providers/googleCalendar.js'
+import { createEvent, updateEvent, getEvent, deleteEvent, moveEvent, getCalendars } from './providers/googleCalendar.js'
 import {
-  createTask, updateTask, deleteTask,
+  createTask, updateTask, deleteTask, moveTask,
   completeTask, uncompleteTask,
-  normalizeTask,
 } from './providers/calendarTasks.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
@@ -23,8 +22,9 @@ import { openSnoozePopover } from './board.js'
 let _mode          = 'event'   // 'event' | 'task'
 let _editItem      = null      // null = create mode
 let _callbacks     = {}
-let _kairosId      = null      // task mode: stable ID (null until first save)
-let _preserveRrule = null
+let _kairosId           = null   // task mode: stable ID (null until first save)
+let _originalCalendarId = null   // calendar ID at open time, for move detection
+let _preserveRrule      = null
 let _pendingBody   = null      // pending save body while scope modal is open
 let _pendingAction = null      // 'delete' | null
 let _locLink       = null      // ↗ link next to location field
@@ -560,6 +560,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   const endRaw = item.end ? _toDate(item.end) : (start ? new Date(start.getTime() + 30 * 60_000) : null)
   const displayEnd = (allDay && endRaw) ? new Date(endRaw.getTime() - 86_400_000) : endRaw
 
+  _originalCalendarId = item.source.account_id
   _setMode(mode, { locked: true })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
@@ -599,42 +600,29 @@ export async function openEditorForEdit(item, callbacks = {}) {
   _preserveRrule = preset === 'CUSTOM' ? item.recurrence : null
   _resetCustomRecur(_fmtDate(start))
 
-  // Calendar selector locked in edit mode
-  const calSel = el('ue-calendar')
-  calSel.disabled  = true
-  calSel.innerHTML = `<option value="${esc(item.source.account_id)}" selected>${esc(item.metadata?.calendar_name ?? 'Loading…')}</option>`
-
   el('ue-delete').hidden   = false
   el('ue-delete').disabled = false
 
   const token = await getToken()
-  if (token) {
-    const calPromise = (async () => {
-      try {
-        const cals = await getCalendars(token)
-        const cal  = cals.find(c => c.id === item.source.account_id)
-        if (cal) calSel.innerHTML = `<option value="${esc(cal.id)}" selected>${esc(cal.summary)}</option>`
-      } catch {}
-    })()
 
-    const masterPromise = item.metadata?.recurringEventId
-      ? getEvent(token, item.source.account_id, item.metadata.recurringEventId).catch(() => null)
-      : Promise.resolve(null)
+  // Populate calendar dropdown with all calendars of the appropriate type,
+  // pre-selecting the item's current calendar. Calendar is editable — changing
+  // it and saving will move the item to the new calendar.
+  await _populateCalendars(item.source.account_id)
 
-    const [, master] = await Promise.all([calPromise, masterPromise])
+  // Set the list selection after the calendar dropdown is settled (task mode only).
+  if (isTask) {
+    const listId = item.metadata?.listId
+    if (listId) el('ue-list').value = listId
+  }
 
+  if (token && item.metadata?.recurringEventId) {
+    const master = await getEvent(token, item.source.account_id, item.metadata.recurringEventId).catch(() => null)
     if (master?.recurrence?.[0]) {
       const mp = _matchPreset(master.recurrence[0])
       el('ue-recur').value = mp
       el('custom-recur-panel').hidden = mp !== 'CUSTOM'
       _preserveRrule = mp === 'CUSTOM' ? master.recurrence[0] : null
-    }
-
-    if (isTask) {
-      // Pre-select the task's current list
-      _populateList()
-      const listId = item.metadata?.listId
-      if (listId) el('ue-list').value = listId
     }
   }
 
@@ -789,13 +777,15 @@ async function _saveTask(title) {
   if (!_editItem) {
     await createTask(token, calId, taskData)
   } else {
-    const extId = _editItem.source.external_id
+    const extId   = _editItem.source.external_id
+    const origCal = _originalCalendarId ?? _editItem.source.account_id
     if (_editItem.metadata?.recurringEventId) {
-      _pendingBody = { _taskData: taskData, calId }
+      _pendingBody = { _taskData: taskData, calId, origCal }
       document.querySelector('input[name="recur-scope"][value="this"]').checked = true
       el('recur-scope-modal').hidden = false
       return
     }
+    if (calId !== origCal) await moveTask(token, origCal, extId, calId)
     await updateTask(token, calId, extId, taskData)
   }
 
@@ -851,7 +841,9 @@ async function _saveEvent(title) {
 
   let savedId = _editItem?.source.external_id ?? null
   if (_editItem) {
-    await updateEvent(token, _editItem.source.account_id, _editItem.source.external_id, body)
+    const origCal = _originalCalendarId ?? _editItem.source.account_id
+    if (calId !== origCal) await moveEvent(token, origCal, _editItem.source.external_id, calId)
+    await updateEvent(token, calId, _editItem.source.external_id, body)
   } else {
     const created = await createEvent(token, calId, body)
     savedId = created.id

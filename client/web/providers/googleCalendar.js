@@ -120,6 +120,15 @@ export async function updateEvent(token, calendarId, eventId, body) {
   return res.json()
 }
 
+export async function moveEvent(token, sourceCalId, eventId, destCalId) {
+  const res = await fetch(
+    `${BASE}/calendars/${encodeURIComponent(sourceCalId)}/events/${encodeURIComponent(eventId)}/move?destination=${encodeURIComponent(destCalId)}`,
+    { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }
+  )
+  if (!res.ok) throw new Error(`moveEvent: ${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 export async function deleteEvent(token, calendarId, eventId) {
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
