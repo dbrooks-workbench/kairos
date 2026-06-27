@@ -1,7 +1,6 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getTasks, completeTask, uncompleteTask } from './providers/googleTasksIntake.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
@@ -13,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.22.0'
+const VERSION   = '0.22.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -108,13 +107,8 @@ async function loadCalendars() {
 async function fetchItems(start, end) {
   const token = await getToken()
   if (!token) return []
-  const [events, tasks] = await Promise.all([
-    getEvents(token, start, end)
-      .catch(err => { console.error('Calendar events fetch failed:', err); return [] }),
-    getTasks(token, start, end)
-      .catch(err => { console.error('Tasks fetch failed:', err); return [] }),
-  ])
-  return [...events, ...tasks]
+  return getEvents(token, start, end)
+    .catch(err => { console.error('Calendar events fetch failed:', err); return [] })
 }
 
 async function handleToggleTask(item) {
@@ -123,18 +117,10 @@ async function handleToggleTask(item) {
   const isDone = item.status === 'COMPLETED'
   const verb   = isDone ? 'uncompleted' : 'completed'
   try {
-    const isCalTask = item.source.provider === 'google-calendar-task'
-    if (isDone) {
-      if (isCalTask) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title)
-      else           await uncompleteTask(token, item.source.account_id, item.source.external_id)
-      const target = state.items.find(i => i.id === item.id)
-      if (target) target.status = 'NEEDS_ACTION'
-    } else {
-      if (isCalTask) await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title)
-      else           await completeTask(token, item.source.account_id, item.source.external_id)
-      const target = state.items.find(i => i.id === item.id)
-      if (target) target.status = 'COMPLETED'
-    }
+    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title)
+    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title)
+    const target = state.items.find(i => i.id === item.id)
+    if (target) target.status = isDone ? 'NEEDS_ACTION' : 'COMPLETED'
     renderItems(getVisibleItems())
     appendLogEntry(token, {
       item_id:       item.id,

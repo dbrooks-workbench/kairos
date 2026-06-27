@@ -542,9 +542,14 @@ export async function openEditorForEdit(item, callbacks = {}) {
   _pendingBody   = null
   _pendingAction = null
 
-  const isTask   = item.item_type === 'TASK'
-  const mode     = isTask ? 'task' : 'event'
-  _kairosId      = isTask ? (item.metadata?.kairosId ?? null) : null
+  // Treat as a task if: explicitly typed TASK, or sits on a designated task
+  // calendar (events on task calendars are adopted into the task flow on save).
+  const taskCalSet = new Set(getTaskCalendars())
+  const isTask = item.item_type === 'TASK'
+              || !!item.metadata?.task_calendar
+              || taskCalSet.has(item.source.account_id)
+  const mode   = isTask ? 'task' : 'event'
+  _kairosId    = isTask ? (item.metadata?.kairosId ?? null) : null
 
   // Load activity log
   _comments = getItemLog(item.id).map(e => ({
