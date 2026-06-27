@@ -968,13 +968,17 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 #unified-editor[hidden] { display: none; }
 
-/* Date/time row — start and end on the same line */
+/* Date/time when-row layout */
 .when-fields {
   display: flex;
   align-items: center;
   gap: 4px;
   flex: 1;
-  flex-wrap: wrap;
+}
+.when-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .event-date-input {
   flex: none;
@@ -991,8 +995,16 @@ body.resize-active * { cursor: ns-resize !important; }
   flex-shrink: 0;
 }
 
-/* When all-day is active, hide both time inputs */
+/* All-day: single row [start date] – [end date] */
 #unified-editor-panel.all-day .event-time-input { display: none; }
+
+/* Timed: two rows — start on top, end below; sep hidden */
+#unified-editor-panel:not(.all-day) .when-fields {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+#unified-editor-panel:not(.all-day) .when-sep { display: none; }
 
 /* Mode toggle (Event | Task) in editor header */
 .editor-mode-toggle {

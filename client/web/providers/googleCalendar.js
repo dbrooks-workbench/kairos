@@ -64,7 +64,7 @@ function normalizeEvent(event, calendar) {
   const _debugColor = event.colorId
     ? `colorId=${event.colorId} → ${resolveColor(event.colorId)}`
     : `cal default → ${calendar.backgroundColor ?? 'none'}`
-  console.debug(`[color] "${event.summary}" on "${calendar.summary}" | ${_debugColor}`)
+  console.log(`[color] "${event.summary}" on "${calendar.summary}" | ${_debugColor}`)
 
   return {
     id: itemId,
