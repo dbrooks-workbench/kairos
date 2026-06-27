@@ -87,105 +87,44 @@
     <!-- Board view -->
     <div id="board" hidden></div>
 
-    <!-- Task editor modal -->
-    <div id="task-modal" hidden>
-    <div class="modal-panel">
-      <div class="modal-header">
-        <input id="modal-title" class="modal-title-input" type="text" placeholder="Task title…">
-        <button id="modal-close" class="modal-close-btn" title="Close">×</button>
-      </div>
-      <div class="modal-body">
-        <div class="modal-field-row">
-          <label class="modal-label">List</label>
-          <select id="modal-list" class="modal-select"></select>
-        </div>
-        <div class="modal-field-row">
-          <label class="modal-label">Due</label>
-          <input id="modal-due" class="modal-input" type="date">
-        </div>
-        <div class="modal-field-row">
-          <label class="modal-label">Repeats</label>
-          <select id="modal-recur" class="modal-select">
-            <option value="">Does not repeat</option>
-            <option value="DAILY">Daily</option>
-            <option value="WEEKDAYS">Every weekday (Mon–Fri)</option>
-            <option value="WEEKLY">Weekly</option>
-            <option value="MONTHLY">Monthly</option>
-            <option value="ANNUALLY">Annually</option>
-          </select>
-        </div>
-        <div class="modal-field-row">
-          <label class="modal-label">LOE</label>
-          <input id="modal-loe" class="modal-input" type="text" placeholder="1d 4h 30m">
-          <span id="modal-loe-error" class="modal-loe-error" hidden>Invalid format (use 1d 4h 30m)</span>
-        </div>
-        <div class="modal-field modal-editor-field">
-          <div id="modal-editor-toolbar" class="editor-toolbar"></div>
-          <div id="modal-editor" class="modal-editor"></div>
-          <textarea id="modal-notes-raw" class="modal-notes modal-notes-raw" placeholder="HTML…" rows="8" hidden></textarea>
-        </div>
-        <details class="modal-section" id="modal-comments-section">
-          <summary>
-            <span class="modal-chevron">›</span>
-            Comments
-            <span id="modal-comments-count" class="modal-section-count"></span>
-          </summary>
-          <div id="modal-comments-items"></div>
-          <div class="modal-add-row">
-            <input id="modal-comment-input" type="text" placeholder="Add comment…">
-            <button id="modal-comment-add">Add</button>
-          </div>
-        </details>
-      </div>
-      <div id="modal-task-id" class="modal-task-id" hidden></div>
-      <div class="modal-footer">
-        <div class="modal-footer-left">
-          <button id="modal-delete"          class="btn-danger"    hidden>Delete</button>
-          <button id="modal-toggle-complete" class="btn-secondary" hidden>Mark complete</button>
-        </div>
-        <div class="modal-footer-right">
-          <button id="modal-cancel" class="btn-ghost">Cancel</button>
-          <button id="modal-save"   class="btn-primary">Save</button>
-        </div>
-      </div>
-    </div><!-- /.modal-panel -->
-    </div><!-- /#task-modal -->
-
-    <!-- Context menu for new event / new task -->
-    <div id="context-menu" hidden>
-      <button class="ctx-item" id="ctx-new-event">📅 New event</button>
-      <button class="ctx-item" id="ctx-new-task">✓ New task</button>
-    </div>
-
-    <!-- Event editor modal -->
-    <div id="event-editor" hidden>
-      <div class="modal-panel" id="event-editor-panel">
+    <!-- Unified event / task editor modal -->
+    <div id="unified-editor" hidden>
+      <div class="modal-panel" id="unified-editor-panel">
         <div class="modal-header">
-          <input id="event-editor-title" class="modal-title-input" type="text" placeholder="Event title…">
-          <button id="event-editor-close" class="modal-close-btn" title="Close">×</button>
+          <input id="ue-title" class="modal-title-input" type="text" placeholder="Event title…">
+          <div class="editor-mode-toggle">
+            <button type="button" id="ue-mode-event" class="mode-btn active">Event</button>
+            <button type="button" id="ue-mode-task"  class="mode-btn">Task</button>
+          </div>
+          <button id="ue-close" class="modal-close-btn" title="Close">×</button>
         </div>
         <div class="modal-body">
+          <!-- Task-only: list assignment -->
+          <div class="modal-field-row" id="ue-list-row" hidden>
+            <label class="modal-label">List</label>
+            <select id="ue-list" class="modal-select"></select>
+          </div>
           <div class="modal-field-row">
             <label class="modal-label">Calendar</label>
-            <select id="event-editor-calendar" class="modal-select"></select>
+            <select id="ue-calendar" class="modal-select"></select>
           </div>
           <div class="modal-field-row">
             <label class="modal-label">All day</label>
-            <input id="event-editor-allday" type="checkbox">
+            <input id="ue-allday" type="checkbox">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Start</label>
-            <input id="event-editor-start-date" class="modal-input event-date-input" type="date">
-            <input id="event-editor-start-time" class="modal-input event-time-input" type="time">
+            <input id="ue-start-date" class="modal-input event-date-input" type="date">
+            <input id="ue-start-time" class="modal-input event-time-input" type="time">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">End</label>
-            <input id="event-editor-end-date" class="modal-input event-date-input" type="date">
-            <input id="event-editor-end-time" class="modal-input event-time-input" type="time">
+            <input id="ue-end-date" class="modal-input event-date-input" type="date">
+            <input id="ue-end-time" class="modal-input event-time-input" type="time">
           </div>
           <div class="modal-field-row">
             <label class="modal-label">Repeats</label>
-            <select id="event-editor-recur" class="modal-select">
+            <select id="ue-recur" class="modal-select">
               <option value="">Does not repeat</option>
               <option value="DAILY">Daily</option>
               <option value="WEEKLY">Weekly</option>
@@ -196,7 +135,7 @@
             </select>
           </div>
 
-          <!-- Custom recurrence panel — shown when "Custom…" is selected -->
+          <!-- Custom recurrence panel -->
           <div id="custom-recur-panel" class="custom-recur-panel" hidden>
             <div class="crp-row">
               <span class="crp-label">Every</span>
@@ -237,40 +176,53 @@
             </div>
           </div>
 
+          <!-- Task-only: level of effort -->
+          <div class="modal-field-row" id="ue-loe-row" hidden>
+            <label class="modal-label">LOE</label>
+            <input id="ue-loe" class="modal-input" type="text" placeholder="1d 4h 30m">
+            <span id="ue-loe-error" class="modal-loe-error" hidden>Invalid format (use 1d 4h 30m)</span>
+          </div>
           <div class="modal-field-row">
             <label class="modal-label">Location</label>
-            <input id="event-editor-location" class="modal-input" type="text" placeholder="Add location…">
+            <input id="ue-location" class="modal-input" type="text" placeholder="Add location…">
           </div>
           <div class="modal-field modal-editor-field">
-            <div id="event-editor-toolbar" class="editor-toolbar"></div>
-            <div id="event-editor-content" class="modal-editor"></div>
-            <textarea id="event-editor-raw" class="modal-notes modal-notes-raw" placeholder="HTML…" rows="8" hidden></textarea>
+            <div id="ue-toolbar" class="editor-toolbar"></div>
+            <div id="ue-content" class="modal-editor"></div>
+            <textarea id="ue-raw" class="modal-notes modal-notes-raw" placeholder="HTML…" rows="8" hidden></textarea>
           </div>
-          <details class="modal-section" id="event-editor-comments-section">
+          <details class="modal-section" id="ue-activity-section">
             <summary>
               <span class="modal-chevron">›</span>
               Activity
-              <span id="event-editor-comments-count" class="modal-section-count"></span>
+              <span id="ue-activity-count" class="modal-section-count"></span>
             </summary>
-            <div id="event-editor-comments-items"></div>
+            <div id="ue-activity-items"></div>
             <div class="modal-add-row">
-              <input id="event-editor-comment-input" type="text" placeholder="Add comment…">
-              <button id="event-editor-comment-add">Add</button>
+              <input id="ue-comment-input" type="text" placeholder="Add comment…">
+              <button id="ue-comment-add">Add</button>
             </div>
           </details>
         </div>
+        <div id="ue-item-id" class="modal-task-id" hidden></div>
         <div class="modal-footer">
           <div class="modal-footer-left">
-            <button id="event-editor-delete"   class="btn-danger"    hidden>Delete</button>
-            <button id="event-editor-complete" class="btn-secondary" hidden>Mark complete</button>
-            <button id="event-editor-snooze"   class="btn-secondary" hidden>Snooze</button>
+            <button id="ue-delete"   class="btn-danger"    hidden>Delete</button>
+            <button id="ue-complete" class="btn-secondary" hidden>Mark complete</button>
+            <button id="ue-snooze"   class="btn-secondary" hidden>Snooze</button>
           </div>
           <div class="modal-footer-right">
-            <button id="event-editor-cancel" class="btn-ghost">Cancel</button>
-            <button id="event-editor-save" class="btn-primary">Save</button>
+            <button id="ue-cancel" class="btn-ghost">Cancel</button>
+            <button id="ue-save"   class="btn-primary">Save</button>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Context menu for new event / new task -->
+    <div id="context-menu" hidden>
+      <button class="ctx-item" id="ctx-new-event">📅 New event</button>
+      <button class="ctx-item" id="ctx-new-task">✓ New task</button>
     </div>
 
     <!-- Recurring-event scope picker — shown after Save on a recurring event -->

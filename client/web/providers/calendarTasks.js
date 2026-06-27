@@ -51,9 +51,28 @@ function _stripCompleteLink(html) {
 }
 
 function _buildEventBody(taskData) {
-  const { title, body, kairosId, listId, order, loe, date, noDate, unprocessed, webhookToken, recurrence, completed } = taskData
+  const {
+    title, body, kairosId, listId, order, loe,
+    date, noDate, allDay, startTime, endDate, endTime, timeZone,
+    location, unprocessed, webhookToken, recurrence, completed,
+  } = taskData
+
   const isUndated = noDate || !date
   const dateStr   = isUndated ? KAIROS_UNDATED_SENTINEL : date
+  // allDay defaults to true when not explicitly set (preserves existing all-day behaviour)
+  const isAllDay  = isUndated || allDay !== false
+
+  let startField, endField
+  if (isAllDay) {
+    const eStr = isUndated ? _nextDay(dateStr)
+      : _nextDay(endDate && endDate >= dateStr ? endDate : dateStr)
+    startField = { date: dateStr }
+    endField   = { date: eStr }
+  } else {
+    const tz = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+    startField = { dateTime: `${dateStr}T${startTime ?? '09:00'}:00`,          timeZone: tz }
+    endField   = { dateTime: `${endDate ?? dateStr}T${endTime ?? '09:30'}:00`, timeZone: tz }
+  }
 
   const footer = (!isUndated && webhookToken) ? _markDoneFooter(kairosId, webhookToken) : ''
   const rawBody = _stripCompleteLink(body ?? '')
@@ -72,11 +91,11 @@ function _buildEventBody(taskData) {
   return {
     summary: _applyPrefix(title, !!completed),
     ...(description !== undefined && { description }),
-    start: { date: dateStr },
-    end:   { date: _nextDay(dateStr) },
+    ...(location  && { location }),
+    start: startField,
+    end:   endField,
     extendedProperties: { private: props },
-    // recurrence: undefined means "don't touch existing rule" (safe for PATCH).
-    // An RRULE string sets the series; an empty array clears it.
+    // recurrence: undefined leaves the existing rule unchanged on PATCH.
     ...(recurrence !== undefined && { recurrence: recurrence ? [recurrence] : [] }),
   }
 }
@@ -84,17 +103,23 @@ function _buildEventBody(taskData) {
 // ── Normalize raw Calendar event → CalendarItem ───────────────────────────────
 
 export function normalizeTask(event, calendarId) {
-  const p          = event.extendedProperties?.private ?? {}
-  // All-day events have start.date; timed events have start.dateTime — use date portion for both
-  const dateStr    = event.start?.date ?? event.start?.dateTime?.slice(0, 10)
-  const isUndated  = p.noDate === 'true' || dateStr === KAIROS_UNDATED_SENTINEL || !dateStr
-  const start      = isUndated ? null : new Date(dateStr + 'T00:00:00')
+  const p           = event.extendedProperties?.private ?? {}
+  const dateStr     = event.start?.date ?? event.start?.dateTime?.slice(0, 10)
+  const isUndated   = p.noDate === 'true' || dateStr === KAIROS_UNDATED_SENTINEL || !dateStr
   const completedAt = p.completedAt || null
 
   const rawTitle = event.summary ?? ''
   const cleanTitle = rawTitle.startsWith(COMPLETED_PREFIX)
     ? rawTitle.slice(COMPLETED_PREFIX.length) || '(No title)'
     : rawTitle || '(No title)'
+
+  const allDay = !!event.start?.date
+  const start  = isUndated ? null
+    : allDay ? new Date(dateStr + 'T00:00:00')
+    : new Date(event.start.dateTime)
+  // For all-day: GCal end.date is exclusive (day after), don't surface as end.
+  // For timed: surface the actual end dateTime.
+  const end = event.end?.dateTime ? new Date(event.end.dateTime) : null
 
   return {
     id:        `gcal:${calendarId}:${event.id}`,
@@ -106,9 +131,9 @@ export function normalizeTask(event, calendarId) {
       external_id: event.id,
     },
     start,
-    end:       null,
+    end,
     due:       start,
-    all_day:   !!event.start?.date,
+    all_day:   allDay,
     status:    completedAt ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: event.recurrence?.[0] ?? null,
     metadata: {
@@ -117,6 +142,7 @@ export function normalizeTask(event, calendarId) {
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
       noDate:           isUndated,
+      location:         event.location ?? null,
       unprocessed:      p.isTask !== 'true',
       recurringEventId: event.recurringEventId ?? null,
       completedAt,

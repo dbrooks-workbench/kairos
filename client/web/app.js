@@ -9,12 +9,11 @@ import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { runMigration } from './migration.js'
-import { initModal, openModal, openCreateModal } from './taskEditor.js'
-import { initEventEditor, openEventEditor, openEventEditorForEdit } from './eventEditor.js'
+import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.21.7'
+const VERSION   = '0.22.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -247,7 +246,7 @@ async function refreshCalendarItems() {
 }
 
 function calendarModalCallbacks() {
-  return { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems, onToggleDone: refreshCalendarItems }
+  return { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems }
 }
 
 // ── View switching ────────────────────────────────────────────────────────────
@@ -309,13 +308,13 @@ document.addEventListener('visibilitychange', () => {
 
 function boardCallbacks() {
   return {
-    onCreate:     (calendarId, listId) => openCreateModal(
-      calendarId ?? getTaskCalendars()[0] ?? null, listId, { onSaved: loadBoardData },
+    onCreate:     (calendarId, listId) => openEditor(
+      { mode: 'task', calendarId: calendarId ?? getTaskCalendars()[0] ?? null, listId },
+      { onSaved: loadBoardData },
     ),
-    onEdit:       item    => openModal(item, {
-      onSaved:      loadBoardData,
-      onDeleted:    loadBoardData,
-      onToggleDone: loadBoardData,
+    onEdit:       item    => openEditorForEdit(item, {
+      onSaved:   loadBoardData,
+      onDeleted: loadBoardData,
     }),
     onRefresh:          loadBoardData,
     onDoneWindowChange: days => { state.doneWindow = days; loadBoardData() },
@@ -1013,7 +1012,7 @@ function renderItems(items) {
         chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
-          openModal(item, calendarModalCallbacks())
+          openEditorForEdit(item, calendarModalCallbacks())
         })
 
         chipEl.draggable = true
@@ -1055,14 +1054,14 @@ function renderItems(items) {
         chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
-          openEventEditorForEdit(item, calendarModalCallbacks())
+          openEditorForEdit(item, calendarModalCallbacks())
         })
       } else {
         if (item.color) applyColor(chipEl, item.color)
         chipEl.textContent = item.title
         chipEl.style.cursor = 'pointer'
         chipEl.addEventListener('click', () => {
-          openEventEditorForEdit(item, { onSaved: refreshCalendarItems })
+          openEditorForEdit(item, calendarModalCallbacks())
         })
       }
 
@@ -1133,11 +1132,11 @@ function renderItems(items) {
       el.title = item.title
       if (item.item_type === 'TASK') {
         el.addEventListener('click', () => {
-          openModal(item, calendarModalCallbacks())
+          openEditorForEdit(item, calendarModalCallbacks())
         })
       } else {
         el.addEventListener('click', () => {
-          openEventEditorForEdit(item, { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems })
+          openEditorForEdit(item, calendarModalCallbacks())
         })
         if (item.editable) {
           const handle = document.createElement('div')
@@ -1156,8 +1155,8 @@ function renderItems(items) {
   initTimedDrag(state.weekStart, items, {
     onRefresh:    refreshCalendarItems,
     onDrawCreate: ({ date, startTime, endTime }) =>
-      openEventEditor(
-        { date, startTime, endTime, allDay: false, calendars: state.calendars },
+      openEditor(
+        { mode: 'event', date, startTime, endTime, allDay: false, calendars: state.calendars },
         { onSaved: refreshCalendarItems }
       ),
   })
@@ -1248,11 +1247,7 @@ function renderMobileDay() {
     chip.textContent = item.title
     chip.title       = item.title
     chip.addEventListener('click', () => {
-      if (item.item_type === 'TASK') {
-        openModal(item, calendarModalCallbacks())
-      } else {
-        openEventEditorForEdit(item, calendarModalCallbacks())
-      }
+      openEditorForEdit(item, calendarModalCallbacks())
     })
     allDayContainer.appendChild(chip)
   }
@@ -1306,11 +1301,7 @@ function renderMobileDay() {
     eventEl.title = item.title
 
     eventEl.addEventListener('click', () => {
-      if (item.item_type === 'TASK') {
-        openModal(item, calendarModalCallbacks())
-      } else {
-        openEventEditorForEdit(item, calendarModalCallbacks())
-      }
+      openEditorForEdit(item, calendarModalCallbacks())
     })
     col.appendChild(eventEl)
   }
@@ -1437,19 +1428,17 @@ function initContextMenu() {
 
   document.getElementById('ctx-new-event').addEventListener('click', () => {
     menu.hidden = true
-    openEventEditor(
-      { date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? true, calendars: state.calendars },
+    openEditor(
+      { mode: 'event', date: _ctxOpts.date, allDay: _ctxOpts.allDay ?? true, calendars: state.calendars },
       { onSaved: refreshCalendarItems }
     )
   })
 
   document.getElementById('ctx-new-task').addEventListener('click', () => {
     menu.hidden = true
-    openCreateModal(
-      getTaskCalendars()[0] ?? null,
-      null,
-      calendarModalCallbacks(),
-      { due: _ctxOpts.date ?? null }
+    openEditor(
+      { mode: 'task', calendarId: getTaskCalendars()[0] ?? null, date: _ctxOpts.date ?? null },
+      calendarModalCallbacks()
     )
   })
 
@@ -1485,8 +1474,8 @@ function initContextMenu() {
     const h = Math.floor(minsIntoDay / 60) % 24
     const m = minsIntoDay % 60
     const startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    openEventEditor(
-      { date, startTime, allDay: false, calendars: state.calendars },
+    openEditor(
+      { mode: 'event', date, startTime, allDay: false, calendars: state.calendars },
       { onSaved: refreshCalendarItems }
     )
   })
@@ -1556,11 +1545,10 @@ document.getElementById('btn-view-board').addEventListener('click',    () => set
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
 
-// Init modal + snooze popover listeners once
-initModal()
+// Init editor + snooze popover listeners once
+initEditor()
 initSnooze()
 initCalendarDrag()
-initEventEditor()
 initContextMenu()
 initTimeIndicator()
 initMobileDayView()
