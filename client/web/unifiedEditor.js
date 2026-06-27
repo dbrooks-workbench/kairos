@@ -374,21 +374,17 @@ async function _populateCalendars(preferredId, preloaded) {
   if (preferredId) sel.value = preferredId
 
   // Populate list dropdown after calendar is known (task mode only)
-  if (_mode === 'task') _populateList()
+  if (_mode === 'task') _populateList(_editItem?.metadata?.listId ?? null)
 }
 
-function _populateList() {
+function _populateList(preferredListId) {
   const calId = el('ue-calendar').value
   if (!calId) return
   const lists = getListsForCalendar(calId)
   const sel   = el('ue-list')
-  if (lists.length) {
-    sel.innerHTML = lists
-      .map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`)
-      .join('')
-  } else {
-    sel.innerHTML = '<option value="">No lists</option>'
-  }
+  sel.innerHTML = '<option value="">— No list —</option>'
+    + lists.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
+  if (preferredListId) sel.value = preferredListId
 }
 
 // ── Webhook token (task mode) ─────────────────────────────────────────────────
@@ -543,8 +539,8 @@ export async function openEditor(opts = {}, callbacks = {}) {
 
   _resetCustomRecur(today)
   await _populateCalendars(opts.calendarId ?? (mode === 'task' ? getTaskCalendars()[0] : null), opts.calendars ?? null)
-
-  // Pre-select list if provided
+  // List is populated (with blank option) inside _populateCalendars → _populateList.
+  // Caller can request a specific list via opts.listId.
   if (mode === 'task' && opts.listId) el('ue-list').value = opts.listId
 
   el('unified-editor').hidden = false
@@ -637,11 +633,8 @@ export async function openEditorForEdit(item, callbacks = {}) {
   // it and saving will move the item to the new calendar.
   await _populateCalendars(item.source.account_id)
 
-  // Set the list selection after the calendar dropdown is settled (task mode only).
-  if (isTask) {
-    const listId = item.metadata?.listId
-    if (listId) el('ue-list').value = listId
-  }
+  // List dropdown is populated (with blank option) via _populateCalendars → _populateList.
+  // Nothing extra needed here — listId already passed as preferredListId.
 
   if (token && item.metadata?.recurringEventId) {
     const master = await getEvent(token, item.source.account_id, item.metadata.recurringEventId).catch(() => null)
