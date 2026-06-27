@@ -51,6 +51,21 @@ function _stripCompleteLink(html) {
   return html.replace(/<div[^>]*data-kairos="complete-link"[^>]*>[\s\S]*?<\/div>/gi, '').trim()
 }
 
+function _extractWebhookToken(description) {
+  if (!description) return null
+  const m = description.match(/[?&]wt=([^&"<\s]+)/)
+  return m ? decodeURIComponent(m[1]) : null
+}
+
+function _buildDescriptionPatch(item, nowCompleted) {
+  if (!item) return {}
+  const { kairosId, webhookToken, body } = item.metadata ?? {}
+  if (!kairosId || !webhookToken) return {}
+  const footer = _markDoneFooter(kairosId, webhookToken, nowCompleted)
+  const rawBody = body ?? ''
+  return { description: rawBody ? `${rawBody}${footer}` : footer }
+}
+
 function _buildEventBody(taskData) {
   const {
     title, body, kairosId, listId, order, loe,
@@ -139,6 +154,7 @@ export function normalizeTask(event, calendarId) {
     recurrence: event.recurrence?.[0] ?? null,
     metadata: {
       kairosId:         p.kairosId    ?? null,
+      webhookToken:     _extractWebhookToken(event.description ?? null),
       listId:           p.listId      || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
@@ -237,18 +253,20 @@ export async function deleteTask(token, calendarId, eventId) {
 
 // ── Completion ────────────────────────────────────────────────────────────────
 
-export async function completeTask(token, calendarId, eventId, title = '') {
+export async function completeTask(token, calendarId, eventId, title = '', item = null) {
   const event = await _patch(token, calendarId, eventId, {
     summary: _applyPrefix(title, true),
     extendedProperties: { private: { completedAt: new Date().toISOString() } },
+    ..._buildDescriptionPatch(item, true),
   })
   return normalizeTask(event, calendarId)
 }
 
-export async function uncompleteTask(token, calendarId, eventId, title = '') {
+export async function uncompleteTask(token, calendarId, eventId, title = '', item = null) {
   const event = await _patch(token, calendarId, eventId, {
     summary: _applyPrefix(title, false),
     extendedProperties: { private: { completedAt: null } },
+    ..._buildDescriptionPatch(item, false),
   })
   return normalizeTask(event, calendarId)
 }

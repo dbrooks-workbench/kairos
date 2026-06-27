@@ -800,8 +800,8 @@ async function _toggleComplete() {
   const verb   = isDone ? 'uncompleted' : 'completed'
   el('ue-complete').disabled = true
   try {
-    if (isDone) await uncompleteTask(token, calId, extId, _editItem.title)
-    else        await completeTask(token, calId, extId, _editItem.title)
+    if (isDone) await uncompleteTask(token, calId, extId, _editItem.title, _editItem)
+    else        await completeTask(token, calId, extId, _editItem.title, _editItem)
     appendLogEntry(token, {
       item_id:       _editItem.id,
       item_type:     'TASK',

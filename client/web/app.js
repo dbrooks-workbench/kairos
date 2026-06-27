@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.16'
+const VERSION   = '0.23.17'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -117,8 +117,8 @@ async function handleToggleTask(item) {
   const isDone = item.status === 'COMPLETED'
   const verb   = isDone ? 'uncompleted' : 'completed'
   try {
-    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title)
-    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title)
+    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
+    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'NEEDS_ACTION' : 'COMPLETED'
     renderItems(getVisibleItems())

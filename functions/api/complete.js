@@ -42,18 +42,18 @@ export async function onRequestGet(context) {
       return _html('Task not found', 'This task may have been deleted or moved to a different account.')
     }
 
-    // Already complete?
+    // Toggle completion state
     const alreadyDone = found.event.extendedProperties?.private?.completedAt
+    const rawTitle    = found.event.summary ?? ''
+    const cleanTitle  = rawTitle.startsWith('✅ ') ? rawTitle.slice(2) : rawTitle
+    const wt          = url.searchParams.get('wt')
+
     if (alreadyDone) {
-      const when = new Date(alreadyDone).toLocaleDateString(undefined, { dateStyle: 'medium' })
-      return _html('Already done ✓', `This task was marked as complete on ${when}.`)
+      await _markUncomplete(accessToken, found.calendarId, found.event.id, cleanTitle, kairosId, wt, found.event.description)
+      return _html('Marked incomplete', `"${_esc(cleanTitle || 'Task')}" has been marked as incomplete.`)
     }
 
-    // Mark complete: write completedAt and prefix the title for standard clients
-    const rawTitle = found.event.summary ?? ''
-    await _markComplete(accessToken, found.calendarId, found.event.id, rawTitle)
-
-    const cleanTitle = rawTitle.startsWith('✅ ') ? rawTitle.slice(2) : rawTitle
+    await _markComplete(accessToken, found.calendarId, found.event.id, cleanTitle, kairosId, wt, found.event.description)
     return _html('Done ✓', `"${_esc(cleanTitle || 'Task')}" has been marked as complete.`)
 
   } catch (err) {
@@ -107,20 +107,46 @@ async function _findByKairosId(accessToken, kairosId) {
   return null
 }
 
-async function _markComplete(accessToken, calendarId, eventId, currentTitle) {
-  const prefixed = currentTitle.startsWith('✅ ') ? currentTitle : '✅ ' + currentTitle
+function _buildFooter(kairosId, wt, completed) {
+  const origin = 'https://kairos.pages.dev'
+  const url    = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(wt)}`
+  const label  = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
+  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a></div>`
+}
+
+function _rebuildDescription(currentDescription, kairosId, wt, nowCompleted) {
+  if (!kairosId || !wt) return undefined
+  const stripped = (currentDescription ?? '').replace(/<div[^>]*data-kairos="complete-link"[^>]*>[\s\S]*?<\/div>/gi, '').trim()
+  const footer   = _buildFooter(kairosId, wt, nowCompleted)
+  return stripped ? `${stripped}${footer}` : footer
+}
+
+async function _markComplete(accessToken, calendarId, eventId, cleanTitle, kairosId, wt, currentDescription) {
+  const description = _rebuildDescription(currentDescription, kairosId, wt, true)
+  const body = {
+    summary: '✅ ' + cleanTitle,
+    extendedProperties: { private: { completedAt: new Date().toISOString() } },
+  }
+  if (description !== undefined) body.description = description
   const res = await fetch(
     `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-    {
-      method:  'PATCH',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        summary: prefixed,
-        extendedProperties: { private: { completedAt: new Date().toISOString() } },
-      }),
-    }
+    { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   )
   if (!res.ok) throw new Error(`Mark complete failed: ${res.status}`)
+}
+
+async function _markUncomplete(accessToken, calendarId, eventId, cleanTitle, kairosId, wt, currentDescription) {
+  const description = _rebuildDescription(currentDescription, kairosId, wt, false)
+  const body = {
+    summary: cleanTitle,
+    extendedProperties: { private: { completedAt: null } },
+  }
+  if (description !== undefined) body.description = description
+  const res = await fetch(
+    `${GCAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  )
+  if (!res.ok) throw new Error(`Mark incomplete failed: ${res.status}`)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
