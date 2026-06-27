@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.3'
+const VERSION   = '0.23.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -985,14 +985,13 @@ function renderItems(items) {
       if (span.row >= visibleRows) continue
 
       const { item } = span
-      const isTask       = item.item_type === 'TASK'
-      const isCommitment = item.item_type === 'EVENT' && !!item.metadata?.task_calendar
+      const isTask = item.item_type === 'TASK' || (item.item_type === 'EVENT' && !!item.metadata?.task_calendar)
       const isDone = item.status === 'COMPLETED'
 
       const chipEl = document.createElement('div')
       chipEl.className = [
         'allday-event',
-        (isTask || isCommitment) ? 'type-task'       : '',
+        isTask ? 'type-task' : '',
         isDone                   ? 'completed'       : '',
         span.startsEarly         ? 'continues-left'  : '',
         span.endsLate            ? 'continues-right' : '',
@@ -1011,12 +1010,16 @@ function renderItems(items) {
         check.className = `task-check${isDone ? ' done' : ''}`
         check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
         if (isDone) check.textContent = '✓'
-        check.addEventListener('click', e => { e.stopPropagation(); handleToggleTask(item) })
+        check.addEventListener('click', e => {
+          e.stopPropagation()
+          if (item.item_type === 'TASK') handleToggleTask(item)
+          else                           handleToggleCommitment(item)
+        })
 
         const titleSpan = document.createElement('span')
         titleSpan.textContent = item.title
 
-        const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+        const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId || item.metadata?.recurring_event_id)
         const recurIcon = isRecurring ? (() => {
           const s = document.createElement('span')
           s.className   = 'task-recur-icon'
@@ -1025,14 +1028,18 @@ function renderItems(items) {
           return s
         })() : null
 
-        const snoozeBtn = item.due && !isDone ? (() => {
+        const snoozeBtn = !isDone ? (() => {
           const btn = document.createElement('button')
           btn.className   = 'task-snooze'
           btn.title       = 'Snooze'
           btn.textContent = '⏰'
           btn.addEventListener('click', e => {
             e.stopPropagation()
-            openSnoozePopover(btn, item, refreshCalendarItems)
+            if (item.item_type === 'TASK')
+              openSnoozePopover(btn, item, refreshCalendarItems)
+            else
+              openSnoozePopover(btn, item, refreshCalendarItems,
+                (n, newDate, dateLabel) => handleSnoozeCommitment(item, n, newDate, dateLabel))
           })
           return btn
         })() : null
@@ -1043,47 +1050,18 @@ function renderItems(items) {
           openEditorForEdit(item, calendarModalCallbacks())
         })
 
-        chipEl.draggable = true
-        chipEl.addEventListener('dragstart', e => {
-          _calDragItem = item
-          e.dataTransfer.effectAllowed = 'move'
-          requestAnimationFrame(() => chipEl.classList.add('drag-source'))
-        })
-        chipEl.addEventListener('dragend', () => {
-          chipEl.classList.remove('drag-source')
-          _calDragItem = null
-        })
-      } else if (isCommitment) {
-        if (isDone) chipEl.style.background = 'transparent'
-        else if (item.color) applyColor(chipEl, item.color)
-
-        const check = document.createElement('button')
-        check.className = `task-check${isDone ? ' done' : ''}`
-        check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
-        if (isDone) check.textContent = '✓'
-        check.addEventListener('click', e => { e.stopPropagation(); handleToggleCommitment(item) })
-
-        const titleSpan = document.createElement('span')
-        titleSpan.textContent = item.title
-
-        const snoozeBtn = !isDone ? (() => {
-          const btn = document.createElement('button')
-          btn.className   = 'task-snooze'
-          btn.title       = 'Snooze'
-          btn.textContent = '⏰'
-          btn.addEventListener('click', e => {
-            e.stopPropagation()
-            openSnoozePopover(btn, item, refreshCalendarItems,
-              (n, newDate, dateLabel) => handleSnoozeCommitment(item, n, newDate, dateLabel))
+        if (item.item_type === 'TASK') {
+          chipEl.draggable = true
+          chipEl.addEventListener('dragstart', e => {
+            _calDragItem = item
+            e.dataTransfer.effectAllowed = 'move'
+            requestAnimationFrame(() => chipEl.classList.add('drag-source'))
           })
-          return btn
-        })() : null
-
-        chipEl.append(check, titleSpan, ...(snoozeBtn ? [snoozeBtn] : []))
-        chipEl.style.cursor = 'pointer'
-        chipEl.addEventListener('click', () => {
-          openEditorForEdit(item, calendarModalCallbacks())
-        })
+          chipEl.addEventListener('dragend', () => {
+            chipEl.classList.remove('drag-source')
+            _calDragItem = null
+          })
+        }
       } else {
         if (item.color) applyColor(chipEl, item.color)
         chipEl.textContent = item.title
