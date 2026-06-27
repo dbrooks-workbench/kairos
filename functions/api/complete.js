@@ -46,7 +46,6 @@ export async function onRequestGet(context) {
     const alreadyDone = found.event.extendedProperties?.private?.completedAt
     const rawTitle    = found.event.summary ?? ''
     const cleanTitle  = rawTitle.startsWith('✅ ') ? rawTitle.slice(2) : rawTitle
-    const wt          = url.searchParams.get('wt')
 
     if (alreadyDone) {
       await _markUncomplete(accessToken, found.calendarId, found.event.id, cleanTitle, kairosId, wt, found.event.description)
