@@ -446,6 +446,7 @@ function _setMode(mode, { locked = false } = {}) {
   if (mode === 'task' && _editItem) {
     el('ue-complete').textContent = isDone ? 'Mark incomplete' : 'Mark complete'
     el('ue-complete').hidden      = false
+    el('ue-complete').disabled    = false
     el('ue-snooze').hidden        = isDone
   } else {
     el('ue-complete').hidden = true
