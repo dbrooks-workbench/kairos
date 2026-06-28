@@ -9,7 +9,7 @@
 
 A self-hosted, open-source **calendar aggregation and personal task management platform**. The calendar grid is the UI primitive — everything that is time-aware surfaces on it. Tasks, events, project milestones, habits, and future custom types all share a common temporal model and render contextually based on their type.
 
-This is not a Google Calendar clone. It is a provider-agnostic aggregation layer with an extensible, type-driven interaction surface — with Google Calendar and Google Tasks as the first concrete provider implementations.
+This is not a Google Calendar clone. It is a provider-agnostic aggregation layer with an extensible, type-driven interaction surface — with Google Calendar as the first concrete provider implementation.
 
 The project should be buildable by others, self-hostable with minimal friction, and extensible by the community.
 
@@ -19,7 +19,7 @@ The project should be buildable by others, self-hostable with minimal friction, 
 
 A **personal project management / calendar hybrid** where:
 - All time-aware data (tasks, events, deadlines, milestones) surfaces on a unified calendar view
-- Each item type drives its own rendering and interaction surface (similar to how Google Calendar surfaces tasks differently than events)
+- Each item type drives its own rendering and interaction surface
 - The system is provider-agnostic — Google is the first implementation, not the assumption
 - The community can add new providers, event types, and interaction surfaces
 
@@ -34,33 +34,42 @@ A **personal project management / calendar hybrid** where:
 │                  Cloudflare Pages                        │
 │                                                          │
 │  ┌─────────────────────┐   ┌──────────────────────────┐ │
-│  │  Static SPA          │   │  Pages Functions         │ │
-│  │  (client/web/)       │   │  (functions/auth/)       │ │
-│  │                      │   │                          │ │
-│  │  vanilla JS          │   │  /auth/start             │ │
-│  │  week-view calendar  │   │  /auth/callback          │ │
-│  │  Google API calls    │   │  /auth/refresh           │ │
-│  └──────────┬───────────┘   │  /auth/logout            │ │
-│             │               └────────────┬─────────────┘ │
-│             │                            │               │
-│             │               ┌────────────▼─────────────┐ │
-│             │               │  Cloudflare KV           │ │
-│             │               │  (session + token store) │ │
-│             │               └──────────────────────────┘ │
+│  │  SPA (Vite build)   │   │  Pages Functions         │ │
+│  │  (client/web/ →     │   │  (functions/)            │ │
+│  │   dist/)            │   │                          │ │
+│  │  vanilla JS         │   │  /auth/start             │ │
+│  │  week-view calendar │   │  /auth/callback          │ │
+│  │  Google API calls   │   │  /auth/refresh           │ │
+│  └──────────┬──────────┘   │  /auth/logout            │ │
+│             │              │  /api/complete            │ │
+│             │              │  /api/webhook-token       │ │
+│             │              └────────────┬─────────────┘ │
+│             │                           │               │
+│             │              ┌────────────▼─────────────┐ │
+│             │              │  Cloudflare KV           │ │
+│             │              │  (session + token store) │ │
+│             │              └──────────────────────────┘ │
 └─────────────┼────────────────────────────────────────────┘
               │ direct API calls (Bearer token)
     ┌─────────▼──────────────────────────┐
     │  Google APIs                       │
-    │  Calendar API v3  /  Tasks API v1  │
+    │  Calendar API v3                   │
+    └────────────────────────────────────┘
+              │
+    ┌─────────▼──────────────────────────┐
+    │  Firestore                         │
+    │  (activity / life log)             │
     └────────────────────────────────────┘
 ```
 
-### Web SPA — Vanilla JS (`client/web/`)
+### Web SPA (`client/web/`)
 
-- No framework, no build step — files served directly by Cloudflare Pages
-- Custom calendar grid using CSS Grid and vanilla JS
-- Calls Google Calendar and Tasks APIs directly from the browser using a Bearer token
+- Vanilla JS with Vite 5 build; output to `dist/`; deployed via Cloudflare Pages
+- Tiptap WYSIWYG editor for event/task body content
+- Custom calendar grid using CSS Grid — week view with all-day and timed zones
+- Calls Google Calendar API directly from the browser using a Bearer token
 - Token obtained by calling `/auth/refresh` (Pages Function); never stored in browser
+- Token cache invalidated on `visibilitychange` — re-fetch on every tab focus
 - Rendering is type-driven: each item knows its `item_type`, driving visual treatment and interaction surface
 
 ### Auth — Cloudflare Pages Functions (`functions/auth/`)
@@ -69,12 +78,25 @@ A **personal project management / calendar hybrid** where:
 - PKCE verifier stored temporarily in KV (5-minute TTL)
 - Tokens stored in KV under a random session ID (1-year TTL)
 - Session ID in an HttpOnly Secure cookie — JS cannot access tokens directly
-- `/auth/refresh` returns a fresh access token to the SPA on demand
+- `/auth/refresh` returns a fresh access token to the SPA on demand; refreshes the Google token from the stored refresh token if expired
 
-### Mobile — Flutter (Phase 2, deferred)
+### Completion Webhook (`functions/api/`)
+
+- `/api/webhook-token` — issues a per-user webhook token stored in KV; used to authorize the completion link without a browser session
+- `/api/complete` — toggles completion state on a calendar task event from a link clicked in Google Calendar (or any native client); authenticates via `wt` webhook token param; updates the event summary, extendedProperties, and description footer in one PATCH
+
+### Mobile — Flutter (Phase 2, next)
 
 - Flutter app targeting iOS and Android
 - Will call Google APIs directly with the same OAuth pattern
+- No ntfy stopgap — jumping straight to the native app
+
+### Activity Log — Firestore (`client/web/providers/lifeLog.js`)
+
+- Append-only activity store; each document: `{ timestamp, event_date, source, item_id, item_type, title, verb, action_detail, narrative, context }`
+- `timestamp` = immutable create time; `event_date` = editable "when it happened" (defaults to timestamp)
+- Loaded at startup into an in-memory cache keyed by `item_id`
+- `appendLogEntry`, `updateLogEntry`, `deleteLogEntry` — immediate Firestore writes; in-memory cache updated synchronously so UI reflects changes without waiting for a round-trip
 
 ---
 
@@ -84,28 +106,30 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
 
 ```js
 {
-  id: string,
+  id: string,                   // e.g. "gcal:{calendarId}:{eventId}"
   title: string,
-  item_type: 'EVENT' | 'TASK' | 'MILESTONE' | 'HABIT',
+  item_type: 'EVENT' | 'TASK',
   source: { provider: string, account_id: string, external_id: string },
-  start: Date,                // all-day items: midnight local time
+  start: Date,                  // all-day items: midnight local time
   end: Date | null,
-  due: Date | null,           // tasks with deadlines
+  due: Date | null,             // tasks: same as start
   all_day: boolean,
   status: 'CONFIRMED' | 'TENTATIVE' | 'CANCELLED' | 'COMPLETED' | 'NEEDS_ACTION',
-  recurrence: string | null,  // RRULE string (EVENT items only; TASK recurrence is in metadata)
-  metadata: {                 // type-specific and derived fields
-    body?: string,            // prose notes
-    loe?: string,             // e.g. "2d 4h"
-    comments?: [{timestamp, text}],
-    checklist?: [{text, checked}],
-    recurrence?: string,      // RRULE string for TASK items (stored in Drive, not notes)
-    kid?: string,             // Kairos stable ID for TASK items (anchor in notes)
-    task_calendar?: boolean,  // derived: true when item_type=EVENT and source calendar is a commitment calendar
-    linked_task_ids?: string[],
-    // virtual/orphaned flags for recurring task instances
-    virtual?: boolean,
-    orphaned?: boolean,
+  recurrence: string | null,    // RRULE string
+  metadata: {
+    body?: string,              // prose notes (stripped of footer/snapshot blocks)
+    loe?: string,               // e.g. "2d 4h"
+    kairosId?: string,          // stable Kairos ID for task events (extendedProperty)
+    webhookToken?: string,      // extracted from completion footer URL; used to rebuild footer on toggle
+    listId?: string,            // Kairos list assignment (extendedProperty)
+    order?: number,             // board sort order (extendedProperty)
+    completedAt?: string|null,  // ISO timestamp or null (extendedProperty)
+    noDate?: boolean,           // undated task (sentineled start date)
+    location?: string,
+    unprocessed?: boolean,      // true if event lacks isTask='true' extendedProperty
+    recurringEventId?: string,  // camelCase; present on recurring event instances
+    task_calendar?: boolean,    // derived: true when source calendar is a task calendar
+    linked_task_ids?: string[], // from ---tasks--- block in event description
   },
   color: string | null,
   editable: boolean,
@@ -115,52 +139,73 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
 ### `item_type` vs render behavior
 
 `item_type` is the **persistence type** — where the item lives:
-- `'TASK'` → stored in Google Tasks
-- `'EVENT'` → stored in Google Calendar
+- `'TASK'` → stored as a Google Calendar event with `isTask='true'` private extended property (`calendarTasks.js`)
+- `'EVENT'` → stored as a regular Google Calendar event (`googleCalendar.js`)
 
-**Render behavior is derived, not stored.** The interaction surface Kairos shows depends on `item_type` plus context:
-- `TASK` → task chip, completion button, snooze, LOE display
-- `EVENT` where `metadata.task_calendar` is false → standard event block, view-only or editable form
-- `EVENT` where `metadata.task_calendar` is true → **commitment**: renders as a task chip (all-day) with completion button and snooze
+**Render behavior is derived, not stored.** The interaction surface depends on `item_type` plus `metadata.task_calendar`:
+- `TASK` or `EVENT` where `metadata.task_calendar` is true → task chip, completion button, snooze, LOE display
+- `EVENT` where `metadata.task_calendar` is false → standard event block, editable form
 
-`metadata.task_calendar` is a derived flag set at normalization time by checking `source.account_id` against the user's designated commitment calendars (`commitmentCalendars` in Drive prefs). It is never stored in Drive or Google APIs — always recomputed on load.
+`metadata.task_calendar` is set at normalization time by checking `source.account_id` against the user's designated task calendars (`taskCalendars` in prefs). Never stored — always recomputed on load.
 
 ---
 
-## Commitments
+## Task Events (Calendar-Backed Tasks)
 
-Google Calendar events on a user-designated **commitment calendar** are treated by Kairos as completable, snoozeable commitments. This is the correct model for recurring scheduled work (weekly review, monthly budget, etc.) because Google Calendar has first-class native recurrence with per-instance editing, stable event IDs, and "edit this / this and following / all" semantics — none of which exist in Google Tasks.
+Tasks in Kairos are stored as Google Calendar events with private extended properties, not in the Google Tasks API. This gives tasks:
+- First-class recurrence (RRULE, per-instance editing, "edit this / all" scope)
+- Native calendar visibility in any GCal client
+- Stable event IDs across moves/renames
 
-The logical line between a task and a commitment: a **task** is something you need to do, often with a due date. A **commitment** is something you've scheduled — it happens at a specific time and may recur. Due dates alone don't cross the line; recurrence and schedule-anchoring do.
+### Extended properties (private)
 
-### Commitment calendar designation
-
-Users designate 0–n Google Calendars as commitment calendars via `commitmentCalendars: string[]` in `kairos-prefs.json`. The calendar picker UI shows a "Use as commitment calendar" toggle per calendar (independent of the visibility toggle). Multiple commitment calendars are supported.
+| Key | Type | Meaning |
+|---|---|---|
+| `isTask` | `'true'` | Marks the event as a Kairos task |
+| `kairosId` | string | Stable per-task ID; used for webhook completion lookup |
+| `listId` | string | Board column assignment |
+| `order` | string (number) | Board sort order |
+| `completedAt` | ISO string \| null | Non-null = completed; encodes both state and time |
+| `loe` | string | Level of effort (e.g. `"2h"`) |
+| `noDate` | `'true'` | Task has no due date (start is a sentinel value) |
 
 ### Completion model
 
-Completion state is maintained at two layers:
+- `completedAt` non-null = completed. One field encodes state and timestamp with no redundancy.
+- Summary prefixed with `✅ ` for visibility in native GCal clients; stripped at normalization time so Kairos UI sees clean title.
+- Description footer: `<div data-kairos="complete-link">` containing `✓ Mark as complete in Kairos` or `↩ Mark as incomplete in Kairos` link — toggled on every complete/uncomplete PATCH, not only on Save.
+- `/api/complete` webhook toggles completion from a native GCal link click (no browser session needed).
 
-1. **Drive** (`kairos-event-tasks.json`, keyed by Google Calendar event instance ID):
-   ```json
-   { "version": 1, "events": { "[eventId]": { "completedAt": "ISO timestamp | null" } } }
-   ```
-   `completedAt` is the single authoritative field: a non-null value means completed (and is the completion time); null/absent means not completed. One field encodes both state and timestamp with no redundancy and no possibility of the two going out of sync. Kairos reads this to render; it never walks the event log to determine current state.
+### Completion footer URL
 
-2. **Log entry in event description** (append-only audit trail):
-   - Complete: appends `@timestamp !completed` to the event instance description
-   - Uncomplete: appends `@timestamp !uncompleted`
-   - Visible in all calendar clients; feeds the Life History Project
+`https://kairos.inlandsoftware.com/api/complete?kairosId={kairosId}&wt={webhookToken}`
 
-Uncompleting sets `completedAt: null` in Drive and appends `!uncompleted` to the log.
+The `wt` (webhook token) is stored in KV and authorizes the completion without a cookie-based session. It is also extracted from the existing footer URL by `_extractWebhookToken()` in `normalizeTask` so callers always have it without a separate fetch.
 
-### Snooze
+### Snapshot block
 
-Snooze moves the specific event instance to a new date via Google Calendar PATCH (updating `start.date`/`end.date` for all-day, `start.dateTime`/`end.dateTime` for timed) and appends `@timestamp !snoozed to YYYY-MM-DD` to the event description. The series is unaffected; only this instance moves.
+On modal Save, a write-only `--- Kairos ---` block is appended to the description/notes for native client visibility. Kairos never reads it back — stripped before parsing. Format:
 
-### What stays on Google Tasks
+```
+--- Kairos ---
+LOE: 2h  ·  3 comments  ·  Updated Jun 27, 2026
+```
 
-One-off personal tasks, with or without a due date. The board view reflects Google Tasks only. Recurring scheduled work belongs on a commitment calendar; the board is for work items, not scheduled commitments.
+---
+
+## Board View
+
+The board (`board.js`) surfaces all task events in a Kanban layout grouped by Kairos list. Recurring tasks are deduplicated to one card per series (best upcoming instance). Cards show chips for: list, recurrence (↻), LOE, due date.
+
+---
+
+## UI Details
+
+- **Past events**: regular past events fade to opacity 0.45 (`.is-past`); past-due incomplete tasks get a red urgency ring (`.past-due`)
+- **Recurrence indicator**: `↻` appended to chip/card title for any item with `recurrence` or `metadata.recurringEventId`
+- **End date**: hidden by default in all-day mode; "Add end date" link reveals it; "Hide end date" collapses back
+- **All day** checkbox appears below the date row (logically modifies dates)
+- **Token refresh**: `invalidateCache()` called on `visibilitychange` — every tab focus gets a fresh token from `/auth/refresh`
 
 ---
 
@@ -168,52 +213,35 @@ One-off personal tasks, with or without a due date. The board view reflects Goog
 
 Providers are plain JS modules that take a token and return `CalendarItem[]`.
 
-```js
-// calendar provider interface
-async function getEvents(token, start, end) -> CalendarItem[]
-
-// task provider interface
-async function getTasks(token, start, end) -> CalendarItem[]
-async function completeTask(token, taskId, listId) -> void
-async function updateTask(token, item) -> CalendarItem
-```
-
-**Implemented providers (Phase 1):**
-- `googleCalendar.js` — Google Calendar API v3; parses `---tasks---` blocks in event descriptions into `metadata.linked_task_ids`
-- `googleTasks.js` — Google Tasks API v1; parses agile-tasks metadata conventions (LOE, comments, checklists) from task notes field
+**Implemented providers:**
+- `calendarTasks.js` — Google Calendar API v3; reads/writes Kairos task events (extendedProperties pattern)
+- `googleCalendar.js` — Google Calendar API v3; regular events; parses `---tasks---` blocks and `@timestamp !verb` log entries in descriptions
 
 **Planned provider extensions:**
 - Outlook / Microsoft 365
 - Apple Calendar (CalDAV)
 
-**Explicitly out of scope:**
-- Self-hosted task backend — Google Tasks is the task provider. The abstraction exists to normalize and extend Google's model, not replace it.
-- ICS feed output — indefinitely deferred.
-
 ---
 
 ## Build Phases
 
-### Phase 1 — Google-Backed Validation (Current Focus)
-**Goal**: Prove the UI and aggregation model work. Produces a functional, shippable product (customizable Google Calendar client).
+### Phase 1 — Baseline (Complete ✓)
+**Shipped**: Functional web app. Week-view calendar, board view, unified editor, task event model, completion/snooze/recurrence, activity log, mobile day view.
 
-- [ ] FastAPI backend skeleton with provider abstraction
-- [ ] `GoogleCalendarProvider` — OAuth2 flow, multi-account, fetch/normalize events
-- [ ] `GoogleTasksProvider` — fetch tasks, normalize, surface on calendar
-- [ ] Unified `/feed` endpoint (JSON) — merged events + tasks
-- [ ] ICS feed output endpoint (`/feed.ics`)
-- [ ] Vanilla SPA — custom calendar grid, week/month views, all-day area
-- [ ] Task rendering on calendar (all-day chips, deadline-aware positioning)
-- [ ] Type-driven interaction surface (events vs tasks have different click behavior)
+Key baseline version: **v0.23.20**
 
-### Phase 2 — Flutter Mobile
-- [ ] Flutter calendar app consuming same backend
-- [ ] Feature parity with web SPA
+### Phase 1.5 — Work Surfaces (Next)
+- Intake surface — capture new tasks/events quickly without opening the full editor
+- Planning surface — review and sequence upcoming work
+
+### Phase 2 — Flutter Mobile (Next major project)
+- Flutter app targeting iOS and Android
+- Feature parity with web SPA
+- Same OAuth pattern; calls Google APIs directly
 
 ### Phase 3 — Extensibility
-- [ ] Plugin/adapter pattern for community providers
-- [ ] Custom event type registration
-- [ ] ICS feed import from arbitrary URLs
+- Plugin/adapter pattern for community providers
+- Custom event type registration
 
 ---
 
@@ -221,26 +249,25 @@ async function updateTask(token, item) -> CalendarItem
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Hosting | Cloudflare Pages | Zero-ops, free tier, same pattern as agile-tasks |
+| Hosting | Cloudflare Pages | Zero-ops, free tier, edge-deployed functions |
 | Auth | PKCE + KV sessions | Client secret never in browser; tokens in KV, not localStorage |
-| Web frontend | Vanilla JS SPA | No build pipeline, maximum control over calendar rendering |
-| Mobile | Flutter (Phase 2) | Single codebase for iOS + Android |
+| Web frontend | Vanilla JS + Vite | Maximum control over calendar rendering; Vite for bundling/dev ergonomics |
+| Mobile | Flutter (Phase 2) | Single codebase for iOS + Android; no ntfy stopgap |
 | Calendar rendering | Custom-rolled | Avoid fighting framework assumptions about task display |
 | No backend | Google APIs direct | No server to maintain; auth handled by Pages Functions |
-| Provider pattern | JS modules | Normalize provider-specific models; parse agile-tasks metadata extensions |
-| PWA | Optional | Offline support without a separate native app |
-| Recurring commitments | Calendar events on commitment calendar, not tasks | Google Tasks has no native recurrence; Google Calendar has first-class RRULE with per-instance editing, stable IDs, and native "edit this / all" semantics |
-| Commitment render behavior | Derived, not stored | `item_type` = persistence type; render behavior derived from `item_type` + commitment calendar membership at normalization time |
-| Commitment completion | `completedAt` timestamp in Drive + log entry in description | `completedAt` non-null = completed (encodes both state and time in one field); log is append-only audit trail |
-| Task vs commitment line | Due date alone stays a task; schedule/recurrence → commitment | "Task with a due date" ≠ "calendar event". Tasks live on the board; commitments render on the calendar with the completion surface |
+| Task storage | Google Calendar events (not Google Tasks API) | First-class RRULE recurrence, stable IDs, per-instance editing, native GCal visibility |
+| Task completion state | `completedAt` extendedProperty + footer toggle | Single field encodes state and time; no redundancy; footer link lets native clients complete tasks |
+| Activity log | Firestore | Structured, queryable; separate from task body; `event_date` editable, `timestamp` immutable |
+| Token refresh | Invalidate on visibilitychange | Ensures returning to tab after any idle period always gets a fresh token |
+| `item_type` | Persistence type only | Render behavior derived from `item_type` + `task_calendar` flag at normalization time |
 
 ---
 
 ## Standards & Interop
 
 - **OAuth2 + PKCE**: Google auth via Cloudflare Pages Functions. Tokens in KV, never in browser storage
-- **Google Calendar API v3**: Primary event source
-- **Google Tasks API v1**: Task source; agile-tasks body conventions for structured metadata
+- **Google Calendar API v3**: All data (events and task events)
+- **Firestore**: Activity log / life history
 
 ---
 
@@ -248,25 +275,21 @@ async function updateTask(token, item) -> CalendarItem
 
 - Not a scheduling/booking tool (no availability sharing, no meeting links)
 - Not a team collaboration tool (single-user, self-hosted first)
-- Not a replacement for a full PMS or project management suite — it is a *calendar-first* view of personal work
+- Not a replacement for a full PMS — it is a *calendar-first* view of personal work
 - Not locked to Google — Google is the first implementation, not the architecture
-- Tasks are not events. `item_type` reflects persistence: `TASK` = Google Tasks, `EVENT` = Google Calendar. Render behavior is derived separately.
-- Recurring commitments belong on commitment calendar events, not Google Tasks. Google Tasks has no native recurrence; the synthetic recurrence Kairos previously implemented there was fragile. `GoogleTasksProvider` has no RRULE logic going forward.
-- The user-facing term for a completable calendar event is **commitment**. Internally, `metadata.task_calendar` flags it; `commitmentCalendars` in Drive prefs holds the designated calendar IDs.
-- `!completed`, `!uncompleted`, and `!snoozed` are in the known action verb allowlist in `parseEventDescription`. All three append log entries to the event instance description; complete/uncomplete also write to `kairos-event-tasks.json`.
+- Not using the Google Tasks API — tasks are Google Calendar events with extended properties
 
 ---
 
 ## Development Notes
 
 - Iterate in Claude Code sessions; memorialize decisions back into this file
-- Data model is the highest-leverage design investment — get the `CalendarItem` schema right before building around it
-- Provider interfaces should be finalized before writing implementations
-- The SPA calendar grid is custom — build the week view first, then month view
-- All-day area and timed area are separate rendering zones; tasks can appear in either depending on whether they have a time component
-- `GoogleTasksProvider`: task `notes` field contains only: prose body → GFM checklist (`- [ ] item`) → `[kid:xxx]` anchor (last line). LOE, comments, and recurrence are stored in `kairos-tasks.json` (Drive), not in notes. Backward-compat: `parseTaskNotes` still extracts LOE, comments, and recurrence sigils from notes for tasks not yet migrated through the modal save path. Migration is lazy — first explicit modal save moves metadata to Drive and cleans the notes.
-- `GoogleCalendarProvider` parses event descriptions for: (1) a single embedded JSON object (first `{` to matching `}`, depth-tracked, silent fail) → `metadata.config`; (2) `@timestamp` comment lines → `metadata.comments`. Structured action comments use a `!verb` prefix to distinguish from plain narrative entries — sigil grammar: `@` = when, `!` = action verb, `$` = key reference. Parser matches `!verb` against a known allowlist (`spawned`, `cancelled`, `deferred`, ...) so unrecognized `!word` gracefully degrades to narrative. Example: `@2025-11-15T09:23:00 !spawned $PAY-TAX tasks/abc123xyz`. The JSON config object may contain `tasks` (linked task IDs) and `spawn` (task prototypes) keys.
-- **Event and task text fields are clean**: prose body only (plus `[kid:xxx]` for tasks). No JSON, no log entries, no Kairos-managed metadata in the text fields. The one exception is the write-only `--- Kairos ---` snapshot block appended on modal Save — Kairos never reads it back (`parseTaskNotes` strips it before parsing).
-- **Snapshot format**: `--- Kairos ---\nLOE: 2h  ·  3 comments  ·  Updated Jun 25, 2026` (tasks) or `--- Kairos ---\nCompleted Jun 25, 2026  ·  2 comments` (commitments). Written on modal Save only.
-- **Unified comment model**: both tasks and events use `[{timestamp, text}]` in Drive. Action entries use `!verb` text convention: `!completed`, `!uncompleted`, `!snoozed to YYYY-MM-DD`. Free-form narrative text is also supported in the same array.
-- **Spawn triggers** (future feature): spawn config prototypes will live in Drive (not in event descriptions). Kairos spawns a Google Task when entering the trigger window and appends `!spawned $KEY tasks/{id}` as a Drive comment entry. Do not implement until core calendar + task rendering is complete.
+- Production URL: `https://kairos.inlandsoftware.com` (permanent CNAME to Cloudflare Pages)
+- Build: `npm run build` in repo root → `dist/`; Cloudflare Pages picks up `dist/` automatically
+- All-day area and timed area are separate rendering zones
+- `normalizeTask` (calendarTasks.js): extracts `webhookToken` from existing footer URL via `_extractWebhookToken()` so it's always available in metadata without a separate fetch
+- `normalizeEvent` (googleCalendar.js): uses camelCase `recurringEventId` (not snake_case) — must stay consistent with `normalizeTask` so all recurrence checks work uniformly
+- `_buildDescriptionPatch(item, nowCompleted)` in calendarTasks.js: rebuilds description with correctly-labelled footer on every complete/uncomplete; called from `completeTask`, `uncompleteTask`, and the `/api/complete` webhook
+- `_setMode()` in unifiedEditor.js: resets `ue-complete.disabled = false` when the button is shown — prevents button staying disabled across modal re-opens
+- **Spawn triggers** (future): config prototypes will live in Drive. Do not implement until work surfaces are complete.
+- **Text fields are clean**: prose body only. The `--- Kairos --- ` snapshot block is write-only (appended on Save); the `data-kairos="complete-link"` footer div is managed by completion handlers. Neither is read back by the parser.
