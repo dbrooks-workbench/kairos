@@ -181,12 +181,16 @@ function _toDatetimeLocal(isoStr) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+let _activityFilter = 'all'  // 'all' | 'comments'
+
 function _renderComments() {
   const container = el('ue-activity-items')
   container.innerHTML = ''
-  const sorted = [..._comments].sort((a, b) =>
-    (a.event_date ?? a.timestamp).localeCompare(b.event_date ?? b.timestamp)
-  )
+  const sorted = [..._comments]
+    .filter(c => _activityFilter === 'comments' ? !c._readonly : true)
+    .sort((a, b) =>
+      (a.event_date ?? a.timestamp).localeCompare(b.event_date ?? b.timestamp)
+    )
   sorted.forEach(c => {
     const row = document.createElement('div')
     row.className = 'modal-comment-row' + (c._readonly ? ' modal-comment-readonly' : '')
@@ -266,7 +270,9 @@ function _renderComments() {
     }
     container.appendChild(row)
   })
-  el('ue-activity-count').textContent = _comments.length ? `(${_comments.length})` : ''
+  const total = _comments.length
+  const shown = sorted.length
+  el('ue-activity-count').textContent = total ? (shown < total ? `(${shown}/${total})` : `(${total})`) : ''
 }
 
 async function _addComment() {
@@ -588,6 +594,17 @@ export function initEditor() {
 
   el('ue-comment-add').addEventListener('click', _addComment)
   el('ue-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addComment() })
+
+  el('ue-activity-filter').addEventListener('click', e => {
+    const btn = e.target.closest('[data-filter]')
+    if (!btn) return
+    e.stopPropagation()   // don't toggle the <details> open/close
+    _activityFilter = btn.dataset.filter
+    el('ue-activity-filter').querySelectorAll('[data-filter]').forEach(s => {
+      s.classList.toggle('active', s.dataset.filter === _activityFilter)
+    })
+    _renderComments()
+  })
 
   el('unified-editor').addEventListener('click', e => { if (e.target === el('unified-editor')) _close() })
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('unified-editor').hidden) _close() })
