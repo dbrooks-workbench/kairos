@@ -140,8 +140,21 @@ export function openSnoozePopover(btn, item, onRefresh, actionFn = null) {
 
   const rect = btn.getBoundingClientRect()
   const popoverWidth = 240
-  const left = Math.min(rect.left, window.innerWidth - popoverWidth - 8)
-  popover.style.top  = `${rect.bottom + 6}px`
+
+  // Measure real height without a visible flash, then decide above vs below
+  popover.style.visibility = 'hidden'
+  popover.hidden = false
+  const popoverHeight = popover.offsetHeight
+  popover.hidden = true
+  popover.style.visibility = ''
+
+  const left       = Math.min(rect.left, window.innerWidth - popoverWidth - 8)
+  const spaceBelow = window.innerHeight - rect.bottom - 8
+  const top        = spaceBelow >= popoverHeight
+    ? rect.bottom + 6
+    : Math.max(8, rect.top - popoverHeight - 6)
+
+  popover.style.top  = `${top}px`
   popover.style.left = `${Math.max(8, left)}px`
   popover.hidden = false
   daysInput.focus()
