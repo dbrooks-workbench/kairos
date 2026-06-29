@@ -5,14 +5,14 @@ import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as ca
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
-import { appendLogEntry } from './providers/lifeLog.js'
+import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { runMigration } from './migration.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.20'
+const VERSION   = '0.23.21'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -124,6 +124,7 @@ async function handleToggleTask(item) {
     renderItems(getVisibleItems())
     appendLogEntry(token, {
       item_id:       item.id,
+      kairosId:      item.metadata?.kairosId ?? undefined,
       item_type:     'TASK',
       title:         item.title,
       verb,
@@ -1544,6 +1545,16 @@ _recurringToggle.addEventListener('change', e => {
 
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
+
+// Admin utilities — callable from browser console for data repair
+// Usage: await _kairos.relinkLog(token, 'gtasks:LIST:TASKID', 'kairosId')
+window._kairos = {
+  relinkLog: async (token, oldItemId, kairosId) => {
+    const n = await relinkLogEntries(token, oldItemId, kairosId)
+    console.log(`relinkLog: updated ${n} entries (${oldItemId} → kairosId:${kairosId})`)
+    return n
+  },
+}
 
 // Init editor + snooze popover listeners once
 initEditor()

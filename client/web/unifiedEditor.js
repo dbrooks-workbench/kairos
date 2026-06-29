@@ -283,6 +283,7 @@ async function _addComment() {
   if (!token) return
   c._id = await appendLogEntry(token, {
     item_id:       _editItem.id,
+    kairosId:      _editItem.metadata?.kairosId ?? undefined,
     item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
     title:         _editItem.title,
     verb:          'comment',
@@ -295,9 +296,11 @@ async function _addComment() {
 
 async function _logNewComments(token, itemId, title) {
   const newComments = _comments.filter(c => !c._readonly && !_originalTimestamps.has(c.timestamp))
+  const kairosId = _editItem?.metadata?.kairosId ?? undefined
   for (const c of newComments) {
     appendLogEntry(token, {
       item_id:       itemId,
+      kairosId,
       item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
       title,
       verb:          'comment',
@@ -684,7 +687,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   _kairosId    = isTask ? (item.metadata?.kairosId ?? null) : null
 
   // Load activity log
-  _comments = getItemLog(item.id).map(e => ({
+  _comments = getItemLog(item.id, item.metadata?.kairosId).map(e => ({
     _id:        e._id,
     timestamp:  e.timestamp,
     event_date: e.event_date ?? e.timestamp,
@@ -805,6 +808,7 @@ async function _toggleComplete() {
     else        await completeTask(token, calId, extId, _editItem.title, _editItem)
     appendLogEntry(token, {
       item_id:       _editItem.id,
+      kairosId:      _editItem.metadata?.kairosId ?? undefined,
       item_type:     'TASK',
       title:         _editItem.title,
       verb,

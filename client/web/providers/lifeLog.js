@@ -11,10 +11,12 @@ import { fsList, fsAdd, fsSet, fsDelete } from './firestore.js'
 
 const COLLECTION = 'activity'
 
-// { [item_id]: [{ _id, timestamp, verb, action_detail, narrative }] }
-// null until loadLifeLog has run
-let _logByItemId = null
-let _loadPromise = null   // deduplicates concurrent calls (e.g. from parallel getEvents+getTasks)
+// { [item_id]:   [{ _id, ... }] }  — primary index by item_id
+// { [kairosId]:  [{ _id, ... }] }  — secondary index by kairosId field (task events)
+// Both null until loadLifeLog has run
+let _logByItemId   = null
+let _logByKairosId = null
+let _loadPromise   = null   // deduplicates concurrent calls (e.g. from parallel getEvents+getTasks)
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -30,27 +32,43 @@ export async function loadLifeLog(token) {
 async function _doLoad(token) {
   try {
     const docs = await fsList(token, COLLECTION)
-    _logByItemId = {}
+    _logByItemId   = {}
+    _logByKairosId = {}
     for (const { _id, ...entry } of docs) {
-      const { item_id } = entry
+      const { item_id, kairosId } = entry
       if (!item_id) continue
       if (!_logByItemId[item_id]) _logByItemId[item_id] = []
       _logByItemId[item_id].push({ _id, ...entry })
+      if (kairosId) {
+        if (!_logByKairosId[kairosId]) _logByKairosId[kairosId] = []
+        _logByKairosId[kairosId].push({ _id, ...entry })
+      }
     }
   } catch (err) {
     console.warn('Life log load failed:', err.message)
-    _logByItemId = {}
+    _logByItemId   = {}
+    _logByKairosId = {}
   }
 }
 
 // Returns log entries for one item, sorted chronologically.
-export function getItemLog(itemId) {
-  if (!itemId || !_logByItemId) return []
-  return (_logByItemId[itemId] ?? []).slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+// Pass kairosId for task events so migrated entries (stored under old gtasks: IDs) are found.
+export function getItemLog(itemId, kairosId) {
+  if (!_logByItemId) return []
+  const byId      = itemId   ? (_logByItemId[itemId]     ?? []) : []
+  const byKairos  = kairosId ? (_logByKairosId[kairosId] ?? []) : []
+  // Merge, deduplicate by _id
+  const seen = new Set()
+  const merged = []
+  for (const e of [...byId, ...byKairos]) {
+    if (!seen.has(e._id)) { seen.add(e._id); merged.push(e) }
+  }
+  return merged.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
 }
 
 // Append an activity entry. Returns the new Firestore _id (null on failure).
-// entry: { item_id, item_type, title, verb, action_detail, narrative, context, event_date? }
+// entry: { item_id, item_type, title, verb, action_detail, narrative, context, event_date?, kairosId? }
+// Pass kairosId for task events — stored in the document so entries survive future item ID changes.
 export async function appendLogEntry(token, entry) {
   const timestamp = new Date().toISOString()
   const doc = {
@@ -64,12 +82,17 @@ export async function appendLogEntry(token, entry) {
     action_detail: entry.action_detail ?? {},
     narrative:     entry.narrative     ?? '',
     context:       entry.context       ?? '',
+    ...(entry.kairosId ? { kairosId: entry.kairosId } : {}),
   }
 
   // Update in-memory cache immediately (_id backfilled after write)
   if (_logByItemId !== null && entry.item_id) {
     if (!_logByItemId[entry.item_id]) _logByItemId[entry.item_id] = []
     _logByItemId[entry.item_id].push({ _id: null, ...doc })
+  }
+  if (_logByKairosId !== null && entry.kairosId) {
+    if (!_logByKairosId[entry.kairosId]) _logByKairosId[entry.kairosId] = []
+    _logByKairosId[entry.kairosId].push({ _id: null, ...doc })
   }
 
   try {
@@ -106,12 +129,45 @@ export async function updateLogEntry(token, itemId, entryId, updates) {
   }
 }
 
+// Re-link activity entries from an old item_id (e.g. gtasks:…) to a kairosId.
+// Adds the kairosId field to each matching Firestore document so getItemLog can find
+// them via the kairosId index. Does not change item_id — both lookups keep working.
+// Use from the browser console after a task migration:
+//   relinkLogEntries(token, 'gtasks:LIST:TASKID', 'kairosId')
+export async function relinkLogEntries(token, oldItemId, kairosId) {
+  if (!oldItemId || !kairosId || !_logByItemId) return 0
+  const entries = (_logByItemId[oldItemId] ?? []).filter(e => e._id)
+  let count = 0
+  for (const entry of entries) {
+    if (entry.kairosId === kairosId) continue   // already linked
+    entry.kairosId = kairosId
+    // Add to kairosId index
+    if (!_logByKairosId[kairosId]) _logByKairosId[kairosId] = []
+    if (!_logByKairosId[kairosId].find(e => e._id === entry._id)) {
+      _logByKairosId[kairosId].push(entry)
+    }
+    const { _id, ...doc } = entry
+    try {
+      await fsSet(token, `${COLLECTION}/${_id}`, doc)
+      count++
+    } catch (err) {
+      console.warn('relinkLogEntries write failed:', err.message)
+    }
+  }
+  return count
+}
+
 // Delete a single activity entry from Firestore and the in-memory cache.
 export async function deleteLogEntry(token, itemId, entryId) {
   if (!entryId) return
-  // Remove from cache immediately so the UI reflects the change
+  // Remove from both caches immediately
   if (_logByItemId && itemId) {
     _logByItemId[itemId] = (_logByItemId[itemId] ?? []).filter(e => e._id !== entryId)
+  }
+  if (_logByKairosId) {
+    for (const key of Object.keys(_logByKairosId)) {
+      _logByKairosId[key] = _logByKairosId[key].filter(e => e._id !== entryId)
+    }
   }
   try {
     await fsDelete(token, `${COLLECTION}/${entryId}`)
