@@ -1719,6 +1719,7 @@ body.resize-active * { cursor: ns-resize !important; }
 
 /* Collapsible sections */
 .modal-section {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -1754,16 +1755,25 @@ body.resize-active * { cursor: ns-resize !important; }
   font-weight: 400;
 }
 
-.modal-section-spacer { flex: 1; }
-
 .activity-filter {
+  /* Sits outside <summary> but overlays it via absolute positioning so clicks
+     never reach <summary> and never trigger the <details> native toggle. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 37px;   /* matches summary padding (8px top + ~21px line + 8px bottom) */
+  display: flex;
+  align-items: center;
+  padding-right: 12px;
+  gap: 4px;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  z-index: 1;
 }
+
+/* Author stylesheet always wins over UA; keeps filter visible when <details> is closed */
+#ue-activity-section > .activity-filter { display: flex; }
 
 .activity-filter span[data-filter] {
   cursor: pointer;

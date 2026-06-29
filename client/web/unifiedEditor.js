@@ -595,15 +595,7 @@ export function initEditor() {
   el('ue-comment-add').addEventListener('click', _addComment)
   el('ue-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addComment() })
 
-  // Prevent <details> toggle when clicking the filter — must call preventDefault()
-  // on the <summary> click (stopPropagation alone isn't enough; browsers fire the
-  // toggle as the summary's default action regardless of child propagation state)
-  el('ue-activity-section').querySelector('summary').addEventListener('click', e => {
-    if (e.target.closest('#ue-activity-filter')) e.preventDefault()
-  })
-
   el('ue-activity-filter').addEventListener('click', e => {
-    e.stopPropagation()
     const btn = e.target.closest('[data-filter]')
     if (!btn) return
     _activityFilter = btn.dataset.filter
