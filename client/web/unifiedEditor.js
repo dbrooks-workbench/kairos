@@ -181,7 +181,7 @@ function _toDatetimeLocal(isoStr) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-let _activityFilter = 'all'  // 'all' | 'comments'
+let _activityFilter = 'comments'  // 'all' | 'comments'
 
 function _renderComments() {
   const container = el('ue-activity-items')
@@ -595,10 +595,17 @@ export function initEditor() {
   el('ue-comment-add').addEventListener('click', _addComment)
   el('ue-comment-input').addEventListener('keydown', e => { if (e.key === 'Enter') _addComment() })
 
+  // Prevent <details> toggle when clicking the filter — must call preventDefault()
+  // on the <summary> click (stopPropagation alone isn't enough; browsers fire the
+  // toggle as the summary's default action regardless of child propagation state)
+  el('ue-activity-section').querySelector('summary').addEventListener('click', e => {
+    if (e.target.closest('#ue-activity-filter')) e.preventDefault()
+  })
+
   el('ue-activity-filter').addEventListener('click', e => {
+    e.stopPropagation()
     const btn = e.target.closest('[data-filter]')
     if (!btn) return
-    e.stopPropagation()   // don't toggle the <details> open/close
     _activityFilter = btn.dataset.filter
     el('ue-activity-filter').querySelectorAll('[data-filter]').forEach(s => {
       s.classList.toggle('active', s.dataset.filter === _activityFilter)
