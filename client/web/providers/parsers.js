@@ -122,7 +122,10 @@ export function displayTimestamp(ts) {
     .replace(' ', 'T')
     .replace(/(\.\d{3})\d+/, '$1')
   const d = new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00')
-  if (isNaN(d)) return ts
+  if (isNaN(d)) {
+    console.warn('[kairos] displayTimestamp could not parse:', JSON.stringify(ts), '(type:', typeof ts + ')')
+    return ts
+  }
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
