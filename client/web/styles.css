@@ -1850,6 +1850,7 @@ body.resize-active * { cursor: ns-resize !important; }
 
 .modal-comment-text {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   border: none;
   border-bottom: 1px solid transparent;
@@ -1858,6 +1859,9 @@ body.resize-active * { cursor: ns-resize !important; }
   background: transparent;
   color: var(--text);
   font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal-comment-text:focus { border-bottom-color: var(--today-color); }

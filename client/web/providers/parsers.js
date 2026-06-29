@@ -115,8 +115,12 @@ export function nowTimestamp() {
 
 export function displayTimestamp(ts) {
   if (!ts) return ''
-  // Normalize space-separated datetime (e.g. from Sheets) to ISO format
-  const normalized = String(ts).replace(' ', 'T')
+  // Normalize: space → T, truncate fractional seconds to ≤3 digits.
+  // Firestore timestampValue returns microsecond precision (.123456Z), which
+  // Chrome's Date parser rejects — JS Date only accepts up to milliseconds.
+  const normalized = String(ts)
+    .replace(' ', 'T')
+    .replace(/(\.\d{3})\d+/, '$1')
   const d = new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00')
   if (isNaN(d)) return ts
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })

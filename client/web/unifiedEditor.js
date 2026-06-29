@@ -210,6 +210,7 @@ function _renderComments() {
       const txt = document.createElement('span')
       txt.className   = 'modal-comment-text'
       txt.textContent = c.text
+      txt.title       = c.text
       row.append(ts, txt, del)
     } else {
       // Timestamp: display span (formatted) swaps to datetime-local input on click, back on blur
