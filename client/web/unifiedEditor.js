@@ -821,8 +821,9 @@ async function _toggleComplete() {
   const verb   = isDone ? 'uncompleted' : 'completed'
   el('ue-complete').disabled = true
   try {
-    if (isDone) await uncompleteTask(token, calId, extId, _editItem.title, _editItem)
-    else        await completeTask(token, calId, extId, _editItem.title, _editItem)
+    const updated = isDone
+      ? await uncompleteTask(token, calId, extId, _editItem.title, _editItem)
+      : await completeTask(token, calId, extId, _editItem.title, _editItem)
     appendLogEntry(token, {
       item_id:       _editItem.id,
       kairosId:      _editItem.metadata?.kairosId ?? undefined,
@@ -833,6 +834,7 @@ async function _toggleComplete() {
       narrative:     isDone ? `Marked "${_editItem.title}" incomplete` : `Completed "${_editItem.title}"`,
     })
     _close()
+    _callbacks.onCompleted?.(updated)
     _callbacks.onSaved?.()
   } catch (err) {
     console.error('Toggle complete failed:', err)

@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.26'
+const VERSION   = '0.23.28'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -233,7 +233,15 @@ async function refreshCalendarItems() {
 }
 
 function calendarModalCallbacks() {
-  return { onSaved: refreshCalendarItems, onDeleted: refreshCalendarItems }
+  return {
+    onSaved:    refreshCalendarItems,
+    onDeleted:  refreshCalendarItems,
+    onCompleted(updated) {
+      const idx = state.items.findIndex(i => i.id === updated.id)
+      if (idx >= 0) state.items[idx] = updated
+      renderItems(getVisibleItems())
+    },
+  }
 }
 
 // ── View switching ────────────────────────────────────────────────────────────
