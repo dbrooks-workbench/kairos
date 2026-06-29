@@ -115,17 +115,15 @@ export function nowTimestamp() {
 
 export function displayTimestamp(ts) {
   if (!ts) return ''
-  // Normalize: space → T, truncate fractional seconds to ≤3 digits.
-  // Firestore timestampValue returns microsecond precision (.123456Z), which
-  // Chrome's Date parser rejects — JS Date only accepts up to milliseconds.
+  // Normalize: trim whitespace, space → T, truncate fractional seconds to ≤3 digits.
+  // Old Firestore entries were stored with trailing spaces (e.g. "2026-05-22T11:00:00  ");
+  // .replace(' ','T') without trim turns the first trailing space into a second T, breaking parse.
   const normalized = String(ts)
+    .trim()
     .replace(' ', 'T')
     .replace(/(\.\d{3})\d+/, '$1')
   const d = new Date(normalized.includes('T') ? normalized : normalized + 'T00:00:00')
-  if (isNaN(d)) {
-    console.warn('[kairos] displayTimestamp could not parse:', JSON.stringify(ts), '(type:', typeof ts + ')')
-    return ts
-  }
+  if (isNaN(d)) return ts
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
