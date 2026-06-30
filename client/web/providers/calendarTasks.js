@@ -101,7 +101,7 @@ function _buildEventBody(taskData) {
     order:   String(order ?? 0),
   }
   if (loe)         props.loe         = loe
-  if (isUndated)   props.noDate      = 'true'
+  props.noDate = isUndated ? 'true' : null   // null clears the property via PATCH merge
   if (unprocessed) props.unprocessed = 'true'
 
   return {
