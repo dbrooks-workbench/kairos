@@ -2246,6 +2246,33 @@ body.resize-active * { cursor: ns-resize !important; }
   flex: none;   /* higher specificity (3 classes) beats span rule (2 classes + element) */
 }
 
+/* Recurring indicator — upper-right corner of all-day event chips (non-task) */
+.allday-recur-icon {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Recurring indicator — upper-right corner of timed event/task blocks */
+.timed-recur-icon {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: none;
+}
+/* Extra right padding on timed blocks so title text doesn't slide behind the icon */
+.cal-event.has-recur { padding-right: 14px; }
+
 /* Snooze button on calendar all-day task chips — always visible, pushed far right */
 .task-snooze {
   flex-shrink: 0;
