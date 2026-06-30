@@ -935,6 +935,7 @@ async function _saveTask(title) {
     webhookToken: wt,
     recurrence,
     completed:    _editItem?.status === 'COMPLETED',
+    completedAt:  _editItem?.metadata?.completedAt ?? null,
   }
 
   const token = await getToken()

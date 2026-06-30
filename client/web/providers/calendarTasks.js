@@ -70,7 +70,7 @@ function _buildEventBody(taskData) {
   const {
     title, body, kairosId, listId, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
-    location, unprocessed, webhookToken, recurrence, completed,
+    location, unprocessed, webhookToken, recurrence, completed, completedAt,
   } = taskData
 
   const isUndated = noDate || !date
@@ -102,6 +102,7 @@ function _buildEventBody(taskData) {
   }
   if (loe)         props.loe         = loe
   props.noDate = isUndated ? 'true' : null   // null clears the property via PATCH merge
+  if (completedAt) props.completedAt = completedAt
   if (unprocessed) props.unprocessed = 'true'
 
   return {
