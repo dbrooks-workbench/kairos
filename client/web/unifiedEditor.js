@@ -203,7 +203,7 @@ function _renderComments() {
       _renderComments()
       if (c._id && _editItem) {
         const token = await getToken()
-        if (token) deleteLogEntry(token, _editItem.id, c._id)
+        if (token) await deleteLogEntry(token, _editItem.id, c._id)
       }
     })
 
@@ -286,6 +286,7 @@ async function _addComment() {
   _renderComments()
   el('ue-activity-section').open = true
 
+  _originalTimestamps.add(ts)
   const token = await getToken()
   if (!token) return
   c._id = await appendLogEntry(token, {
@@ -298,7 +299,6 @@ async function _addComment() {
     narrative:     c.text,
     context:       '',
   })
-  _originalTimestamps.add(ts)
 }
 
 async function _logNewComments(token, itemId, title) {
