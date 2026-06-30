@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.29'
+const VERSION   = '0.23.30'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1266,6 +1266,8 @@ function renderMobileDay() {
   const dayEnd   = new Date(dayStart.getTime() + 86_400_000)
   const today    = new Date()
   const isToday  = sameDay(day, today)
+  const _now            = today
+  const _todayMidnight  = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 
   // Day label
   const labelEl = document.getElementById('mobile-day-label')
@@ -1290,11 +1292,61 @@ function renderMobileDay() {
     }
     if (!covers) continue
 
+    const isTask    = item.item_type === 'TASK' || (item.item_type === 'EVENT' && !!item.metadata?.task_calendar)
+    const isDone    = item.status === 'COMPLETED'
+    const isPast    = item.end ? new Date(item.end) <= _todayMidnight : new Date(item.start) < _todayMidnight
+    const isPastDue = isTask && isPast && !isDone
+
     const chip = document.createElement('div')
-    chip.className = `mobile-allday-chip${item.item_type === 'TASK' ? ' type-task' : ''}`
-    if (item.color) applyColor(chip, item.color)
-    chip.textContent = item.title
-    chip.title       = item.title
+    chip.className = [
+      'mobile-allday-chip',
+      isTask    ? 'type-task' : '',
+      isDone    ? 'completed' : '',
+      isPast && !isTask && !isDone ? 'is-past'  : '',
+      isPastDue                    ? 'past-due' : '',
+    ].filter(Boolean).join(' ')
+    chip.title = item.title
+
+    if (isTask) {
+      if (isDone) chip.style.background = 'transparent'
+      else if (item.color) applyColor(chip, item.color)
+
+      const check = document.createElement('button')
+      check.className = `task-check${isDone ? ' done' : ''}`
+      check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+      if (isDone) check.textContent = '✓'
+      check.addEventListener('click', e => {
+        e.stopPropagation()
+        if (item.item_type === 'TASK') handleToggleTask(item)
+        else                           handleToggleCommitment(item)
+      })
+
+      const titleSpan = document.createElement('span')
+      titleSpan.textContent = item.title
+
+      const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+      const parts = [check, titleSpan]
+      if (isRecurring) {
+        const icon = document.createElement('span')
+        icon.className   = 'task-recur-icon'
+        icon.textContent = '↻'
+        icon.title       = 'Recurring'
+        parts.push(icon)
+      }
+      chip.append(...parts)
+    } else {
+      if (item.color) applyColor(chip, item.color)
+      const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
+      chip.textContent = item.title
+      if (isRecurringEv) {
+        chip.style.paddingRight = '14px'
+        const icon = document.createElement('span')
+        icon.className   = 'allday-recur-icon'
+        icon.textContent = '↻'
+        chip.appendChild(icon)
+      }
+    }
+
     chip.addEventListener('click', () => {
       openEditorForEdit(item, calendarModalCallbacks())
     })
@@ -1319,8 +1371,17 @@ function renderMobileDay() {
     const topMin = start.getHours() * 60 + start.getMinutes()
     const durMin = Math.max((end - start) / 60_000, 15)
 
+    const _timedTask = item.item_type === 'TASK' || (item.item_type === 'EVENT' && !!item.metadata?.task_calendar)
+    const _timedDone = item.status === 'COMPLETED'
+    const _timedPast = end <= _now
+
     const eventEl = document.createElement('div')
-    eventEl.className = `mobile-cal-event${item.item_type === 'TASK' ? ' type-task' : ''}`
+    eventEl.className = [
+      'mobile-cal-event',
+      _timedTask                               ? 'type-task' : '',
+      _timedPast && !_timedTask && !_timedDone ? 'is-past'   : '',
+      _timedTask && _timedPast  && !_timedDone ? 'past-due'  : '',
+    ].filter(Boolean).join(' ')
     if (item.color) applyColor(eventEl, item.color)
     eventEl.style.top    = `${topMin}px`
     eventEl.style.height = `${durMin - 2}px`
@@ -1340,6 +1401,7 @@ function renderMobileDay() {
       }
     }
 
+    const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
     const titleEl = document.createElement('div')
     titleEl.className   = 'mobile-event-title'
     titleEl.textContent = item.title
@@ -1347,6 +1409,13 @@ function renderMobileDay() {
     timeEl.className   = 'mobile-event-time'
     timeEl.textContent = formatTimeRange(start, end)
     eventEl.append(titleEl, timeEl)
+    if (isRecurringEv) {
+      eventEl.classList.add('has-recur')
+      const icon = document.createElement('span')
+      icon.className   = 'timed-recur-icon'
+      icon.textContent = '↻'
+      eventEl.appendChild(icon)
+    }
     eventEl.title = item.title
 
     eventEl.addEventListener('click', () => {

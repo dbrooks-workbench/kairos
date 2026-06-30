@@ -2471,7 +2471,36 @@ body.resize-active * { cursor: ns-resize !important; }
   filter: saturate(0.33) brightness(1);
 }
 
-.mobile-allday-chip.type-task { background: var(--task-color); }
+.mobile-allday-chip.type-task {
+  background: var(--task-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Title span inside task chips — fills available space with ellipsis */
+.mobile-allday-chip.type-task span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Recur icon must not steal flex space from the title span */
+.mobile-allday-chip.type-task .task-recur-icon { flex: none; }
+
+/* Completed state — matches desktop .allday-event.completed */
+.mobile-allday-chip.completed {
+  background: transparent !important;
+  color: #b0b0b0;
+  filter: none;
+  border: 1px solid #ddd;
+}
+.mobile-allday-chip.completed span { text-decoration: line-through; }
+
+.mobile-allday-chip.is-past  { opacity: 0.45; }
+.mobile-allday-chip.past-due { box-shadow: 0 0 0 2px #c5221f; }
 
 #mobile-timed-area {
   flex-shrink: 0;
@@ -2516,6 +2545,9 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 
 .mobile-cal-event.type-task { background: var(--task-color); }
+
+.mobile-cal-event.is-past  { opacity: 0.45; }
+.mobile-cal-event.past-due { box-shadow: 0 0 0 2px #c5221f; }
 
 .mobile-event-title { font-weight: 600; line-height: 1.3; }
 .mobile-event-time  { font-weight: 400; opacity: 0.85; font-size: 11px; line-height: 1.3; }
