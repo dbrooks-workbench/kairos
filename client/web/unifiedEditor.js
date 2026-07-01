@@ -941,8 +941,6 @@ async function _saveTask(title) {
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
 
-  await _logNewComments(token, _editItem?.id ?? `gcal:${calId}:pending`, title)
-
   if (!_editItem) {
     await createTask(token, calId, taskData)
   } else {
@@ -1017,7 +1015,6 @@ async function _saveEvent(title) {
     const created = await createEvent(token, calId, body)
     savedId = created.id
   }
-  await _logNewComments(token, _editItem?.id ?? `gcal:${calId}:${savedId}`, title)
   _close()
   _callbacks.onSaved?.()
 }
@@ -1095,15 +1092,12 @@ async function _executeWithScope(scope) {
       if (scope === 'all')            await updateTask(token, calId, masterId, td)
       else if (scope === 'following') await _saveFollowingTask(token, calId, td)
       else                            await updateTask(token, calId, extId, td)
-      await _logNewComments(token, _editItem.id, td.title)
     } else {
       const calId   = _editItem.source.account_id
       const extId   = _editItem.source.external_id
-      const title   = pending.summary ?? _editItem.title
       if (scope === 'all')            await _saveAll(token, pending)
       else if (scope === 'following') await _saveFollowing(token, pending)
       else                            await updateEvent(token, calId, extId, pending)
-      await _logNewComments(token, _editItem.id, title)
     }
     _close()
     _callbacks.onSaved?.()
