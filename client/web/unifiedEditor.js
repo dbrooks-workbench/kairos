@@ -1095,7 +1095,7 @@ async function _executeWithScope(scope) {
       const { _taskData: td, calId } = pending
       const extId    = _editItem.source.external_id
       const masterId = _editItem.metadata.recurringEventId
-      if (scope === 'all')            await updateTask(token, calId, masterId, td)
+      if (scope === 'all')            await _saveAllTask(token, calId, td)
       else if (scope === 'following') await _saveFollowingTask(token, calId, td)
       else                            await updateTask(token, calId, extId, td)
     } else {
@@ -1152,6 +1152,32 @@ async function _saveFollowing(token, body) {
   }
   if (!body.recurrence && mrule) body.recurrence = [mrule.replace(/;?(UNTIL|COUNT)=[^;]*/g,'')]
   await createEvent(token, calId, body)
+}
+
+async function _saveAllTask(token, calId, taskData) {
+  const masterId   = _editItem.metadata.recurringEventId
+  const master     = await getEvent(token, calId, masterId)
+  // Use the master's start date so the series anchor is unchanged and BYDAY stays
+  // consistent with the master's recurrence rule (instance date may differ on exceptions).
+  const masterDate    = master.start?.date ?? master.start?.dateTime?.slice(0, 10)
+  const isAllDay      = !!master.start?.date
+  const masterTime    = master.start?.dateTime ? master.start.dateTime.slice(11, 16) : null
+  const masterEndTime = master.end?.dateTime   ? master.end.dateTime.slice(11, 16)   : null
+  // Rebuild RRULE using master's start date to keep BYDAY consistent
+  const freq  = el('ue-recur').value
+  const rrule = freq === 'CUSTOM' ? _preserveRrule
+    : freq ? (_buildRrule(freq, masterDate) ?? null) : null
+  const tdForMaster = {
+    ...taskData,
+    date:       masterDate,
+    noDate:     !masterDate,
+    allDay:     isAllDay,
+    startTime:  masterTime    ?? taskData.startTime,
+    endDate:    null,
+    endTime:    masterEndTime ?? taskData.endTime,
+    recurrence: rrule,
+  }
+  await updateTask(token, calId, masterId, tdForMaster)
 }
 
 async function _saveFollowingTask(token, calId, taskData) {
