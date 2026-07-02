@@ -184,7 +184,10 @@ async function _patch(token, calId, eventId, body) {
     `${BASE}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
     { method: 'PATCH', headers: _authHeaders(token), body: JSON.stringify(body) }
   )
-  if (!res.ok) throw new Error(`calendarTasks PATCH ${res.status}: ${res.statusText}`)
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`calendarTasks PATCH ${res.status}: ${detail || res.statusText}`)
+  }
   return res.json()
 }
 
@@ -193,7 +196,10 @@ async function _post(token, calId, body) {
     `${BASE}/calendars/${encodeURIComponent(calId)}/events`,
     { method: 'POST', headers: _authHeaders(token), body: JSON.stringify(body) }
   )
-  if (!res.ok) throw new Error(`calendarTasks POST ${res.status}: ${res.statusText}`)
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`calendarTasks POST ${res.status}: ${detail || res.statusText}`)
+  }
   return res.json()
 }
 
