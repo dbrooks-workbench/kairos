@@ -919,9 +919,15 @@ async function _saveTask(title) {
   _kairosId       = kairosId
   const wt        = await _ensureWebhookToken()
   const freq      = el('ue-recur').value
+  // recurrence=null → send recurrence:[] to CLEAR an existing rule; recurrence=undefined → omit entirely.
+  // Only send [] when the item was originally recurring (master has a rule); for non-recurring tasks
+  // and recurring instances (recurrence field is on master, not instance) omit it — Google rejects
+  // recurrence:[] combined with a start format change (e.g. timed→all-day) with "Invalid start time."
   const recurrence = freq === 'CUSTOM'
     ? undefined
-    : (freq ? (_buildRrule(freq, startDate) ?? null) : null)
+    : freq
+      ? (_buildRrule(freq, startDate) ?? null)
+      : (_editItem?.recurrence ? null : undefined)
 
   const taskData = {
     title,
@@ -1097,7 +1103,7 @@ async function _executeWithScope(scope) {
       const masterId = _editItem.metadata.recurringEventId
       if (scope === 'all')            await _saveAllTask(token, calId, td)
       else if (scope === 'following') await _saveFollowingTask(token, calId, td)
-      else                            await updateTask(token, calId, extId, td)
+      else                            await updateTask(token, calId, extId, { ...td, recurrence: undefined })
     } else {
       const calId   = _editItem.source.account_id
       const extId   = _editItem.source.external_id
