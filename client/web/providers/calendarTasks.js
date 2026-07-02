@@ -66,7 +66,7 @@ function _buildDescriptionPatch(item, nowCompleted) {
   return { description: rawBody ? `${rawBody}${footer}` : footer }
 }
 
-function _buildEventBody(taskData) {
+function _buildEventBody(taskData, isCreate = false) {
   const {
     title, body, kairosId, listId, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
@@ -101,7 +101,9 @@ function _buildEventBody(taskData) {
     order:   String(order ?? 0),
   }
   if (loe)         props.loe         = loe
-  props.noDate = isUndated ? 'true' : null   // null clears the property via PATCH merge
+  // null clears an existing noDate property via PATCH merge; omit on POST (Google rejects null in extendedProperties)
+  if (isUndated)        props.noDate = 'true'
+  else if (!isCreate)   props.noDate = null
   if (completedAt) props.completedAt = completedAt
   if (unprocessed) props.unprocessed = 'true'
 
@@ -198,7 +200,7 @@ async function _post(token, calId, body) {
 // ── Task CRUD ─────────────────────────────────────────────────────────────────
 
 export async function createTask(token, calendarId, taskData) {
-  const event = await _post(token, calendarId, _buildEventBody(taskData))
+  const event = await _post(token, calendarId, _buildEventBody(taskData, true))
   return normalizeTask(event, calendarId)
 }
 
