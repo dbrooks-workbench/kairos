@@ -672,9 +672,11 @@ export async function openEditor(opts = {}, callbacks = {}) {
   if (_rawMode) _switchToRich()
 
   el('ue-activity-section').hidden = true
-  el('ue-delete').hidden   = true
-  el('ue-complete').hidden = true
-  el('ue-snooze').hidden   = true
+  el('ue-delete').hidden       = true
+  el('ue-complete').hidden     = true
+  el('ue-snooze').hidden       = true
+  el('ue-save').disabled       = false
+  el('ue-save-error').hidden   = true
 
   _resetCustomRecur(today)
   await _populateCalendars(opts.calendarId ?? (mode === 'task' ? getTaskCalendars()[0] : null), opts.calendars ?? null)
@@ -880,12 +882,15 @@ async function _save() {
   const saveBtn = el('ue-save')
   if (saveBtn.disabled) return
   saveBtn.disabled = true
+  el('ue-save-error').hidden = true
 
   try {
     if (_mode === 'task') await _saveTask(title)
     else                  await _saveEvent(title)
   } catch (err) {
     console.error('Save failed:', err)
+    el('ue-save-error').textContent = err.message || 'Save failed'
+    el('ue-save-error').hidden = false
     saveBtn.disabled = false
   }
 }
@@ -901,6 +906,7 @@ async function _saveTask(title) {
   }
 
   const calId     = el('ue-calendar').value
+  if (!calId) { el('ue-save').disabled = false; return }
   const listId    = el('ue-list').value || null
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null

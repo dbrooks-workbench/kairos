@@ -1647,6 +1647,13 @@ body.resize-active * { cursor: ns-resize !important; }
   color: #c5221f;
 }
 
+.modal-save-error {
+  font-size: 11px;
+  color: #c5221f;
+  align-self: center;
+  max-width: 260px;
+}
+
 #modal-recur-preview-wrap { padding: 0 0 2px; }
 .recur-preview-btn {
   background: none;
