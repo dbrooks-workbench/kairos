@@ -279,7 +279,8 @@ async function _addComment() {
   const inp  = el('ue-comment-input')
   const text = inp.value.trim()
   if (!text || !_editItem) return
-  const ts = nowTimestamp()
+  const ts     = nowTimestamp()
+  const itemId = _editItem.id   // capture before awaits in case modal closes
   const c  = { _id: null, timestamp: ts, event_date: ts, text }
   _comments.push(c)
   inp.value = ''
@@ -290,15 +291,21 @@ async function _addComment() {
   const token = await getToken()
   if (!token) return
   c._id = await appendLogEntry(token, {
-    item_id:       _editItem.id,
-    kairosId:      _editItem.metadata?.kairosId ?? undefined,
+    item_id:       itemId,
+    kairosId:      _editItem?.metadata?.kairosId ?? undefined,
     item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
-    title:         _editItem.title,
+    title:         _editItem?.title ?? '',
     verb:          'comment',
     action_detail: { verb: 'comment', text: c.text },
     narrative:     c.text,
     context:       '',
   })
+  // Race condition: if the comment was deleted while appendLogEntry was writing,
+  // c._id was null so deleteLogEntry was never called — clean up now.
+  if (c._id && !_comments.includes(c)) {
+    const tk = await getToken()
+    if (tk) deleteLogEntry(tk, itemId, c._id)
+  }
 }
 
 async function _logNewComments(token, itemId, title) {
@@ -1005,8 +1012,10 @@ async function _saveEvent(title) {
   let rrule
   if (freq === 'CUSTOM') rrule = _preserveRrule ?? _buildCustomRrule()
   else                   rrule = _buildRrule(freq, startDate)
-  if (rrule)                     body.recurrence = [rrule]
-  else if (_editItem && !freq)   body.recurrence = []
+  if (rrule)
+    body.recurrence = [rrule]
+  else if (_editItem && !freq && _editItem.recurrence)
+    body.recurrence = []   // only clear if item was originally recurring
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
