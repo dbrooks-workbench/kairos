@@ -58,6 +58,28 @@ function _stripCompleteLink(html) {
   return html.replace(/<div[^>]*data-kairos="complete-link"[^>]*>[\s\S]*?<\/div>/gi, '').trim()
 }
 
+// Minimal normalization for GCal-native events on task calendars (no isTask='true').
+// Produces just enough structure for ensureFooters to process and promote them.
+function _normalizeNativeEvent(event, calId) {
+  if (event.status === 'cancelled') return null
+  const desc = event.description ?? ''
+  return {
+    item_type:  'EVENT',
+    title:      (event.summary ?? '').replace(/^✅\s*/, ''),
+    source:     { account_id: calId, external_id: event.id },
+    status:     'NEEDS_ACTION',
+    recurrence: event.recurrence?.[0] ?? null,
+    metadata: {
+      task_calendar: true,
+      kairosId:      null,
+      unprocessed:   false,
+      noDate:        false,
+      hasViewLink:   desc.includes('data-kairos="complete-link"') && desc.includes('/?task='),
+      body:          _stripCompleteLink(desc) || null,
+    },
+  }
+}
+
 function _extractWebhookToken(description) {
   if (!description) return null
   const m = description.match(/[?&]wt=([^&"<\s]+)/)
@@ -370,17 +392,28 @@ export async function getAllTaskEvents(token, calendarId) {
 // Patching the master propagates the footer to all future instances via inheritance,
 // avoiding the need to patch every individual recurring instance separately.
 export async function ensureAllFooters(token, calendarIds) {
-  const items = []
+  const timeMin = new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString()
+  const timeMax = new Date('2099-12-31T23:59:59Z').toISOString()
+  const items   = []
   for (const calId of calendarIds) {
-    // Omit singleEvents so recurring masters are returned instead of instances.
-    // orderBy requires singleEvents=true so it must be omitted here too.
+    // Pass 1: Kairos task events (have isTask='true'). Omit singleEvents so
+    // recurring masters are returned; patching a master propagates to instances.
     const masters = await _fetchPage(token, calId, new URLSearchParams({
       privateExtendedProperty: 'isTask=true',
-      timeMin:    new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString(),
-      timeMax:    new Date('2099-12-31T23:59:59Z').toISOString(),
-      maxResults: '2500',
-    })).catch(err => { console.warn('[ensureAllFooters] fetch failed:', calId, err.message); return [] })
+      timeMin, timeMax, maxResults: '2500',
+    })).catch(err => { console.warn('[ensureAllFooters] task fetch failed:', calId, err.message); return [] })
     items.push(...masters.map(e => normalizeTask(e, calId)))
+
+    // Pass 2: GCal-native events on this task calendar (no isTask='true').
+    // These were created directly in Google Calendar and need to be promoted.
+    const raw = await _fetchPage(token, calId, new URLSearchParams({
+      timeMin, timeMax, maxResults: '2500',
+    })).catch(err => { console.warn('[ensureAllFooters] native fetch failed:', calId, err.message); return [] })
+    const native = raw
+      .filter(e => e.extendedProperties?.private?.isTask !== 'true')
+      .map(e => _normalizeNativeEvent(e, calId))
+      .filter(Boolean)
+    items.push(...native)
   }
   await ensureFooters(token, items)
 }
@@ -408,7 +441,9 @@ export async function findTaskByKairosId(token, calendarIds, kairosId) {
 // Idempotent — items with hasViewLink=true are skipped. No-ops instantly when
 // everything is already up to date (no webhook-token fetch, no API calls).
 export async function ensureFooters(token, items) {
-  const tasks = items.filter(i => i.item_type === 'TASK')
+  const tasks = items.filter(i =>
+    i.item_type === 'TASK' || (i.item_type === 'EVENT' && i.metadata?.task_calendar)
+  )
   const stale = []
   for (const item of tasks) {
     const { kairosId, unprocessed, noDate, hasViewLink } = item.metadata ?? {}
@@ -416,10 +451,12 @@ export async function ensureFooters(token, items) {
     if (unprocessed)      skip = 'unprocessed'
     else if (noDate)      skip = 'noDate'
     else if (hasViewLink) skip = 'hasViewLink=true (footer current)'
-    const isMaster = item.recurrence !== null
-    const action   = skip ? `SKIP: ${skip}`
-      : kairosId   ? `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`
-      :              `PATCH + mint kairosId (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+    const isMaster    = item.recurrence !== null
+    const isNative    = item.item_type === 'EVENT'
+    const action      = skip ? `SKIP: ${skip}`
+      : isNative      ? `PATCH + promote to Kairos task (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+      : kairosId      ? `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+      :                 `PATCH + mint kairosId (${isMaster ? 'master→view-only' : 'instance→full footer'})`
     console.log(`[ensureFooters] ${item.title} (${item.source?.external_id}) — ${action}`)
     if (!skip) stale.push(item)
   }
