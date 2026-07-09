@@ -44,7 +44,7 @@ function _markDoneFooter(kairosId, webhookToken, completed) {
   const url     = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
   const label   = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
   const viewUrl = `${origin}/?task=${encodeURIComponent(kairosId)}`
-  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a><span style="margin:0 8px">·</span><a href="${viewUrl}" style="color:#1a73e8">View in Kairos</a></div>`
+  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8;display:block">${label}</a><a href="${viewUrl}" style="color:#1a73e8;display:block;margin-top:4px">View in Kairos</a></div>`
 }
 
 function _stripCompleteLink(html) {
