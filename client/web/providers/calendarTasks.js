@@ -41,16 +41,10 @@ function _nextDay(dateStr) {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
 }
 
-function _markDoneFooter(kairosId, webhookToken, completed, viewOnly = false) {
+function _markDoneFooter(kairosId) {
   const origin  = (typeof window !== 'undefined') ? window.location.origin : ''
   const viewUrl = `${origin}/?task=${encodeURIComponent(kairosId)}`
-  const viewLink = `<a href="${viewUrl}" style="color:#1a73e8;display:block">View in Kairos</a>`
-  if (viewOnly) {
-    return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888">${viewLink}</div>`
-  }
-  const url   = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
-  const label = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
-  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8;display:block">${label}</a><a href="${viewUrl}" style="color:#1a73e8;display:block;margin-top:4px">View in Kairos</a></div>`
+  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${viewUrl}" style="color:#1a73e8">View on Kairos</a></div>`
 }
 
 function _stripCompleteLink(html) {
@@ -62,19 +56,20 @@ function _stripCompleteLink(html) {
 // Produces just enough structure for ensureFooters to process and promote them.
 function _normalizeNativeEvent(event, calId) {
   if (event.status === 'cancelled') return null
-  const desc = event.description ?? ''
+  const desc        = event.description ?? ''
+  const isCompleted = (event.summary ?? '').startsWith(COMPLETED_PREFIX)
   return {
     item_type:  'EVENT',
     title:      (event.summary ?? '').replace(/^✅\s*/, ''),
     source:     { account_id: calId, external_id: event.id },
-    status:     'NEEDS_ACTION',
+    status:     isCompleted ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: event.recurrence?.[0] ?? null,
     metadata: {
       task_calendar: true,
       kairosId:      null,
       unprocessed:   false,
       noDate:        false,
-      hasViewLink:   desc.includes('data-kairos="complete-link"') && desc.includes('/?task='),
+      hasViewLink:   desc.includes('View on Kairos'),
       body:          _stripCompleteLink(desc) || null,
     },
   }
@@ -86,11 +81,11 @@ function _extractWebhookToken(description) {
   return m ? decodeURIComponent(m[1]) : null
 }
 
-function _buildDescriptionPatch(item, nowCompleted) {
+function _buildDescriptionPatch(item) {
   if (!item) return {}
-  const { kairosId, webhookToken, body } = item.metadata ?? {}
-  if (!kairosId || !webhookToken) return {}
-  const footer = _markDoneFooter(kairosId, webhookToken, nowCompleted)
+  const { kairosId, body } = item.metadata ?? {}
+  if (!kairosId) return {}
+  const footer = _markDoneFooter(kairosId)
   const rawBody = body ?? ''
   return { description: rawBody ? `${rawBody}${footer}` : footer }
 }
@@ -119,7 +114,7 @@ function _buildEventBody(taskData, isCreate = false) {
     endField   = { dateTime: `${endDate ?? dateStr}T${endTime ?? '09:30'}:00`, timeZone: tz }
   }
 
-  const footer = (!isUndated && webhookToken) ? _markDoneFooter(kairosId, webhookToken, !!completed) : ''
+  const footer = (!isUndated && kairosId) ? _markDoneFooter(kairosId) : ''
   const rawBody = _stripCompleteLink(body ?? '')
   const description = rawBody ? `${rawBody}${footer}` : (footer || undefined)
 
@@ -187,8 +182,7 @@ export function normalizeTask(event, calendarId) {
     metadata: {
       kairosId:         p.kairosId    ?? null,
       webhookToken:     _extractWebhookToken(event.description ?? null),
-      hasViewLink:      (event.description ?? '').includes('data-kairos="complete-link"') &&
-                        (event.description ?? '').includes('/?task='),
+      hasViewLink:      (event.description ?? '').includes('View on Kairos'),
       listId:           p.listId      || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
@@ -451,49 +445,31 @@ export async function ensureFooters(token, items) {
     if (unprocessed)      skip = 'unprocessed'
     else if (noDate)      skip = 'noDate'
     else if (hasViewLink) skip = 'hasViewLink=true (footer current)'
-    const isMaster    = item.recurrence !== null
-    const isNative    = item.item_type === 'EVENT'
-    const action      = skip ? `SKIP: ${skip}`
-      : isNative      ? `PATCH + promote to Kairos task (${isMaster ? 'master→view-only' : 'instance→full footer'})`
-      : kairosId      ? `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`
-      :                 `PATCH + mint kairosId (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+    const isMaster = item.recurrence !== null
+    const isNative = item.item_type === 'EVENT'
+    const action   = skip ? `SKIP: ${skip}`
+      : isNative   ? `PATCH + promote to Kairos task (${isMaster ? 'master' : 'instance'})`
+      : kairosId   ? `PATCH (${isMaster ? 'master' : 'instance/single'})`
+      :              `PATCH + mint kairosId (${isMaster ? 'master' : 'instance/single'})`
     console.log(`[ensureFooters] ${item.title} (${item.source?.external_id}) — ${action}`)
     if (!skip) stale.push(item)
   }
-  const staleMasters   = stale.filter(i => i.recurrence !== null)
-  const staleInstances = stale.filter(i => i.recurrence === null)
-  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer (${staleMasters.length} masters, ${staleInstances.length} instances)`)
+  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer update`)
   if (!stale.length) return
 
-  // Webhook token only needed for instances/singles (masters get view-only footer).
-  let wt = null
-  if (staleInstances.length) {
-    try {
-      const r = await fetch('/api/webhook-token', { credentials: 'include' })
-      if (r.ok) wt = (await r.json()).token ?? null
-    } catch (err) {
-      console.warn('[ensureFooters] webhook-token fetch failed:', err.message)
-    }
-    if (!wt) { console.warn('[ensureFooters] no webhook token, aborting instance patches'); }
-  }
-
   let patched = 0
-  const toPatch = [
-    ...staleMasters,
-    ...(wt ? staleInstances : []),
-  ]
   // Sequential with 150 ms gap to stay within Google Calendar API rate limits.
-  for (const item of toPatch) {
+  for (const item of stale) {
     const kairosId          = item.metadata.kairosId ?? generateKairosId()
     const isRecurringMaster = item.recurrence !== null
     const completed         = !isRecurringMaster && item.status === 'COMPLETED'
-    const footer            = _markDoneFooter(kairosId, wt, completed, isRecurringMaster)
+    const footer            = _markDoneFooter(kairosId)
     const rawBody           = item.metadata.body ?? ''
     const body              = {
       summary:     _applyPrefix(item.title, completed),
       description: rawBody ? `${rawBody}${footer}` : footer,
     }
-    if (!item.metadata.kairosId) {
+    if (!item.metadata.kairosId || item.item_type === 'EVENT') {
       body.extendedProperties = { private: { kairosId, isTask: 'true' } }
     }
     try {
@@ -504,7 +480,7 @@ export async function ensureFooters(token, items) {
     }
     await new Promise(r => setTimeout(r, 150))
   }
-  console.log(`[ensureFooters] patched ${patched}/${toPatch.length}`)
+  console.log(`[ensureFooters] patched ${patched}/${stale.length}`)
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.
