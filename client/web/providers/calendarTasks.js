@@ -180,13 +180,15 @@ function _authHeaders(token) {
 }
 
 async function _patch(token, calId, eventId, body) {
+  const serialized = JSON.stringify(body)
+  console.log('[calendarTasks PATCH]', eventId, body)
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
-    { method: 'PATCH', headers: _authHeaders(token), body: JSON.stringify(body) }
+    { method: 'PATCH', headers: _authHeaders(token), body: serialized }
   )
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`calendarTasks PATCH ${res.status}: ${detail || res.statusText}`)
+    throw new Error(`calendarTasks PATCH ${res.status}: ${detail || res.statusText}\nRequest: ${serialized}`)
   }
   return res.json()
 }
