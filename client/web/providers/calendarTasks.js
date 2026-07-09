@@ -40,10 +40,11 @@ function _nextDay(dateStr) {
 }
 
 function _markDoneFooter(kairosId, webhookToken, completed) {
-  const origin = (typeof window !== 'undefined') ? window.location.origin : ''
-  const url    = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
-  const label  = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
-  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a></div>`
+  const origin  = (typeof window !== 'undefined') ? window.location.origin : ''
+  const url     = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
+  const label   = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
+  const viewUrl = `${origin}/?task=${encodeURIComponent(kairosId)}`
+  return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8">${label}</a><span style="margin:0 8px">·</span><a href="${viewUrl}" style="color:#1a73e8">View in Kairos</a></div>`
 }
 
 function _stripCompleteLink(html) {
@@ -158,6 +159,7 @@ export function normalizeTask(event, calendarId) {
     metadata: {
       kairosId:         p.kairosId    ?? null,
       webhookToken:     _extractWebhookToken(event.description ?? null),
+      hasViewLink:      (event.description ?? '').includes('?task='),
       listId:           p.listId      || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
@@ -354,6 +356,59 @@ export async function getAllTaskEvents(token, calendarId) {
   })
 
   return [...tagged, ...untagged].map(e => normalizeTask(e, calendarId))
+}
+
+// Returns the first task event with the given kairosId, searching across the
+// supplied calendar IDs. Used for deep-link navigation from "View in Kairos".
+export async function findTaskByKairosId(token, calendarIds, kairosId) {
+  const params = new URLSearchParams({
+    privateExtendedProperty: `kairosId=${kairosId}`,
+    timeMin:      new Date(KAIROS_UNDATED_SENTINEL).toISOString(),
+    timeMax:      new Date('2099-12-31T23:59:59Z').toISOString(),
+    singleEvents: 'true',
+    orderBy:      'startTime',
+    maxResults:   '1',
+  })
+  for (const calId of calendarIds) {
+    const items = await _fetchPage(token, calId, params).catch(() => [])
+    if (items.length) return normalizeTask(items[0], calId)
+  }
+  return null
+}
+
+// Backfill: patch any task events in `items` that are missing the "View in Kairos"
+// footer link, building the correct description and title prefix for each.
+// Idempotent — items with hasViewLink=true are skipped. No-ops instantly when
+// everything is already up to date (no webhook-token fetch, no API calls).
+export async function ensureFooters(token, items) {
+  const stale = items.filter(item =>
+    item.item_type === 'TASK' &&
+    item.metadata?.kairosId &&
+    !item.metadata?.unprocessed &&
+    !item.metadata?.noDate &&
+    !item.metadata?.hasViewLink
+  )
+  if (!stale.length) return
+
+  let wt = null
+  try {
+    const r = await fetch('/api/webhook-token', { credentials: 'include' })
+    if (r.ok) wt = (await r.json()).token ?? null
+  } catch {}
+  if (!wt) return
+
+  for (let i = 0; i < stale.length; i += 5) {
+    await Promise.all(stale.slice(i, i + 5).map(async item => {
+      const { kairosId } = item.metadata
+      const completed    = item.status === 'COMPLETED'
+      const footer       = _markDoneFooter(kairosId, wt, completed)
+      const rawBody      = item.metadata.body ?? ''
+      await _patch(token, item.source.account_id, item.source.external_id, {
+        summary:     _applyPrefix(item.title, completed),
+        description: rawBody ? `${rawBody}${footer}` : footer,
+      }).catch(err => console.warn('[ensureFooters]', kairosId, err.message))
+    }))
+  }
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.

@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate } from './providers/calendarTasks.js'
+import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.41'
+const VERSION   = '0.23.42'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -384,6 +384,7 @@ async function loadBoardData() {
     ])
     state.taskLists = getAllLists()
     renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+    ensureFooters(token, state.boardItems).catch(console.warn)
   } catch (err) {
     console.error('Board data load failed:', err)
   }
@@ -1679,4 +1680,23 @@ render().then(async () => {
 
   runSpawnScan()
   startPolling(120_000)
+
+  // Background footer backfill for task events in the current week view
+  getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
+
+  // Deep-link: ?task=<kairosId> opens the task editor directly (written into the
+  // "View in Kairos" footer link so native GCal clients can jump back to Kairos)
+  const sp          = new URLSearchParams(window.location.search)
+  const deepLinkId  = sp.get('task')
+  if (deepLinkId) {
+    history.replaceState({}, '', '/')
+    const token = await getToken()
+    if (token) {
+      let task = state.items.find(i => i.metadata?.kairosId === deepLinkId)
+      if (!task && state.taskCalendars.size) {
+        task = await findTaskByKairosId(token, [...state.taskCalendars], deepLinkId).catch(() => null)
+      }
+      if (task) openEditorForEdit(task, { onSaved: refreshCalendarItems })
+    }
+  }
 })
