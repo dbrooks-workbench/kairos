@@ -1,3 +1,5 @@
+import { generateKairosId } from './driveTaskMeta.js'
+
 // Task events stored in Google Calendar using extendedProperties.private.
 // isTask='true' marks the event as a Kairos task (never a regular event).
 //
@@ -411,15 +413,14 @@ export async function ensureFooters(token, items) {
   for (const item of tasks) {
     const { kairosId, unprocessed, noDate, hasViewLink } = item.metadata ?? {}
     let skip = null
-    if (!kairosId)    skip = 'no kairosId'
-    else if (unprocessed) skip = 'unprocessed'
+    if (unprocessed)      skip = 'unprocessed'
     else if (noDate)      skip = 'noDate'
     else if (hasViewLink) skip = 'hasViewLink=true (footer current)'
     const isMaster = item.recurrence !== null
-    console.log(
-      `[ensureFooters] ${item.title} (${item.source?.external_id}) — ` +
-      (skip ? `SKIP: ${skip}` : `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`)
-    )
+    const action   = skip ? `SKIP: ${skip}`
+      : kairosId   ? `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+      :              `PATCH + mint kairosId (${isMaster ? 'master→view-only' : 'instance→full footer'})`
+    console.log(`[ensureFooters] ${item.title} (${item.source?.external_id}) — ${action}`)
     if (!skip) stale.push(item)
   }
   const staleMasters   = stale.filter(i => i.recurrence !== null)
@@ -446,16 +447,20 @@ export async function ensureFooters(token, items) {
   ]
   // Sequential with 150 ms gap to stay within Google Calendar API rate limits.
   for (const item of toPatch) {
-    const { kairosId }      = item.metadata
+    const kairosId          = item.metadata.kairosId ?? generateKairosId()
     const isRecurringMaster = item.recurrence !== null
     const completed         = !isRecurringMaster && item.status === 'COMPLETED'
     const footer            = _markDoneFooter(kairosId, wt, completed, isRecurringMaster)
     const rawBody           = item.metadata.body ?? ''
+    const body              = {
+      summary:     _applyPrefix(item.title, completed),
+      description: rawBody ? `${rawBody}${footer}` : footer,
+    }
+    if (!item.metadata.kairosId) {
+      body.extendedProperties = { private: { kairosId, isTask: 'true' } }
+    }
     try {
-      await _patch(token, item.source.account_id, item.source.external_id, {
-        summary:     _applyPrefix(item.title, completed),
-        description: rawBody ? `${rawBody}${footer}` : footer,
-      })
+      await _patch(token, item.source.account_id, item.source.external_id, body)
       patched++
     } catch (err) {
       console.warn('[ensureFooters] patch failed:', kairosId, err.message)
