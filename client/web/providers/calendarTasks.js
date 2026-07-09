@@ -381,34 +381,44 @@ export async function findTaskByKairosId(token, calendarIds, kairosId) {
 // Idempotent — items with hasViewLink=true are skipped. No-ops instantly when
 // everything is already up to date (no webhook-token fetch, no API calls).
 export async function ensureFooters(token, items) {
-  const stale = items.filter(item =>
-    item.item_type === 'TASK' &&
+  const tasks = items.filter(i => i.item_type === 'TASK')
+  const stale = tasks.filter(item =>
     item.metadata?.kairosId &&
     !item.metadata?.unprocessed &&
     !item.metadata?.noDate &&
     !item.metadata?.hasViewLink
   )
+  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer update`)
   if (!stale.length) return
 
   let wt = null
   try {
     const r = await fetch('/api/webhook-token', { credentials: 'include' })
     if (r.ok) wt = (await r.json()).token ?? null
-  } catch {}
-  if (!wt) return
+  } catch (err) {
+    console.warn('[ensureFooters] webhook-token fetch failed:', err.message)
+  }
+  if (!wt) { console.warn('[ensureFooters] no webhook token, aborting'); return }
 
+  let patched = 0
   for (let i = 0; i < stale.length; i += 5) {
     await Promise.all(stale.slice(i, i + 5).map(async item => {
       const { kairosId } = item.metadata
       const completed    = item.status === 'COMPLETED'
       const footer       = _markDoneFooter(kairosId, wt, completed)
       const rawBody      = item.metadata.body ?? ''
-      await _patch(token, item.source.account_id, item.source.external_id, {
-        summary:     _applyPrefix(item.title, completed),
-        description: rawBody ? `${rawBody}${footer}` : footer,
-      }).catch(err => console.warn('[ensureFooters]', kairosId, err.message))
+      try {
+        await _patch(token, item.source.account_id, item.source.external_id, {
+          summary:     _applyPrefix(item.title, completed),
+          description: rawBody ? `${rawBody}${footer}` : footer,
+        })
+        patched++
+      } catch (err) {
+        console.warn('[ensureFooters] patch failed:', kairosId, err.message)
+      }
     }))
   }
+  console.log(`[ensureFooters] patched ${patched}/${stale.length}`)
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.

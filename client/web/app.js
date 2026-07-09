@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.43'
+const VERSION   = '0.23.44'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1595,6 +1595,7 @@ async function render() {
     ])
     state.items = items
     renderItems(getVisibleItems())
+    getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
   } catch (err) {
     console.error('Render failed:', err)
   }
@@ -1680,9 +1681,6 @@ render().then(async () => {
 
   runSpawnScan()
   startPolling(120_000)
-
-  // Background footer backfill for task events in the current week view
-  getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
 
   // Deep-link: ?task=<kairosId> opens the task editor directly (written into the
   // "View in Kairos" footer link so native GCal clients can jump back to Kairos)
