@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.51'
+const VERSION   = '0.23.52'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -107,8 +107,10 @@ async function loadCalendars() {
 async function fetchItems(start, end) {
   const token = await getToken()
   if (!token) return []
-  return getEvents(token, start, end)
+  const items = await getEvents(token, start, end)
     .catch(err => { console.error('Calendar events fetch failed:', err); return [] })
+  _weekCache.set(start.getTime(), { items, ts: Date.now() })
+  return items
 }
 
 async function handleToggleTask(item) {
@@ -208,20 +210,54 @@ async function handleSnoozeCommitment(item, n, newDate, dateLabel) {
 }
 
 // ── Loading indicator ─────────────────────────────────────────────────────────
-// Ref-counted: bar shows whenever any fetch is in-flight, hides when all settle.
+// Ref-counted: bar shows whenever any foreground fetch is in-flight.
+// Background preload fetches bypass it via _bgFetchCount.
 
 function showLoading() { document.getElementById('loading-bar').classList.add('active') }
 function hideLoading() { document.getElementById('loading-bar').classList.remove('active') }
 
-let _pending = 0
-const _origFetch = window.fetch.bind(window)
+let _pending      = 0
+let _bgFetchCount = 0
+const _origFetch  = window.fetch.bind(window)
 window.fetch = async (...args) => {
+  if (_bgFetchCount > 0) return _origFetch(...args)
   if (++_pending === 1) showLoading()
   try {
     return await _origFetch(...args)
   } finally {
     if (--_pending <= 0) { _pending = 0; hideLoading() }
   }
+}
+
+// ── Week cache ────────────────────────────────────────────────────────────────
+// Keyed by weekStart.getTime(). Preloaded adjacent weeks render instantly on
+// navigation. Populated by fetchItems() and preload; TTL = 5 minutes.
+
+const _weekCache  = new Map() // ts → { items, ts }
+const _CACHE_TTL  = 5 * 60 * 1000
+
+async function _preloadWeek(token, weekStart) {
+  const key = weekStart.getTime()
+  const hit = _weekCache.get(key)
+  if (hit && Date.now() - hit.ts < _CACHE_TTL) return
+  _bgFetchCount++
+  try {
+    const items = await getEvents(token, weekStart, addDays(weekStart, 7))
+    _weekCache.set(key, { items, ts: Date.now() })
+  } catch {
+    // preload failures are silent — next navigation will fetch normally
+  } finally {
+    _bgFetchCount--
+  }
+}
+
+function preloadAdjacentWeeks() {
+  getToken().then(async t => {
+    if (!t) return
+    await _preloadWeek(t, addDays(state.weekStart,  7))
+    await _preloadWeek(t, addDays(state.weekStart, 14))
+    await _preloadWeek(t, addDays(state.weekStart, -7))
+  })
 }
 
 // ── Calendar-view modal callbacks ─────────────────────────────────────────────
@@ -1583,22 +1619,34 @@ async function render() {
   loadCalendars()  // async, populates calendar picker in background
 
   try {
-    const end = addDays(state.weekStart, 7)
-    // Fetch items, task lists, and prefs in parallel
-    const [items] = await Promise.all([
-      fetchItems(state.weekStart, end),
-      getToken().then(t => t ? loadPrefs(t).then(() => {
-        state.hiddenCalendars = new Set(getHiddenCalendars())
-        state.taskCalendars   = new Set(getTaskCalendars())
-      }) : null),
-      getToken().then(t => t ? loadLists(t) : null),
-    ])
-    state.items = items
-    renderItems(getVisibleItems())
-    getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
+    const end      = addDays(state.weekStart, 7)
+    const cacheKey = state.weekStart.getTime()
+    const hit      = _weekCache.get(cacheKey)
+
+    if (hit && Date.now() - hit.ts < _CACHE_TTL) {
+      // Fast path: serve from preloaded cache — navigation feels instant
+      state.items = hit.items
+      renderItems(getVisibleItems())
+      getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
+    } else {
+      // Cold path: fetch items, prefs, and lists in parallel
+      const [items] = await Promise.all([
+        fetchItems(state.weekStart, end),
+        getToken().then(t => t ? loadPrefs(t).then(() => {
+          state.hiddenCalendars = new Set(getHiddenCalendars())
+          state.taskCalendars   = new Set(getTaskCalendars())
+        }) : null),
+        getToken().then(t => t ? loadLists(t) : null),
+      ])
+      state.items = items
+      renderItems(getVisibleItems())
+      getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
+    }
   } catch (err) {
     console.error('Render failed:', err)
   }
+
+  preloadAdjacentWeeks()
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────

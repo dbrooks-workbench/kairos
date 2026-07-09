@@ -206,7 +206,6 @@ function _authHeaders(token) {
 
 async function _patch(token, calId, eventId, body) {
   const serialized = JSON.stringify(body)
-  console.log('[calendarTasks PATCH]', eventId, body)
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
     { method: 'PATCH', headers: _authHeaders(token), body: serialized }
@@ -440,24 +439,11 @@ export async function ensureFooters(token, items) {
   )
   const stale = []
   for (const item of tasks) {
-    const { kairosId, unprocessed, noDate, hasViewLink } = item.metadata ?? {}
-    let skip = null
-    if (unprocessed)      skip = 'unprocessed'
-    else if (noDate)      skip = 'noDate'
-    else if (hasViewLink) skip = 'hasViewLink=true (footer current)'
-    const isMaster = item.recurrence !== null
-    const isNative = item.item_type === 'EVENT'
-    const action   = skip ? `SKIP: ${skip}`
-      : isNative   ? `PATCH + promote to Kairos task (${isMaster ? 'master' : 'instance'})`
-      : kairosId   ? `PATCH (${isMaster ? 'master' : 'instance/single'})`
-      :              `PATCH + mint kairosId (${isMaster ? 'master' : 'instance/single'})`
-    console.log(`[ensureFooters] ${item.title} (${item.source?.external_id}) — ${action}`)
-    if (!skip) stale.push(item)
+    const { unprocessed, noDate, hasViewLink } = item.metadata ?? {}
+    if (!unprocessed && !noDate && !hasViewLink) stale.push(item)
   }
-  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer update`)
   if (!stale.length) return
 
-  let patched = 0
   // Sequential with 150 ms gap to stay within Google Calendar API rate limits.
   for (const item of stale) {
     const kairosId          = item.metadata.kairosId ?? generateKairosId()
@@ -474,13 +460,11 @@ export async function ensureFooters(token, items) {
     }
     try {
       await _patch(token, item.source.account_id, item.source.external_id, body)
-      patched++
     } catch (err) {
       console.warn('[ensureFooters] patch failed:', kairosId, err.message)
     }
     await new Promise(r => setTimeout(r, 150))
   }
-  console.log(`[ensureFooters] patched ${patched}/${stale.length}`)
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.
