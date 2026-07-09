@@ -39,11 +39,15 @@ function _nextDay(dateStr) {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
 }
 
-function _markDoneFooter(kairosId, webhookToken, completed) {
+function _markDoneFooter(kairosId, webhookToken, completed, viewOnly = false) {
   const origin  = (typeof window !== 'undefined') ? window.location.origin : ''
-  const url     = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
-  const label   = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
   const viewUrl = `${origin}/?task=${encodeURIComponent(kairosId)}`
+  const viewLink = `<a href="${viewUrl}" style="color:#1a73e8;display:block">View in Kairos</a>`
+  if (viewOnly) {
+    return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888">${viewLink}</div>`
+  }
+  const url   = `${origin}/api/complete?kairosId=${encodeURIComponent(kairosId)}&wt=${encodeURIComponent(webhookToken)}`
+  const label = completed ? '↩ Mark as incomplete in Kairos' : '✓ Mark as complete in Kairos'
   return `<div data-kairos="complete-link" style="margin-top:12px;border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#888"><a href="${url}" style="color:#1a73e8;display:block">${label}</a><a href="${viewUrl}" style="color:#1a73e8;display:block;margin-top:4px">View in Kairos</a></div>`
 }
 
@@ -159,7 +163,8 @@ export function normalizeTask(event, calendarId) {
     metadata: {
       kairosId:         p.kairosId    ?? null,
       webhookToken:     _extractWebhookToken(event.description ?? null),
-      hasViewLink:      (event.description ?? '').includes('?task='),
+      hasViewLink:      (event.description ?? '').includes('data-kairos="complete-link"') &&
+                        (event.description ?? '').includes('/?task='),
       listId:           p.listId      || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
@@ -402,43 +407,62 @@ export async function findTaskByKairosId(token, calendarIds, kairosId) {
 // everything is already up to date (no webhook-token fetch, no API calls).
 export async function ensureFooters(token, items) {
   const tasks = items.filter(i => i.item_type === 'TASK')
-  const stale = tasks.filter(item =>
-    item.metadata?.kairosId &&
-    !item.metadata?.unprocessed &&
-    !item.metadata?.noDate &&
-    !item.metadata?.hasViewLink
-  )
-  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer update`)
+  const stale = []
+  for (const item of tasks) {
+    const { kairosId, unprocessed, noDate, hasViewLink } = item.metadata ?? {}
+    let skip = null
+    if (!kairosId)    skip = 'no kairosId'
+    else if (unprocessed) skip = 'unprocessed'
+    else if (noDate)      skip = 'noDate'
+    else if (hasViewLink) skip = 'hasViewLink=true (footer current)'
+    const isMaster = item.recurrence !== null
+    console.log(
+      `[ensureFooters] ${item.title} (${item.source?.external_id}) — ` +
+      (skip ? `SKIP: ${skip}` : `PATCH (${isMaster ? 'master→view-only' : 'instance→full footer'})`)
+    )
+    if (!skip) stale.push(item)
+  }
+  const staleMasters   = stale.filter(i => i.recurrence !== null)
+  const staleInstances = stale.filter(i => i.recurrence === null)
+  console.log(`[ensureFooters] ${tasks.length} tasks, ${stale.length} need footer (${staleMasters.length} masters, ${staleInstances.length} instances)`)
   if (!stale.length) return
 
+  // Webhook token only needed for instances/singles (masters get view-only footer).
   let wt = null
-  try {
-    const r = await fetch('/api/webhook-token', { credentials: 'include' })
-    if (r.ok) wt = (await r.json()).token ?? null
-  } catch (err) {
-    console.warn('[ensureFooters] webhook-token fetch failed:', err.message)
+  if (staleInstances.length) {
+    try {
+      const r = await fetch('/api/webhook-token', { credentials: 'include' })
+      if (r.ok) wt = (await r.json()).token ?? null
+    } catch (err) {
+      console.warn('[ensureFooters] webhook-token fetch failed:', err.message)
+    }
+    if (!wt) { console.warn('[ensureFooters] no webhook token, aborting instance patches'); }
   }
-  if (!wt) { console.warn('[ensureFooters] no webhook token, aborting'); return }
 
   let patched = 0
-  for (let i = 0; i < stale.length; i += 5) {
-    await Promise.all(stale.slice(i, i + 5).map(async item => {
-      const { kairosId } = item.metadata
-      const completed    = item.status === 'COMPLETED'
-      const footer       = _markDoneFooter(kairosId, wt, completed)
-      const rawBody      = item.metadata.body ?? ''
-      try {
-        await _patch(token, item.source.account_id, item.source.external_id, {
-          summary:     _applyPrefix(item.title, completed),
-          description: rawBody ? `${rawBody}${footer}` : footer,
-        })
-        patched++
-      } catch (err) {
-        console.warn('[ensureFooters] patch failed:', kairosId, err.message)
-      }
-    }))
+  const toPatch = [
+    ...staleMasters,
+    ...(wt ? staleInstances : []),
+  ]
+  // Sequential with 150 ms gap to stay within Google Calendar API rate limits.
+  for (const item of toPatch) {
+    const { kairosId }      = item.metadata
+    const isRecurringMaster = item.recurrence !== null
+    const completed         = !isRecurringMaster && item.status === 'COMPLETED'
+    const footer            = _markDoneFooter(kairosId, wt, completed, isRecurringMaster)
+    const rawBody           = item.metadata.body ?? ''
+    try {
+      await _patch(token, item.source.account_id, item.source.external_id, {
+        summary:     _applyPrefix(item.title, completed),
+        description: rawBody ? `${rawBody}${footer}` : footer,
+      })
+      patched++
+    } catch (err) {
+      console.warn('[ensureFooters] patch failed:', kairosId, err.message)
+    }
+    await new Promise(r => setTimeout(r, 150))
   }
-  console.log(`[ensureFooters] patched ${patched}/${stale.length}`)
+  console.log(`[ensureFooters] patched ${patched}/${toPatch.length}`)
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.
