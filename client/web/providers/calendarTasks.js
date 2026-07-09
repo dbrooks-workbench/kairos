@@ -358,6 +358,26 @@ export async function getAllTaskEvents(token, calendarId) {
   return [...tagged, ...untagged].map(e => normalizeTask(e, calendarId))
 }
 
+// Global one-time backfill: fetches all task MASTER events (not instances) across
+// the given calendars and patches any that are missing the "View in Kairos" footer.
+// Patching the master propagates the footer to all future instances via inheritance,
+// avoiding the need to patch every individual recurring instance separately.
+export async function ensureAllFooters(token, calendarIds) {
+  const items = []
+  for (const calId of calendarIds) {
+    // Omit singleEvents so recurring masters are returned instead of instances.
+    // orderBy requires singleEvents=true so it must be omitted here too.
+    const masters = await _fetchPage(token, calId, new URLSearchParams({
+      privateExtendedProperty: 'isTask=true',
+      timeMin:    new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString(),
+      timeMax:    new Date('2099-12-31T23:59:59Z').toISOString(),
+      maxResults: '2500',
+    })).catch(err => { console.warn('[ensureAllFooters] fetch failed:', calId, err.message); return [] })
+    items.push(...masters.map(e => normalizeTask(e, calId)))
+  }
+  await ensureFooters(token, items)
+}
+
 // Returns the first task event with the given kairosId, searching across the
 // supplied calendar IDs. Used for deep-link navigation from "View in Kairos".
 export async function findTaskByKairosId(token, calendarIds, kairosId) {

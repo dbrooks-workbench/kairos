@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters } from './providers/calendarTasks.js'
+import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.44'
+const VERSION   = '0.23.45'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1681,6 +1681,13 @@ render().then(async () => {
 
   runSpawnScan()
   startPolling(120_000)
+
+  // One-time global footer backfill — fetches masters (not instances) so recurring
+  // tasks propagate the footer to all future instances via description inheritance.
+  getToken().then(t => {
+    if (t && state.taskCalendars.size)
+      ensureAllFooters(t, [...state.taskCalendars]).catch(console.warn)
+  })
 
   // Deep-link: ?task=<kairosId> opens the task editor directly (written into the
   // "View in Kairos" footer link so native GCal clients can jump back to Kairos)
