@@ -59,11 +59,13 @@ function _stripCompleteLink(html) {
 // Produces just enough structure for ensureFooters to process and promote them.
 function _normalizeNativeEvent(event, calId) {
   if (event.status === 'cancelled') return null
+  const rawSummary  = event.summary ?? ''
   const desc        = event.description ?? ''
-  const isCompleted = (event.summary ?? '').startsWith(COMPLETED_PREFIX)
+  const isCompleted = rawSummary.startsWith(COMPLETED_PREFIX)
+  const isPending   = rawSummary.startsWith(PENDING_PREFIX)
   return {
     item_type:  'EVENT',
-    title:      _stripPrefix(event.summary ?? ''),
+    title:      _stripPrefix(rawSummary),
     source:     { account_id: calId, external_id: event.id },
     status:     isCompleted ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: event.recurrence?.[0] ?? null,
@@ -73,6 +75,7 @@ function _normalizeNativeEvent(event, calId) {
       unprocessed:   false,
       noDate:        false,
       hasViewLink:   desc.includes('View on Kairos'),
+      hasPrefix:     isCompleted || isPending,
       body:          _stripCompleteLink(desc) || null,
     },
   }
@@ -155,6 +158,7 @@ export function normalizeTask(event, calendarId) {
   const completedAt = p.completedAt || null
 
   const rawTitle   = event.summary ?? ''
+  const hasPrefix  = /^(?:✅|☐)/.test(rawTitle)
   const cleanTitle = _stripPrefix(rawTitle) || '(No title)'
 
   const allDay = !!event.start?.date
@@ -184,6 +188,7 @@ export function normalizeTask(event, calendarId) {
       kairosId:         p.kairosId    ?? null,
       webhookToken:     _extractWebhookToken(event.description ?? null),
       hasViewLink:      (event.description ?? '').includes('View on Kairos'),
+      hasPrefix,
       listId:           p.listId      || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
@@ -430,18 +435,30 @@ export async function findTaskByKairosId(token, calendarIds, kairosId) {
   return null
 }
 
-// Backfill: patch any task events in `items` that are missing the "View in Kairos"
-// footer link, building the correct description and title prefix for each.
-// Idempotent — items with hasViewLink=true are skipped. No-ops instantly when
-// everything is already up to date (no webhook-token fetch, no API calls).
+// Backfill: patch any task events in `items` that are missing the "View on Kairos"
+// footer link or the correct title prefix (☐/✅).
+// Idempotent — skips items that have both. No-ops instantly when everything is current.
 export async function ensureFooters(token, items) {
   const tasks = items.filter(i =>
     i.item_type === 'TASK' || (i.item_type === 'EVENT' && i.metadata?.task_calendar)
   )
   const stale = []
   for (const item of tasks) {
-    const { unprocessed, noDate, hasViewLink } = item.metadata ?? {}
-    if (!unprocessed && !noDate && !hasViewLink) stale.push(item)
+    const { unprocessed, noDate, hasViewLink, hasPrefix } = item.metadata ?? {}
+    if (unprocessed) {
+      console.log('[ensureFooters] SKIP unprocessed:', item.title, '·', item.source.external_id)
+      continue
+    }
+    if (noDate) {
+      console.log('[ensureFooters] SKIP noDate:', item.title, '·', item.source.external_id)
+      continue
+    }
+    if (hasViewLink && hasPrefix) {
+      console.log('[ensureFooters] OK:', item.title, '· hasViewLink:', hasViewLink, '· hasPrefix:', hasPrefix)
+      continue
+    }
+    console.log('[ensureFooters] STALE:', item.title, '· hasViewLink:', hasViewLink, '· hasPrefix:', hasPrefix)
+    stale.push(item)
   }
   if (!stale.length) return
 
@@ -461,6 +478,7 @@ export async function ensureFooters(token, items) {
     }
     try {
       await _patch(token, item.source.account_id, item.source.external_id, body)
+      console.log('[ensureFooters] PATCHED:', item.title, '· kairosId:', kairosId)
     } catch (err) {
       console.warn('[ensureFooters] patch failed:', kairosId, err.message)
     }
