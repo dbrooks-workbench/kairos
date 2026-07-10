@@ -85,14 +85,16 @@ export async function appendLogEntry(token, entry) {
     ...(entry.kairosId ? { kairosId: entry.kairosId } : {}),
   }
 
-  // Update in-memory cache immediately (_id backfilled after write)
+  // Update in-memory cache immediately (_id backfilled after write).
+  // Use one shared object so the _id backfill below updates both index references.
+  const cached = { _id: null, ...doc }
   if (_logByItemId !== null && entry.item_id) {
     if (!_logByItemId[entry.item_id]) _logByItemId[entry.item_id] = []
-    _logByItemId[entry.item_id].push({ _id: null, ...doc })
+    _logByItemId[entry.item_id].push(cached)
   }
   if (_logByKairosId !== null && entry.kairosId) {
     if (!_logByKairosId[entry.kairosId]) _logByKairosId[entry.kairosId] = []
-    _logByKairosId[entry.kairosId].push({ _id: null, ...doc })
+    _logByKairosId[entry.kairosId].push(cached)
   }
 
   try {

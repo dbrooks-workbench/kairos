@@ -18,20 +18,23 @@ export const KAIROS_UNDATED_SENTINEL = '1970-01-01'
 // Prefix written to the Google Calendar event summary when a task is completed.
 // Lets standard GCal clients show completion state without Kairos open.
 // Stripped from CalendarItem.title at normalization time so Kairos UI never
-// sees it — completion state is authoritative in Drive (completedAt).
+// sees it — completion state is authoritative in extendedProperties (completedAt).
 const COMPLETED_PREFIX = '✅ '
+const PENDING_PREFIX   = '☐ '
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Adds or removes COMPLETED_PREFIX from a title to match isCompleted.
-// Safe to call redundantly — only modifies when the prefix state is wrong.
+// Strips any status prefix then re-applies the correct one for isCompleted.
 function _applyPrefix(title, isCompleted) {
-  const has = (title ?? '').startsWith(COMPLETED_PREFIX)
-  if (isCompleted && !has) return COMPLETED_PREFIX + (title ?? '')
-  if (!isCompleted && has)  return (title ?? '').slice(COMPLETED_PREFIX.length)
-  return title ?? ''
+  const clean = (title ?? '').replace(/^(?:✅|☐)\s*/, '')
+  return (isCompleted ? COMPLETED_PREFIX : PENDING_PREFIX) + clean
+}
+
+// Strips any status prefix. Used at normalization time so Kairos UI sees clean titles.
+function _stripPrefix(title) {
+  return (title ?? '').replace(/^(?:✅|☐)\s*/, '')
 }
 
 function _nextDay(dateStr) {
@@ -60,7 +63,7 @@ function _normalizeNativeEvent(event, calId) {
   const isCompleted = (event.summary ?? '').startsWith(COMPLETED_PREFIX)
   return {
     item_type:  'EVENT',
-    title:      (event.summary ?? '').replace(/^✅\s*/, ''),
+    title:      _stripPrefix(event.summary ?? ''),
     source:     { account_id: calId, external_id: event.id },
     status:     isCompleted ? 'COMPLETED' : 'NEEDS_ACTION',
     recurrence: event.recurrence?.[0] ?? null,
@@ -151,10 +154,8 @@ export function normalizeTask(event, calendarId) {
   const isUndated   = p.noDate === 'true' || dateStr === KAIROS_UNDATED_SENTINEL || !dateStr
   const completedAt = p.completedAt || null
 
-  const rawTitle = event.summary ?? ''
-  const cleanTitle = rawTitle.startsWith(COMPLETED_PREFIX)
-    ? rawTitle.slice(COMPLETED_PREFIX.length) || '(No title)'
-    : rawTitle || '(No title)'
+  const rawTitle   = event.summary ?? ''
+  const cleanTitle = _stripPrefix(rawTitle) || '(No title)'
 
   const allDay = !!event.start?.date
   const start  = isUndated ? null
