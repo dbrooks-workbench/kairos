@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.56'
+const VERSION   = '0.23.57'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -296,6 +296,7 @@ function setView(v) {
     loadBoardData()
     startPolling(60_000)
   } else {
+    render()
     startPolling(120_000)
   }
 }
@@ -427,6 +428,9 @@ async function loadBoardData() {
     state.taskLists = getAllLists()
     renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
     ensureFooters(token, state.boardItems).catch(console.warn)
+    // Board changes (completion, snooze, move) must be visible immediately when the
+    // user switches back to the calendar view — drop the cached week so render() re-fetches.
+    _weekCache.clear()
   } catch (err) {
     console.error('Board data load failed:', err)
   }
