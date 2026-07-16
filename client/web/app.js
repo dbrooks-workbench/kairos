@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.55'
+const VERSION   = '0.23.56'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -370,15 +370,21 @@ function boardCallbacks() {
 }
 
 function getBoardItems() {
-  const showRecurring = localStorage.getItem('kairos:showRecurring') === 'true'
-  if (!showRecurring) return state.boardItems.filter(i => !i.metadata?.recurringEventId)
+  const showRecurring  = localStorage.getItem('kairos:showRecurring')  === 'true'
+  const hideFarFuture  = localStorage.getItem('kairos:hideFarFuture')  === 'true'
+
+  const cutoff = hideFarFuture ? addDays((() => { const d = new Date(); d.setHours(0,0,0,0); return d })(), 14) : null
+
+  let items = state.boardItems
+  if (cutoff) items = items.filter(i => !i.start || i.start <= cutoff || i.metadata?.noDate)
+  if (!showRecurring) return items.filter(i => !i.metadata?.recurringEventId)
 
   // Recurring tasks are shown as one card per series: the next upcoming non-completed
   // instance. Falls back to the most recent past non-completed instance if none upcoming.
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const bestBySeries = new Map()
 
-  for (const item of state.boardItems) {
+  for (const item of items) {
     const sid = item.metadata?.recurringEventId
     if (!sid || item.status === 'COMPLETED') continue
 
@@ -396,7 +402,7 @@ function getBoardItems() {
   }
 
   return [
-    ...state.boardItems.filter(i => !i.metadata?.recurringEventId),
+    ...items.filter(i => !i.metadata?.recurringEventId),
     ...[...bestBySeries.values()],
   ]
 }
@@ -1681,6 +1687,14 @@ const _recurringToggle = document.getElementById('board-show-recurring')
 _recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
 _recurringToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:showRecurring', e.target.checked)
+  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+})
+
+// Board far-future filter
+const _farFutureToggle = document.getElementById('board-hide-far-future')
+_farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
+_farFutureToggle.addEventListener('change', e => {
+  localStorage.setItem('kairos:hideFarFuture', e.target.checked)
   renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
 })
 
