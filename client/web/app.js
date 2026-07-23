@@ -12,7 +12,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.57'
+const VERSION   = '0.23.58'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1187,11 +1187,13 @@ function renderItems(items) {
       el.className = [
         'cal-event',
         _timedTask ? 'type-task' : '',
+        _timedTask && _timedDone                   ? 'completed' : '',
         _timedPast && !_timedTask && !_timedDone ? 'is-past'  : '',
         _timedTask && _timedPast  && !_timedDone ? 'past-due' : '',
       ].filter(Boolean).join(' ')
       el.dataset.itemId = item.id
-      if (item.color) applyColor(el, item.color)
+      if (_timedTask && !_timedDone && item.color) applyColor(el, item.color)
+      else if (!_timedTask && item.color) applyColor(el, item.color)
       el.style.top    = `${topMin}px`
       el.style.height = `${durMin - 2}px`
       if (numCols === 1) {
@@ -1211,26 +1213,73 @@ function renderItems(items) {
         }
       }
       const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-      const titleEl = document.createElement('div')
-      titleEl.className   = 'event-title'
-      titleEl.textContent = item.title
-      const timeEl  = document.createElement('div')
-      timeEl.className   = 'event-time'
-      timeEl.textContent = formatTimeRange(start, end)
-      el.append(titleEl, timeEl)
-      if (isRecurringEv) {
-        el.classList.add('has-recur')
-        const icon = document.createElement('span')
-        icon.className   = 'timed-recur-icon'
-        icon.textContent = '↻'
-        el.appendChild(icon)
-      }
-      el.title = item.title
-      if (item.item_type === 'TASK') {
+
+      if (_timedTask) {
+        const check = document.createElement('button')
+        check.className = `task-check${_timedDone ? ' done' : ''}`
+        check.setAttribute('aria-label', _timedDone ? 'Mark incomplete' : 'Mark complete')
+        if (_timedDone) check.textContent = '✓'
+        check.addEventListener('click', e => {
+          e.stopPropagation()
+          if (item.item_type === 'TASK') handleToggleTask(item)
+          else                           handleToggleCommitment(item)
+        })
+
+        const textWrap = document.createElement('div')
+        textWrap.className = 'timed-task-text'
+        const titleEl = document.createElement('div')
+        titleEl.className   = 'event-title'
+        titleEl.textContent = item.title
+        const timeEl = document.createElement('div')
+        timeEl.className   = 'event-time'
+        timeEl.textContent = formatTimeRange(start, end)
+        textWrap.append(titleEl, timeEl)
+
+        if (isRecurringEv) {
+          el.classList.add('has-recur')
+          const icon = document.createElement('span')
+          icon.className   = 'timed-recur-icon'
+          icon.textContent = '↻'
+          el.appendChild(icon)
+        }
+
+        const snoozeBtn = !_timedDone ? (() => {
+          const btn = document.createElement('button')
+          btn.className   = 'task-snooze'
+          btn.title       = 'Snooze'
+          btn.textContent = '⏰'
+          btn.addEventListener('click', e => {
+            e.stopPropagation()
+            if (item.item_type === 'TASK')
+              openSnoozePopover(btn, item, refreshCalendarItems)
+            else
+              openSnoozePopover(btn, item, refreshCalendarItems,
+                (n, newDate, dateLabel) => handleSnoozeCommitment(item, n, newDate, dateLabel))
+          })
+          return btn
+        })() : null
+
+        el.append(check, textWrap, ...(snoozeBtn ? [snoozeBtn] : []))
+        el.title = item.title
         el.addEventListener('click', () => {
           openEditorForEdit(item, calendarModalCallbacks())
         })
       } else {
+        const titleEl = document.createElement('div')
+        titleEl.className   = 'event-title'
+        titleEl.textContent = item.title
+        const timeEl  = document.createElement('div')
+        timeEl.className   = 'event-time'
+        timeEl.textContent = formatTimeRange(start, end)
+        el.append(titleEl, timeEl)
+        if (isRecurringEv) {
+          el.classList.add('has-recur')
+          const icon = document.createElement('span')
+          icon.className   = 'timed-recur-icon'
+          icon.textContent = '↻'
+          el.appendChild(icon)
+        }
+        el.title = item.title
         el.addEventListener('click', () => {
           openEditorForEdit(item, calendarModalCallbacks())
         })
@@ -1426,10 +1475,12 @@ function renderMobileDay() {
     eventEl.className = [
       'mobile-cal-event',
       _timedTask                               ? 'type-task' : '',
+      _timedTask && _timedDone                 ? 'completed' : '',
       _timedPast && !_timedTask && !_timedDone ? 'is-past'   : '',
       _timedTask && _timedPast  && !_timedDone ? 'past-due'  : '',
     ].filter(Boolean).join(' ')
-    if (item.color) applyColor(eventEl, item.color)
+    if (_timedTask && !_timedDone && item.color) applyColor(eventEl, item.color)
+    else if (!_timedTask && item.color) applyColor(eventEl, item.color)
     eventEl.style.top    = `${topMin}px`
     eventEl.style.height = `${durMin - 2}px`
 
@@ -1449,25 +1500,77 @@ function renderMobileDay() {
     }
 
     const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-    const titleEl = document.createElement('div')
-    titleEl.className   = 'mobile-event-title'
-    titleEl.textContent = item.title
-    const timeEl = document.createElement('div')
-    timeEl.className   = 'mobile-event-time'
-    timeEl.textContent = formatTimeRange(start, end)
-    eventEl.append(titleEl, timeEl)
-    if (isRecurringEv) {
-      eventEl.classList.add('has-recur')
-      const icon = document.createElement('span')
-      icon.className   = 'timed-recur-icon'
-      icon.textContent = '↻'
-      eventEl.appendChild(icon)
-    }
-    eventEl.title = item.title
 
-    eventEl.addEventListener('click', () => {
-      openEditorForEdit(item, calendarModalCallbacks())
-    })
+    if (_timedTask) {
+      const check = document.createElement('button')
+      check.className = `task-check${_timedDone ? ' done' : ''}`
+      check.setAttribute('aria-label', _timedDone ? 'Mark incomplete' : 'Mark complete')
+      if (_timedDone) check.textContent = '✓'
+      check.addEventListener('click', e => {
+        e.stopPropagation()
+        if (item.item_type === 'TASK') handleToggleTask(item)
+        else                           handleToggleCommitment(item)
+      })
+
+      const textWrap = document.createElement('div')
+      textWrap.className = 'timed-task-text'
+      const titleEl = document.createElement('div')
+      titleEl.className   = 'mobile-event-title'
+      titleEl.textContent = item.title
+      const timeEl = document.createElement('div')
+      timeEl.className   = 'mobile-event-time'
+      timeEl.textContent = formatTimeRange(start, end)
+      textWrap.append(titleEl, timeEl)
+
+      if (isRecurringEv) {
+        eventEl.classList.add('has-recur')
+        const icon = document.createElement('span')
+        icon.className   = 'timed-recur-icon'
+        icon.textContent = '↻'
+        eventEl.appendChild(icon)
+      }
+
+      const snoozeBtn = !_timedDone ? (() => {
+        const btn = document.createElement('button')
+        btn.className   = 'task-snooze'
+        btn.title       = 'Snooze'
+        btn.textContent = '⏰'
+        btn.addEventListener('click', e => {
+          e.stopPropagation()
+          if (item.item_type === 'TASK')
+            openSnoozePopover(btn, item, refreshCalendarItems)
+          else
+            openSnoozePopover(btn, item, refreshCalendarItems,
+              (n, newDate, dateLabel) => handleSnoozeCommitment(item, n, newDate, dateLabel))
+        })
+        return btn
+      })() : null
+
+      eventEl.append(check, textWrap, ...(snoozeBtn ? [snoozeBtn] : []))
+      eventEl.title = item.title
+      eventEl.addEventListener('click', () => {
+        openEditorForEdit(item, calendarModalCallbacks())
+      })
+    } else {
+      const titleEl = document.createElement('div')
+      titleEl.className   = 'mobile-event-title'
+      titleEl.textContent = item.title
+      const timeEl = document.createElement('div')
+      timeEl.className   = 'mobile-event-time'
+      timeEl.textContent = formatTimeRange(start, end)
+      eventEl.append(titleEl, timeEl)
+      if (isRecurringEv) {
+        eventEl.classList.add('has-recur')
+        const icon = document.createElement('span')
+        icon.className   = 'timed-recur-icon'
+        icon.textContent = '↻'
+        eventEl.appendChild(icon)
+      }
+      eventEl.title = item.title
+      eventEl.addEventListener('click', () => {
+        openEditorForEdit(item, calendarModalCallbacks())
+      })
+    }
     col.appendChild(eventEl)
   }
 
