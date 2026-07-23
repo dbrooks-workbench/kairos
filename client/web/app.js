@@ -13,7 +13,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.59'
+const VERSION   = '0.23.60'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -823,8 +823,9 @@ async function openSweepDialog() {
   const container = document.getElementById('sweep-sources-container')
   const targetSel = document.getElementById('sweep-target-select')
   const status    = document.getElementById('sweep-dialog-status')
-  const saveBtn   = document.getElementById('sweep-save-btn')
-  const nowBtn    = document.getElementById('sweep-now-btn')
+  const saveBtn      = document.getElementById('sweep-save-btn')
+  const cancelBtn    = document.getElementById('sweep-cancel-btn')
+  const nowBtn       = document.getElementById('sweep-now-btn')
 
   dialog.hidden = false
   status.textContent = ''
@@ -883,7 +884,10 @@ async function openSweepDialog() {
     })
   }
 
-  // Save
+  // Cancel
+  cancelBtn.onclick = () => { dialog.hidden = true }
+
+  // Save + dismiss
   saveBtn.onclick = async () => {
     const sources = []
     container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
@@ -891,8 +895,7 @@ async function openSweepDialog() {
     })
     setSweepSources(sources)
     setSweepTargetListId(targetSel.value || null)
-    status.textContent = 'Saved.'
-    setTimeout(() => { if (status.textContent === 'Saved.') status.textContent = '' }, 2000)
+    dialog.hidden = true
   }
 
   // Sweep now
