@@ -2,17 +2,18 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars } from './providers/kairosPrefs.js'
-import { loadLists, getListsForCalendar, createList, getAllLists, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getSweepTargetListId, setSweepSources, setSweepTargetListId } from './providers/kairosPrefs.js'
+import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { runMigration } from './migration.js'
+import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.58'
+const VERSION   = '0.23.59'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -331,6 +332,7 @@ document.addEventListener('visibilitychange', () => {
   invalidateCache()
   runSpawnScan()
     .then(() => {
+      runSweepIfConfigured()
       if (state.view === 'board') loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
         state.items = items
@@ -756,10 +758,20 @@ function renderAccountPanel(accounts) {
   addSec.innerHTML = `<button class="acct-add" id="btn-add-secondary">+ Add secondary account</button>`
   panel.appendChild(addSec)
 
+  // Sweep configuration
+  const sweepSec = el('div', 'acct-section acct-section-border')
+  sweepSec.innerHTML = `<button class="acct-sweep-link" id="btn-open-sweep">Configure Google Task Sweep →</button>`
+  panel.appendChild(sweepSec)
+
   panel.querySelector('#btn-panel-signout')?.addEventListener('click', logout)
   panel.querySelector('#btn-add-secondary')?.addEventListener('click', addAccount)
   panel.querySelectorAll('.acct-remove').forEach(btn => {
     btn.addEventListener('click', () => logoutAccount(btn.dataset.id))
+  })
+  panel.querySelector('#btn-open-sweep')?.addEventListener('click', e => {
+    e.stopPropagation()
+    document.getElementById('account-panel').hidden = true
+    openSweepDialog()
   })
 }
 
@@ -767,6 +779,162 @@ function el(tag, className) {
   const node = document.createElement(tag)
   if (className) node.className = className
   return node
+}
+
+// ── Google Task Sweep ─────────────────────────────────────────────────────────
+
+const SWEEP_INTERVAL = 15 * 60 * 1000  // 15 minutes
+
+async function _fetchWebhookToken() {
+  try {
+    const res = await fetch('/api/webhook-token', { credentials: 'include' })
+    if (res.ok) return (await res.json()).token ?? null
+  } catch {}
+  return null
+}
+
+// Run a sweep pass if sources and target are configured. Silent unless tasks are swept.
+async function runSweepIfConfigured() {
+  const sources  = getSweepSources()
+  const targetId = getSweepTargetListId()
+  if (!sources.length || !targetId) return
+
+  const accounts = await getTokens()
+  const calToken = accounts.find(a => a.primary)?.token
+  if (!calToken) return
+
+  const webhookToken = await _fetchWebhookToken()
+
+  try {
+    const result = await runSweep({ accounts, calToken, webhookToken, sweepSources: sources, targetListId: targetId })
+    if (result.swept > 0) {
+      console.log(`[sweep] swept ${result.swept} tasks into Kairos`)
+      _weekCache.clear()
+      await loadBoardData()
+    }
+  } catch (err) {
+    console.warn('[sweep] failed:', err.message)
+  }
+}
+
+// Open the sweep configuration dialog.
+async function openSweepDialog() {
+  const dialog   = document.getElementById('sweep-dialog')
+  const container = document.getElementById('sweep-sources-container')
+  const targetSel = document.getElementById('sweep-target-select')
+  const status    = document.getElementById('sweep-dialog-status')
+  const saveBtn   = document.getElementById('sweep-save-btn')
+  const nowBtn    = document.getElementById('sweep-now-btn')
+
+  dialog.hidden = false
+  status.textContent = ''
+
+  // Populate destination list dropdown
+  targetSel.innerHTML = '<option value="">— select a list —</option>'
+  const savedTarget = getSweepTargetListId()
+  for (const list of getAllLists().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    const opt = document.createElement('option')
+    opt.value       = list.id
+    opt.textContent = list.name
+    opt.selected    = list.id === savedTarget
+    targetSel.appendChild(opt)
+  }
+
+  // Load GT lists per account and build source checkboxes
+  container.innerHTML = ''
+  const savedSources = getSweepSources()
+  const accounts = await getTokens()
+
+  for (const account of accounts) {
+    const group = el('div', 'sweep-account-group')
+    const nameEl = el('div', 'sweep-account-name')
+    nameEl.textContent = `${account.email ?? account.id}${account.primary ? ' (primary)' : ''}`
+    group.appendChild(nameEl)
+
+    const loadingEl = el('div', 'sweep-loading')
+    loadingEl.textContent = 'Loading lists…'
+    group.appendChild(loadingEl)
+    container.appendChild(group)
+
+    // Fetch this account's GT lists asynchronously
+    getGtLists(account.token).then(lists => {
+      loadingEl.remove()
+      if (!lists.length) {
+        const empty = el('div', 'sweep-loading')
+        empty.textContent = 'No task lists found'
+        group.appendChild(empty)
+        return
+      }
+      for (const list of lists) {
+        const isChecked = savedSources.some(s => s.accountId === account.id && s.listId === list.id)
+        const row = el('label', 'sweep-list-row')
+        const cb  = document.createElement('input')
+        cb.type    = 'checkbox'
+        cb.dataset.accountId   = account.id
+        cb.dataset.listId      = list.id
+        cb.dataset.listName    = list.title ?? list.id
+        cb.checked = isChecked
+        row.appendChild(cb)
+        row.appendChild(document.createTextNode(list.title ?? list.id))
+        group.appendChild(row)
+      }
+    }).catch(() => {
+      loadingEl.textContent = 'Failed to load lists'
+    })
+  }
+
+  // Save
+  saveBtn.onclick = async () => {
+    const sources = []
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
+    })
+    setSweepSources(sources)
+    setSweepTargetListId(targetSel.value || null)
+    status.textContent = 'Saved.'
+    setTimeout(() => { if (status.textContent === 'Saved.') status.textContent = '' }, 2000)
+  }
+
+  // Sweep now
+  nowBtn.onclick = async () => {
+    // Save current UI state first so runSweep reads fresh config
+    const sources = []
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
+    })
+    setSweepSources(sources)
+    setSweepTargetListId(targetSel.value || null)
+
+    const targetId = targetSel.value
+    if (!sources.length) { status.textContent = 'No sources selected.'; return }
+    if (!targetId)        { status.textContent = 'No destination selected.'; return }
+
+    nowBtn.disabled = true
+    status.textContent = 'Sweeping…'
+
+    const accounts    = await getTokens()
+    const calToken    = accounts.find(a => a.primary)?.token
+    const webhookToken = await _fetchWebhookToken()
+
+    try {
+      const result = await runSweep({
+        accounts, calToken, webhookToken,
+        sweepSources: sources, targetListId: targetId,
+        onProgress: ({ swept, total }) => {
+          status.textContent = `Sweeping… ${swept}/${total}`
+        },
+      })
+      const parts = [`${result.swept} swept`]
+      if (result.failed)  parts.push(`${result.failed} failed`)
+      if (result.skipped) parts.push(`${result.skipped} skipped`)
+      status.textContent = `Done — ${parts.join(', ')}`
+      if (result.swept > 0) { _weekCache.clear(); loadBoardData() }
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`
+    } finally {
+      nowBtn.disabled = false
+    }
+  }
 }
 
 // ── Spawn scan ────────────────────────────────────────────────────────────────
@@ -1832,6 +2000,15 @@ document.addEventListener('click', () => {
 })
 document.getElementById('account-panel').addEventListener('click', e => e.stopPropagation())
 
+// Sweep dialog close
+document.getElementById('sweep-dialog-close').addEventListener('click', () => {
+  document.getElementById('sweep-dialog').hidden = true
+})
+document.getElementById('sweep-dialog').addEventListener('click', e => {
+  if (e.target === document.getElementById('sweep-dialog'))
+    document.getElementById('sweep-dialog').hidden = true
+})
+
 render().then(async () => {
   // #timed-scroll is a flex column container; scrollTop = M shows timed-area
   // minute M at the top of the visible area below the sticky header.
@@ -1849,6 +2026,8 @@ render().then(async () => {
   if (mobileScroll) mobileScroll.scrollTop = Math.max(0, minsNow - 120)
 
   runSpawnScan()
+  runSweepIfConfigured()
+  setInterval(runSweepIfConfigured, SWEEP_INTERVAL)
   startPolling(120_000)
 
   // One-time global footer backfill — fetches masters (not instances) so recurring

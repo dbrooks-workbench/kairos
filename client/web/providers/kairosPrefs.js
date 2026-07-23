@@ -11,10 +11,12 @@
 import { fsGet, fsSet } from './firestore.js'
 
 const DEFAULTS = () => ({
-  version:        1,
-  hiddenCalendars: [],
-  taskCalendars:   [],
-  taskColumnSort:  {},
+  version:           1,
+  hiddenCalendars:   [],
+  taskCalendars:     [],
+  taskColumnSort:    {},
+  sweepSources:      [],   // [{ accountId, listId, listName }]
+  sweepTargetListId: null, // Kairos list ID where swept tasks land
 })
 
 let _prefs       = null
@@ -53,9 +55,11 @@ async function _doLoad(token) {
 
 // ── Getters ───────────────────────────────────────────────────────────────────
 
-export function getHiddenCalendars() { return _prefs?.hiddenCalendars ?? [] }
-export function getTaskCalendars()   { return _prefs?.taskCalendars   ?? [] }
-export function getTaskColumnSort()  { return _prefs?.taskColumnSort  ?? {} }
+export function getHiddenCalendars()  { return _prefs?.hiddenCalendars   ?? [] }
+export function getTaskCalendars()    { return _prefs?.taskCalendars     ?? [] }
+export function getTaskColumnSort()   { return _prefs?.taskColumnSort    ?? {} }
+export function getSweepSources()     { return _prefs?.sweepSources      ?? [] }
+export function getSweepTargetListId(){ return _prefs?.sweepTargetListId ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +73,20 @@ export function setHiddenCalendars(cals) {
 export function setTaskCalendars(cals) {
   if (!_prefs) return
   _prefs.taskCalendars = [...cals]
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setSweepSources(sources) {
+  if (!_prefs) return
+  _prefs.sweepSources = [...sources]
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setSweepTargetListId(listId) {
+  if (!_prefs) return
+  _prefs.sweepTargetListId = listId ?? null
   _dirty = true
   _scheduleSave()
 }

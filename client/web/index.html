@@ -285,6 +285,35 @@
     </div>
   </div><!-- /#app -->
 
+  <!-- Google Task Sweep configuration dialog -->
+  <div id="sweep-dialog" hidden>
+    <div class="sweep-panel">
+      <div class="sweep-panel-header">
+        <span class="sweep-panel-title">Google Task Sweep</span>
+        <button id="sweep-dialog-close" class="modal-close-btn" title="Close">×</button>
+      </div>
+      <div class="sweep-panel-body">
+        <div class="sweep-section">
+          <div class="sweep-section-label">Intake sources</div>
+          <div class="sweep-section-hint">Tasks from these Google Tasks lists will be swept into Kairos automatically.</div>
+          <div id="sweep-sources-container"></div>
+        </div>
+        <div class="sweep-section">
+          <div class="sweep-section-label">Destination</div>
+          <div class="sweep-section-hint">Swept tasks will be added to this list.</div>
+          <select id="sweep-target-select" class="modal-select"></select>
+        </div>
+      </div>
+      <div class="sweep-panel-footer">
+        <div id="sweep-dialog-status" class="sweep-dialog-status"></div>
+        <div class="sweep-panel-actions">
+          <button id="sweep-now-btn" class="btn-secondary">Sweep now</button>
+          <button id="sweep-save-btn" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>
