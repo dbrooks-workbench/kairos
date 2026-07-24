@@ -285,23 +285,23 @@
     </div>
   </div><!-- /#app -->
 
-  <!-- Google Task Sweep configuration dialog -->
+  <!-- Configure Kairos dialog -->
   <div id="sweep-dialog" hidden>
     <div class="sweep-panel">
       <div class="sweep-panel-header">
-        <span class="sweep-panel-title">Google Task Sweep</span>
+        <span class="sweep-panel-title">Configure Kairos</span>
         <button id="sweep-dialog-close" class="modal-close-btn" title="Close">×</button>
       </div>
       <div class="sweep-panel-body">
         <div class="sweep-section">
-          <div class="sweep-section-label">Intake sources</div>
-          <div class="sweep-section-hint">Tasks from these Google Tasks lists will be swept into Kairos automatically.</div>
-          <div id="sweep-sources-container"></div>
+          <div class="sweep-section-label">Default intake list</div>
+          <div class="sweep-section-hint">New captures — voice items and swept tasks — land in this list for processing.</div>
+          <select id="intake-list-select" class="modal-select"></select>
         </div>
         <div class="sweep-section">
-          <div class="sweep-section-label">Destination</div>
-          <div class="sweep-section-hint">Swept tasks will be added to this list.</div>
-          <select id="sweep-target-select" class="modal-select"></select>
+          <div class="sweep-section-label">Google Task Sweep</div>
+          <div class="sweep-section-hint">Tasks from these Google Tasks lists are swept into your default intake list automatically.</div>
+          <div id="sweep-sources-container"></div>
         </div>
       </div>
       <div class="sweep-panel-footer">

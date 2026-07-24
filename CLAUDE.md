@@ -85,11 +85,12 @@ A **personal project management / calendar hybrid** where:
 - `/api/webhook-token` — issues a per-user webhook token stored in KV; used to authorize the completion link without a browser session
 - `/api/complete` — toggles completion state on a calendar task event from a link clicked in Google Calendar (or any native client); authenticates via `wt` webhook token param; updates the event summary, extendedProperties, and description footer in one PATCH
 
-### Mobile — Flutter (Phase 2, next)
+### Mobile — Native Android (Phase 2, next)
 
-- Flutter app targeting iOS and Android
+- Native Android app: **Kotlin + Jetpack Compose** (decided 2026-07-23; was pinned to Flutter). Android-only for now; iOS is an outside chance, not a target.
 - Will call Google APIs directly with the same OAuth pattern
 - No ntfy stopgap — jumping straight to the native app
+- See `../kairos-mobile/CLAUDE.md` for the framework rationale and mobile-specific decisions
 
 ### Activity Log — Firestore (`client/web/providers/lifeLog.js`)
 
@@ -234,8 +235,8 @@ Key baseline version: **v0.23.20**
 - Intake surface — capture new tasks/events quickly without opening the full editor
 - Planning surface — review and sequence upcoming work
 
-### Phase 2 — Flutter Mobile (Next major project)
-- Flutter app targeting iOS and Android
+### Phase 2 — Native Android Mobile (Next major project)
+- Native Android app: Kotlin + Jetpack Compose (Android-only; iOS is an outside chance)
 - Feature parity with web SPA
 - Same OAuth pattern; calls Google APIs directly
 
@@ -252,7 +253,7 @@ Key baseline version: **v0.23.20**
 | Hosting | Cloudflare Pages | Zero-ops, free tier, edge-deployed functions |
 | Auth | PKCE + KV sessions | Client secret never in browser; tokens in KV, not localStorage |
 | Web frontend | Vanilla JS + Vite | Maximum control over calendar rendering; Vite for bundling/dev ergonomics |
-| Mobile | Flutter (Phase 2) | Single codebase for iOS + Android; no ntfy stopgap |
+| Mobile | Native Android — Kotlin + Jetpack Compose (Phase 2) | Android-only for the maintainer; iOS an outside chance. Lowest complexity for one OS, best on-device perf/gestures. Decided 2026-07-23 (was Flutter). |
 | Calendar rendering | Custom-rolled | Avoid fighting framework assumptions about task display |
 | No backend | Google APIs direct | No server to maintain; auth handled by Pages Functions |
 | Task storage | Google Calendar events (not Google Tasks API) | First-class RRULE recurrence, stable IDs, per-instance editing, native GCal visibility |

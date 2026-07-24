@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getSweepTargetListId, setSweepSources, setSweepTargetListId } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
@@ -13,7 +13,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.23.60'
+const VERSION   = '0.24.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -758,9 +758,9 @@ function renderAccountPanel(accounts) {
   addSec.innerHTML = `<button class="acct-add" id="btn-add-secondary">+ Add secondary account</button>`
   panel.appendChild(addSec)
 
-  // Sweep configuration
+  // Kairos configuration (intake list + Google Task Sweep)
   const sweepSec = el('div', 'acct-section acct-section-border')
-  sweepSec.innerHTML = `<button class="acct-sweep-link" id="btn-open-sweep">Configure Google Task Sweep →</button>`
+  sweepSec.innerHTML = `<button class="acct-sweep-link" id="btn-open-sweep">Configure Kairos →</button>`
   panel.appendChild(sweepSec)
 
   panel.querySelector('#btn-panel-signout')?.addEventListener('click', logout)
@@ -771,7 +771,7 @@ function renderAccountPanel(accounts) {
   panel.querySelector('#btn-open-sweep')?.addEventListener('click', e => {
     e.stopPropagation()
     document.getElementById('account-panel').hidden = true
-    openSweepDialog()
+    openConfigDialog()
   })
 }
 
@@ -796,7 +796,7 @@ async function _fetchWebhookToken() {
 // Run a sweep pass if sources and target are configured. Silent unless tasks are swept.
 async function runSweepIfConfigured() {
   const sources  = getSweepSources()
-  const targetId = getSweepTargetListId()
+  const targetId = getDefaultIntakeListId()
   if (!sources.length || !targetId) return
 
   const accounts = await getTokens()
@@ -817,11 +817,11 @@ async function runSweepIfConfigured() {
   }
 }
 
-// Open the sweep configuration dialog.
-async function openSweepDialog() {
+// Open the Configure Kairos dialog (default intake list + Google Task Sweep).
+async function openConfigDialog() {
   const dialog   = document.getElementById('sweep-dialog')
   const container = document.getElementById('sweep-sources-container')
-  const targetSel = document.getElementById('sweep-target-select')
+  const targetSel = document.getElementById('intake-list-select')
   const status    = document.getElementById('sweep-dialog-status')
   const saveBtn      = document.getElementById('sweep-save-btn')
   const cancelBtn    = document.getElementById('sweep-cancel-btn')
@@ -830,9 +830,9 @@ async function openSweepDialog() {
   dialog.hidden = false
   status.textContent = ''
 
-  // Populate destination list dropdown
+  // Populate default intake list dropdown
   targetSel.innerHTML = '<option value="">— select a list —</option>'
-  const savedTarget = getSweepTargetListId()
+  const savedTarget = getDefaultIntakeListId()
   for (const list of getAllLists().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
     const opt = document.createElement('option')
     opt.value       = list.id
@@ -894,7 +894,7 @@ async function openSweepDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setSweepTargetListId(targetSel.value || null)
+    setDefaultIntakeListId(targetSel.value || null)
     dialog.hidden = true
   }
 
@@ -906,11 +906,11 @@ async function openSweepDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setSweepTargetListId(targetSel.value || null)
+    setDefaultIntakeListId(targetSel.value || null)
 
     const targetId = targetSel.value
     if (!sources.length) { status.textContent = 'No sources selected.'; return }
-    if (!targetId)        { status.textContent = 'No destination selected.'; return }
+    if (!targetId)        { status.textContent = 'No intake list selected.'; return }
 
     nowBtn.disabled = true
     status.textContent = 'Sweeping…'

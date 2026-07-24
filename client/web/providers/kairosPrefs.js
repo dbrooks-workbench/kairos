@@ -3,20 +3,22 @@
 // Shape:
 //   {
 //     version: 1,
-//     hiddenCalendars: string[],
-//     taskCalendars:   string[],   // ordered project/task calendars
-//     taskColumnSort:  { [calId]: 'manual' | 'date' },
+//     hiddenCalendars:     string[],
+//     taskCalendars:       string[],   // ordered project/task calendars
+//     taskColumnSort:      { [calId]: 'manual' | 'date' },
+//     sweepSources:        [{ accountId, listId, listName }],
+//     defaultIntakeListId: string|null, // shared bucket — voice captures + swept tasks land here for processing
 //   }
 
 import { fsGet, fsSet } from './firestore.js'
 
 const DEFAULTS = () => ({
-  version:           1,
-  hiddenCalendars:   [],
-  taskCalendars:     [],
-  taskColumnSort:    {},
-  sweepSources:      [],   // [{ accountId, listId, listName }]
-  sweepTargetListId: null, // Kairos list ID where swept tasks land
+  version:             1,
+  hiddenCalendars:     [],
+  taskCalendars:       [],
+  taskColumnSort:      {},
+  sweepSources:        [],   // [{ accountId, listId, listName }]
+  defaultIntakeListId: null, // Kairos list ID — shared intake bucket for voice captures + swept tasks
 })
 
 let _prefs       = null
@@ -38,6 +40,12 @@ async function _doLoad(token) {
     const data = await fsGet(token, 'prefs/main')
     if (data) {
       _prefs = { ...DEFAULTS(), ...data }
+      // Migrate legacy sweepTargetListId → defaultIntakeListId (renamed 2026-07:
+      // the destination is now a general intake bucket, not sweep-specific).
+      if (_prefs.defaultIntakeListId == null && data.sweepTargetListId != null) {
+        _prefs.defaultIntakeListId = data.sweepTargetListId
+      }
+      delete _prefs.sweepTargetListId  // fsSet full-replaces, so the stale key is dropped on next save
     } else {
       _prefs = DEFAULTS()
       await fsSet(token, 'prefs/main', _prefs)
@@ -58,8 +66,8 @@ async function _doLoad(token) {
 export function getHiddenCalendars()  { return _prefs?.hiddenCalendars   ?? [] }
 export function getTaskCalendars()    { return _prefs?.taskCalendars     ?? [] }
 export function getTaskColumnSort()   { return _prefs?.taskColumnSort    ?? {} }
-export function getSweepSources()     { return _prefs?.sweepSources      ?? [] }
-export function getSweepTargetListId(){ return _prefs?.sweepTargetListId ?? null }
+export function getSweepSources()       { return _prefs?.sweepSources        ?? [] }
+export function getDefaultIntakeListId(){ return _prefs?.defaultIntakeListId ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -84,9 +92,9 @@ export function setSweepSources(sources) {
   _scheduleSave()
 }
 
-export function setSweepTargetListId(listId) {
+export function setDefaultIntakeListId(listId) {
   if (!_prefs) return
-  _prefs.sweepTargetListId = listId ?? null
+  _prefs.defaultIntakeListId = listId ?? null
   _dirty = true
   _scheduleSave()
 }
