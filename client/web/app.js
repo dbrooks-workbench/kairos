@@ -4,7 +4,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, createStatus } from './providers/kairosStatuses.js'
+import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -14,7 +14,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.25.0'
+const VERSION   = '0.26.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -28,6 +28,14 @@ const state = {
   boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
+}
+
+// Status IDs flagged "in progress" — refreshed at the top of each render pass so
+// task chips in those statuses get the green ring (past-due red still wins).
+let _inProgressIds = new Set()
+function isInProgressItem(item, isTask, isDone) {
+  const sid = item.metadata?.statusId
+  return isTask && !isDone && !!sid && _inProgressIds.has(sid)
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -1177,6 +1185,7 @@ let _calDragItem = null  // task being dragged in the calendar all-day area
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
+  _inProgressIds = getInProgressStatusIds()
   const _now = new Date()
   const _todayMidnight = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate())
 
@@ -1277,6 +1286,7 @@ function renderItems(items) {
         isDone    ? 'completed' : '',
         isPast && !isTask && !isDone ? 'is-past'   : '',
         isPastDue                    ? 'past-due'   : '',
+        !isPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
         span.startsEarly             ? 'continues-left'  : '',
         span.endsLate                ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
@@ -1408,6 +1418,7 @@ function renderItems(items) {
         _timedTask && _timedDone                   ? 'completed' : '',
         _timedPast && !_timedTask && !_timedDone ? 'is-past'  : '',
         _timedTask && _timedPast  && !_timedDone ? 'past-due' : '',
+        !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
       ].filter(Boolean).join(' ')
       el.dataset.itemId = item.id
       if (_timedTask && !_timedDone && item.color) applyColor(el, item.color)
@@ -1575,6 +1586,7 @@ function initMobileDayView() {
 function renderMobileDay() {
   if (window.innerWidth > 768) return  // desktop — skip
 
+  _inProgressIds = getInProgressStatusIds()
   const day      = state.mobileDay
   const dayStart = new Date(day); dayStart.setHours(0, 0, 0, 0)
   const dayEnd   = new Date(dayStart.getTime() + 86_400_000)
@@ -1618,6 +1630,7 @@ function renderMobileDay() {
       isDone    ? 'completed' : '',
       isPast && !isTask && !isDone ? 'is-past'  : '',
       isPastDue                    ? 'past-due' : '',
+      !isPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
     ].filter(Boolean).join(' ')
     chip.title = item.title
 
@@ -1696,6 +1709,7 @@ function renderMobileDay() {
       _timedTask && _timedDone                 ? 'completed' : '',
       _timedPast && !_timedTask && !_timedDone ? 'is-past'   : '',
       _timedTask && _timedPast  && !_timedDone ? 'past-due'  : '',
+      !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
     ].filter(Boolean).join(' ')
     if (_timedTask && !_timedDone && item.color) applyColor(eventEl, item.color)
     else if (!_timedTask && item.color) applyColor(eventEl, item.color)

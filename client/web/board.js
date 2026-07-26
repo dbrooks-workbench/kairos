@@ -483,8 +483,14 @@ function buildAddStatusCol(callbacks) {
 
 function buildCard(item) {
   const isDone = item.status === 'COMPLETED'
+  // Green ring when the task's status is flagged in-progress (past-due, shown via
+  // the red "overdue" due-chip, takes priority — suppress green then).
+  const today     = new Date(); today.setHours(0, 0, 0, 0)
+  const isPastDue = !isDone && item.due && new Date(item.due).setHours(0, 0, 0, 0) < today
+  const st        = item.metadata?.statusId ? _statuses.find(s => s.id === item.metadata.statusId) : null
+  const inProgress = !isDone && !isPastDue && !!st?.inProgress
   const card   = document.createElement('div')
-  card.className          = `board-card${isDone ? ' board-card-done' : ''}`
+  card.className          = `board-card${isDone ? ' board-card-done' : ''}${inProgress ? ' in-progress' : ''}`
   card.dataset.itemId     = item.id
   card.dataset.statusId   = _effectiveStatusId(item) ?? ''
   card.dataset.calendarId = item.source.account_id
