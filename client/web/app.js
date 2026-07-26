@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.28.0'
+const VERSION   = '0.28.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1319,8 +1319,19 @@ function renderItems(items) {
         const endDayIdx = localDayIndex(end, state.weekStart)
         if (endDayIdx >= 0 && dayIdx <= 6) allDayItems.push(item)
       } else {
-        if (dayIdx < 0 || dayIdx >= 7) continue
-        timedByDay[dayIdx].push({ item, start, end })
+        // A timed event that crosses midnight is split into one segment per day,
+        // each clamped to that day's [00:00, 24:00], so it wraps into the next
+        // column instead of overflowing the bottom of the start day.
+        let segStart = start
+        while (segStart < end) {
+          const nextMidnight = new Date(segStart.getFullYear(), segStart.getMonth(), segStart.getDate() + 1)
+          const segEnd       = end < nextMidnight ? end : nextMidnight
+          const segDayIdx    = localDayIndex(segStart, state.weekStart)
+          if (segDayIdx >= 0 && segDayIdx < 7) {
+            timedByDay[segDayIdx].push({ item, start: segStart, end: segEnd })
+          }
+          segStart = nextMidnight
+        }
       }
     }
   }
@@ -1802,8 +1813,12 @@ function renderMobileDay() {
     const start = new Date(item.start)
     const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 30 * 60_000)
     if (end - start >= 86_400_000) continue  // multi-day → shown above
-    if (!sameDay(start, day)) continue
-    timedItems.push({ item, start, end })
+    if (!(start < dayEnd && end > dayStart)) continue  // doesn't touch this day
+    // Clamp to the viewed day so a cross-midnight event shows its portion here
+    // (00:00 head on the following day, tail up to 24:00 on the start day).
+    const segStart = start < dayStart ? dayStart : start
+    const segEnd   = end   > dayEnd   ? dayEnd   : end
+    timedItems.push({ item, start: segStart, end: segEnd })
   }
 
   for (const { item, start, end, colIdx, numCols } of computeOverlapLayout(timedItems)) {
