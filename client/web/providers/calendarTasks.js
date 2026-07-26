@@ -6,7 +6,8 @@ import { generateKairosId } from './driveTaskMeta.js'
 // extendedProperties.private schema:
 //   kairosId    — stable identifier (survives events.move)
 //   isTask      — 'true' always
-//   listId      — Firestore list ID
+//   listId      — Firestore list ID (organization axis)
+//   statusId    — Firestore status ID (workflow axis; board column)
 //   order       — sparse float string for manual sorting
 //   loe         — level-of-effort string, optional
 //   noDate      — 'true' when undated (start.date = KAIROS_UNDATED_SENTINEL)
@@ -98,7 +99,7 @@ function _buildDescriptionPatch(item) {
 
 function _buildEventBody(taskData, isCreate = false) {
   const {
-    title, body, kairosId, listId, order, loe,
+    title, body, kairosId, listId, statusId, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
     location, unprocessed, webhookToken, recurrence, completed, completedAt,
   } = taskData
@@ -130,6 +131,10 @@ function _buildEventBody(taskData, isCreate = false) {
     listId:  listId ?? '',
     order:   String(order ?? 0),
   }
+  // Only touch statusId when the caller supplies it — on PATCH, omitting a key
+  // from extendedProperties.private preserves the stored value (Google merges),
+  // so editor saves that don't carry statusId won't wipe a task's column.
+  if (statusId !== undefined) props.statusId = statusId ?? ''
   if (loe)         props.loe         = loe
   // null clears an existing noDate property via PATCH merge; omit on POST (Google rejects null in extendedProperties)
   if (isUndated)        props.noDate = 'true'
@@ -190,6 +195,7 @@ export function normalizeTask(event, calendarId) {
       hasViewLink:      (event.description ?? '').includes('View on Kairos'),
       hasPrefix,
       listId:           p.listId      || null,
+      statusId:         p.statusId    || null,
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
       noDate:           isUndated,
@@ -487,10 +493,10 @@ export async function ensureFooters(token, items) {
 }
 
 // Resets order values to evenly-spaced integers when float precision runs low.
+// Caller passes the already-filtered column items (by statusId or listId).
 // Sorts by current order, then assigns 10, 20, 30, ...
-export async function rebalanceColumn(token, calendarId, listId, items) {
-  const filtered = items.filter(i => i.metadata.listId === listId)
-  const sorted   = [...filtered].sort((a, b) => (a.metadata.order ?? 0) - (b.metadata.order ?? 0))
+export async function rebalanceColumn(token, calendarId, items) {
+  const sorted = [...items].sort((a, b) => (a.metadata.order ?? 0) - (b.metadata.order ?? 0))
   await Promise.all(
     sorted.map((item, i) =>
       patchTaskProps(token, calendarId, item.source.external_id, { order: (i + 1) * 10 })

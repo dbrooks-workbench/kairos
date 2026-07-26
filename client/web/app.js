@@ -2,9 +2,9 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId, getIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadStatuses, ensureDefaultStatuses } from './providers/kairosStatuses.js'
+import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -14,7 +14,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.24.1'
+const VERSION   = '0.25.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -344,10 +344,23 @@ document.addEventListener('visibilitychange', () => {
 
 // ── Board data + callbacks ────────────────────────────────────────────────────
 
+// The board + list views are scoped to one "project" calendar. Prefer the saved
+// choice when it's still a task calendar, else the intake status's calendar, else
+// the first task calendar.
+function currentProjectCalendarId() {
+  const taskCals = getTaskCalendars()
+  if (!taskCals.length) return null
+  const saved = getProjectCalendarId()
+  if (saved && taskCals.includes(saved)) return saved
+  const intakeStatus = getIntakeStatusId() ? getStatus(getIntakeStatusId()) : null
+  if (intakeStatus && taskCals.includes(intakeStatus.calendarId)) return intakeStatus.calendarId
+  return taskCals[0]
+}
+
 function boardCallbacks() {
   return {
-    onCreate:     (calendarId, listId) => openEditor(
-      { mode: 'task', calendarId: calendarId ?? getTaskCalendars()[0] ?? null, listId },
+    onCreate:     (calendarId, statusId) => openEditor(
+      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), statusId },
       { onSaved: loadBoardData },
     ),
     onEdit:       item    => openEditorForEdit(item, {
@@ -356,21 +369,43 @@ function boardCallbacks() {
     }),
     onRefresh:          loadBoardData,
     onDoneWindowChange: days => { state.doneWindow = days; loadBoardData() },
-    onCreateList: async name => {
+    onCreateStatus: async name => {
       const token = await getToken()
       if (!token) return
-      const calId = getTaskCalendars()[0] ?? null
+      const calId = currentProjectCalendarId()
       if (!calId) return
       try {
-        const calLists = getListsForCalendar(calId)
-        const maxOrder = calLists.length ? Math.max(...calLists.map(l => l.order ?? 0)) : 0
-        await createList(token, calId, name, maxOrder + 10)
+        const calStatuses = getStatusesForCalendar(calId)
+        const maxOrder    = calStatuses.length ? Math.max(...calStatuses.map(s => s.order ?? 0)) : 0
+        await createStatus(token, calId, name, maxOrder + 10)
         await loadBoardData()
       } catch (err) {
-        console.error('Create list failed:', err)
+        console.error('Create status failed:', err)
       }
     },
   }
+}
+
+function rerenderBoard() {
+  const calId = currentProjectCalendarId()
+  renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
+}
+
+// Fill the board/list project-calendar <select> from the designated task calendars.
+function populateProjectSelector() {
+  const sel = document.getElementById('board-calendar-select')
+  if (!sel) return
+  const taskCals = getTaskCalendars()
+  const current  = currentProjectCalendarId()
+  sel.innerHTML = ''
+  for (const calId of taskCals) {
+    const opt = document.createElement('option')
+    opt.value       = calId
+    opt.textContent = state.calendars.find(c => c.id === calId)?.summary ?? calId
+    if (calId === current) opt.selected = true
+    sel.appendChild(opt)
+  }
+  sel.hidden = taskCals.length <= 1
 }
 
 function getBoardItems() {
@@ -433,7 +468,8 @@ async function loadBoardData() {
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
     await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
     state.taskLists = getAllLists()
-    renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+    populateProjectSelector()
+    rerenderBoard()
     ensureFooters(token, state.boardItems).catch(console.warn)
     // Board changes (completion, snooze, move) must be visible immediately when the
     // user switches back to the calendar view — drop the cached week so render() re-fetches.
@@ -1967,12 +2003,18 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
 document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
 
+// Board / list project-calendar selector
+document.getElementById('board-calendar-select').addEventListener('change', e => {
+  setProjectCalendarId(e.target.value)
+  rerenderBoard()
+})
+
 // Board recurring-task filter
 const _recurringToggle = document.getElementById('board-show-recurring')
 _recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
 _recurringToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:showRecurring', e.target.checked)
-  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+  rerenderBoard()
 })
 
 // Board far-future filter
@@ -1980,7 +2022,7 @@ const _farFutureToggle = document.getElementById('board-hide-far-future')
 _farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
 _farFutureToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:hideFarFuture', e.target.checked)
-  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+  rerenderBoard()
 })
 
 // Show version on hover over the app title

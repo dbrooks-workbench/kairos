@@ -23,6 +23,7 @@ const DEFAULTS = () => ({
   sweepSources:        [],   // [{ accountId, listId, listName }]
   defaultIntakeListId: null, // DEPRECATED — see intakeStatusId
   intakeStatusId:      null, // Kairos status ID — shared intake bucket for voice captures + swept tasks
+  projectCalendarId:   null, // calendar the board + list views are scoped to (the active "project")
 })
 
 let _prefs       = null
@@ -73,6 +74,7 @@ export function getTaskColumnSort()   { return _prefs?.taskColumnSort    ?? {} }
 export function getSweepSources()       { return _prefs?.sweepSources        ?? [] }
 export function getDefaultIntakeListId(){ return _prefs?.defaultIntakeListId ?? null }
 export function getIntakeStatusId()     { return _prefs?.intakeStatusId      ?? null }
+export function getProjectCalendarId()  { return _prefs?.projectCalendarId   ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +109,13 @@ export function setDefaultIntakeListId(listId) {
 export function setIntakeStatusId(statusId) {
   if (!_prefs) return
   _prefs.intakeStatusId = statusId ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setProjectCalendarId(calendarId) {
+  if (!_prefs) return
+  _prefs.projectCalendarId = calendarId ?? null
   _dirty = true
   _scheduleSave()
 }

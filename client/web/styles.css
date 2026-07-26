@@ -1618,6 +1618,33 @@ body.resize-active * { cursor: ns-resize !important; }
 .col-sort-date-btn:hover { opacity: 0.7; }
 .col-sort-date-btn.active { opacity: 1; }
 
+/* Hammer toggle: marks a status column as an "in progress" stage */
+.col-inprogress-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.25;
+  filter: grayscale(1);
+  transition: opacity 0.15s, filter 0.15s;
+  flex-shrink: 0;
+}
+.col-inprogress-btn:hover { opacity: 0.7; }
+.col-inprogress-btn.active { opacity: 1; filter: none; }
+
+/* Board / list project-calendar selector */
+.board-calendar-select {
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .done-window-toggle {
   display: flex;
   gap: 2px;
