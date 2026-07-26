@@ -5,32 +5,44 @@ import {
 } from './providers/calendarTasks.js'
 import { patchTask } from './providers/googleTasksIntake.js'
 import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js'
-import { updateList, deleteList } from './providers/kairosLists.js'
+import { updateStatus, deleteStatus } from './providers/kairosStatuses.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
-const DONE_COL_ID     = '__done__'
-const UNLISTED_COL_ID = '__unlisted__'
+const DONE_COL_ID = '__done__'
 
 let _sortables  = []
 let _callbacks  = {}
-let _taskLists  = []   // Kairos lists [{id, calendarId, name, order}]
-let _boardItems = []   // CalendarItem[] — calendar task events
+let _statuses   = []   // Kairos statuses [{id, calendarId, name, order, inProgress}] for the selected calendar
+let _calendarId = null // calendar the board is scoped to
+let _boardItems = []   // CalendarItem[] — calendar task events (all calendars; filtered to _calendarId at render)
 let _doneWindow = 30
+
+// The board renders one calendar at a time. Items whose statusId is missing or
+// points at a status not on this calendar fall into the first (lowest-order)
+// column — Intake by seed convention — so legacy/untriaged tasks surface there.
+function _fallbackStatusId() {
+  return _statuses[0]?.id ?? null
+}
+
+function _effectiveStatusId(item) {
+  const sid = item.metadata?.statusId
+  return (sid && _statuses.some(s => s.id === sid)) ? sid : _fallbackStatusId()
+}
 
 // ── Sort mode ─────────────────────────────────────────────────────────────────
 
-function setColSort(listId, mode) {
-  if (getTaskColumnSort()[listId] === mode) return
-  setTaskColumnSort(listId, mode)
-  renderBoard(_taskLists, _boardItems, _callbacks, _doneWindow)
+function setColSort(statusId, mode) {
+  if (getTaskColumnSort()[statusId] === mode) return
+  setTaskColumnSort(statusId, mode)
+  renderBoard(_statuses, _boardItems, _callbacks, _doneWindow, _calendarId)
 }
 
-function colSortMode(listId) {
-  return getTaskColumnSort()[listId] ?? 'manual'
+function colSortMode(statusId) {
+  return getTaskColumnSort()[statusId] ?? 'manual'
 }
 
-function sortedItems(items, listId) {
-  if (colSortMode(listId) === 'date') {
+function sortedItems(items, statusId) {
+  if (colSortMode(statusId) === 'date') {
     return [...items].sort((a, b) => {
       if (!a.due && !b.due) return 0
       if (!a.due) return 1
@@ -199,68 +211,51 @@ export function destroyBoard() {
   document.getElementById('board').innerHTML = ''
 }
 
-export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
-  _taskLists  = taskLists
+export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, calendarId = null) {
+  _statuses   = [...statuses].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  _calendarId = calendarId
   _boardItems = boardItems
   _callbacks  = callbacks
   _doneWindow = doneWindow
 
   const scrollTops = {}
-  document.querySelectorAll('.board-task-list[data-list-id]').forEach(el => {
-    if (el.scrollTop > 0) scrollTops[el.dataset.listId] = el.scrollTop
+  document.querySelectorAll('.board-task-list[data-status-id]').forEach(el => {
+    if (el.scrollTop > 0) scrollTops[el.dataset.statusId] = el.scrollTop
   })
 
   destroyBoard()
   const board = document.getElementById('board')
 
-  // Partition: active tasks keyed by Firestore listId, completed in Done, unassigned in Unlisted
-  const knownListIds  = new Set(taskLists.map(l => l.id))
-  const activeByList  = {}
-  const doneItems     = []
-  const unlistedItems = []
+  // Only this calendar's task events; partition active tasks by effective status,
+  // completed ones into the synthetic Done column.
+  const items = calendarId
+    ? boardItems.filter(i => i.source.account_id === calendarId)
+    : boardItems
+  const activeByStatus = {}
+  const doneItems      = []
 
-  for (const item of boardItems) {
+  for (const item of items) {
     if (item.status === 'COMPLETED') {
       doneItems.push(item)
     } else {
-      const lid = item.metadata?.listId
-      if (lid && knownListIds.has(lid)) {
-        if (!activeByList[lid]) activeByList[lid] = []
-        activeByList[lid].push(item)
-      } else {
-        unlistedItems.push(item)
-      }
+      const sid = _effectiveStatusId(item)
+      if (!sid) continue
+      if (!activeByStatus[sid]) activeByStatus[sid] = []
+      activeByStatus[sid].push(item)
     }
   }
 
-  // Columns in ascending list.order
-  const sorted = [...taskLists].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-  for (const list of sorted) {
-    const items = sortedItems(activeByList[list.id] ?? [], list.id)
-    const col   = buildCol(list, items, 'user', doneWindow)
+  for (const status of _statuses) {
+    const colItems = sortedItems(activeByStatus[status.id] ?? [], status.id)
+    const col      = buildCol(status, colItems, 'user', doneWindow)
     board.appendChild(col)
     _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
       group:      'tasks',
       animation:  150,
       ghostClass: 'board-ghost',
       dragClass:  'board-dragging',
-      sort: colSortMode(list.id) !== 'date',
+      sort: colSortMode(status.id) !== 'date',
       onEnd: handleDrop,
-    }))
-  }
-
-  if (unlistedItems.length > 0) {
-    const unlistedCol = buildCol(
-      { id: UNLISTED_COL_ID, name: 'Unlisted', calendarId: null },
-      unlistedItems, 'unlisted', doneWindow,
-    )
-    board.appendChild(unlistedCol)
-    _sortables.push(Sortable.create(unlistedCol.querySelector('.board-task-list'), {
-      group:      { name: 'tasks', pull: true, put: false },
-      animation:  150,
-      ghostClass: 'board-ghost',
-      sort:       false,
-      onEnd:      handleDrop,
     }))
   }
 
@@ -269,7 +264,7 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     doneItems.slice(0, 100), 'done', doneWindow,
   )
   board.appendChild(doneCol)
-  board.appendChild(buildAddListCol(callbacks))
+  board.appendChild(buildAddStatusCol(callbacks))
   _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
     group:      'tasks',
     animation:  150,
@@ -285,22 +280,21 @@ export function renderBoard(taskLists, boardItems, callbacks, doneWindow = 30) {
     onEnd: handleColReorder,
   }))
 
-  document.querySelectorAll('.board-task-list[data-list-id]').forEach(el => {
-    const saved = scrollTops[el.dataset.listId]
+  document.querySelectorAll('.board-task-list[data-status-id]').forEach(el => {
+    const saved = scrollTops[el.dataset.statusId]
     if (saved) el.scrollTop = saved
   })
 }
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
-function buildCol(list, items, colType, doneWindow) {
-  const isUser     = colType === 'user'
-  const isDone     = colType === 'done'
-  const isUnlisted = colType === 'unlisted'
+function buildCol(status, items, colType, doneWindow) {
+  const isUser = colType === 'user'
+  const isDone = colType === 'done'
 
   const col = document.createElement('div')
-  col.className = `board-col${isDone ? ' board-col-done' : isUnlisted ? ' board-col-unlisted' : ' board-col-reorderable'}`
-  if (isUser) col.dataset.listId = list.id
+  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}`
+  if (isUser) col.dataset.statusId = status.id
 
   const hdr = document.createElement('div')
   hdr.className = 'board-col-header'
@@ -315,7 +309,7 @@ function buildCol(list, items, colType, doneWindow) {
 
   const titleEl = document.createElement('span')
   titleEl.className   = 'board-col-title'
-  titleEl.textContent = list.name ?? ''
+  titleEl.textContent = status.name ?? ''
 
   const countEl = document.createElement('span')
   countEl.className   = 'board-col-count'
@@ -330,7 +324,7 @@ function buildCol(list, items, colType, doneWindow) {
       const inp = document.createElement('input')
       inp.type      = 'text'
       inp.className = 'board-col-title-input'
-      inp.value     = list.name ?? ''
+      inp.value     = status.name ?? ''
       inp.maxLength = 100
       titleEl.replaceWith(inp)
       inp.focus()
@@ -341,13 +335,13 @@ function buildCol(list, items, colType, doneWindow) {
         if (done) return
         done = true
         const newName = inp.value.trim()
-        if (newName && newName !== list.name) {
+        if (newName && newName !== status.name) {
           try {
             const token = await getToken()
-            if (token) await updateList(token, list.id, { name: newName })
+            if (token) await updateStatus(token, status.id, { name: newName })
             _callbacks.onRefresh?.()
           } catch (err) {
-            console.error('Rename list failed:', err)
+            console.error('Rename status failed:', err)
             inp.replaceWith(titleEl)
           }
         } else {
@@ -363,33 +357,52 @@ function buildCol(list, items, colType, doneWindow) {
       })
     })
 
-    const isDate  = colSortMode(list.id) === 'date'
+    // Hammer toggle: mark this status as an "in progress" stage. Many statuses
+    // may be flagged; any task in a flagged status gets the green treatment.
+    const hammerBtn = document.createElement('button')
+    hammerBtn.className   = `col-inprogress-btn${status.inProgress ? ' active' : ''}`
+    hammerBtn.textContent = '🔨'
+    hammerBtn.title       = status.inProgress
+      ? 'In-progress stage — click to unset'
+      : 'Mark as an in-progress stage'
+    hammerBtn.addEventListener('click', async () => {
+      try {
+        const token = await getToken()
+        if (token) await updateStatus(token, status.id, { inProgress: !status.inProgress })
+        _callbacks.onRefresh?.()
+      } catch (err) {
+        console.error('Toggle in-progress failed:', err)
+      }
+    })
+    hdr.appendChild(hammerBtn)
+
+    const isDate  = colSortMode(status.id) === 'date'
     const sortBtn = document.createElement('button')
     sortBtn.className   = `col-sort-date-btn${isDate ? ' active' : ''}`
     sortBtn.textContent = '📅'
     sortBtn.title       = isDate ? 'Sorted by date — click for manual order' : 'Sort by date'
-    sortBtn.addEventListener('click', () => setColSort(list.id, isDate ? 'manual' : 'date'))
+    sortBtn.addEventListener('click', () => setColSort(status.id, isDate ? 'manual' : 'date'))
     hdr.appendChild(sortBtn)
 
     const addBtn = document.createElement('button')
     addBtn.className   = 'board-add-btn'
     addBtn.title       = 'New task'
     addBtn.textContent = '+'
-    addBtn.addEventListener('click', () => _callbacks.onCreate?.(list.calendarId, list.id))
+    addBtn.addEventListener('click', () => _callbacks.onCreate?.(status.calendarId, status.id))
     hdr.appendChild(addBtn)
 
     const delBtn = document.createElement('button')
     delBtn.className   = 'board-col-delete-btn'
-    delBtn.title       = 'Delete list'
+    delBtn.title       = 'Delete status'
     delBtn.textContent = '🗑'
     delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete "${list.name}"? Tasks in this list will become unassigned.`)) return
+      if (!confirm(`Delete "${status.name}"? Tasks in this status will move to the first column.`)) return
       try {
         const token = await getToken()
-        if (token) await deleteList(token, list.id)
+        if (token) await deleteStatus(token, status.id)
         _callbacks.onRefresh?.()
       } catch (err) {
-        console.error('Delete list failed:', err)
+        console.error('Delete status failed:', err)
       }
     })
     hdr.appendChild(delBtn)
@@ -409,8 +422,8 @@ function buildCol(list, items, colType, doneWindow) {
   }
 
   const listEl = document.createElement('div')
-  listEl.className      = 'board-task-list'
-  listEl.dataset.listId = list.id
+  listEl.className        = 'board-task-list'
+  listEl.dataset.statusId = status.id
 
   for (const item of items) listEl.appendChild(buildCard(item))
 
@@ -418,13 +431,13 @@ function buildCol(list, items, colType, doneWindow) {
   return col
 }
 
-function buildAddListCol(callbacks) {
+function buildAddStatusCol(callbacks) {
   const col = document.createElement('div')
   col.className = 'board-col board-col-add'
 
   const addBtn = document.createElement('button')
   addBtn.className   = 'board-add-list-btn'
-  addBtn.textContent = '+ New list'
+  addBtn.textContent = '+ New status'
 
   const form = document.createElement('div')
   form.className = 'board-add-list-form'
@@ -433,7 +446,7 @@ function buildAddListCol(callbacks) {
   const inp = document.createElement('input')
   inp.type        = 'text'
   inp.className   = 'board-add-list-input'
-  inp.placeholder = 'List name'
+  inp.placeholder = 'Status name'
   inp.maxLength   = 100
 
   const confirmBtn = document.createElement('button')
@@ -450,7 +463,7 @@ function buildAddListCol(callbacks) {
   const hideForm = () => { form.hidden = true; addBtn.hidden = false }
   const submit   = () => {
     const name = inp.value.trim()
-    if (name) callbacks.onCreateList?.(name)
+    if (name) callbacks.onCreateStatus?.(name)
     hideForm()
   }
 
@@ -470,10 +483,16 @@ function buildAddListCol(callbacks) {
 
 function buildCard(item) {
   const isDone = item.status === 'COMPLETED'
+  // Green ring when the task's status is flagged in-progress (past-due, shown via
+  // the red "overdue" due-chip, takes priority — suppress green then).
+  const today     = new Date(); today.setHours(0, 0, 0, 0)
+  const isPastDue = !isDone && item.due && new Date(item.due).setHours(0, 0, 0, 0) < today
+  const st        = item.metadata?.statusId ? _statuses.find(s => s.id === item.metadata.statusId) : null
+  const inProgress = !isDone && !isPastDue && !!st?.inProgress
   const card   = document.createElement('div')
-  card.className          = `board-card${isDone ? ' board-card-done' : ''}`
+  card.className          = `board-card${isDone ? ' board-card-done' : ''}${inProgress ? ' in-progress' : ''}`
   card.dataset.itemId     = item.id
-  card.dataset.listId     = item.metadata?.listId ?? ''
+  card.dataset.statusId   = _effectiveStatusId(item) ?? ''
   card.dataset.calendarId = item.source.account_id
   card.dataset.extId      = item.source.external_id
   card.dataset.order      = String(item.metadata?.order ?? 0)
@@ -558,13 +577,13 @@ async function handleDrop(evt) {
   const { item: cardEl, from, to } = evt
   if (from === to && evt.oldIndex === evt.newIndex) return
 
-  const fromListId  = from.dataset.listId
-  const toListId    = to.dataset.listId
-  const calendarId  = cardEl.dataset.calendarId
-  const extId       = cardEl.dataset.extId
+  const fromStatusId = from.dataset.statusId
+  const toStatusId   = to.dataset.statusId
+  const calendarId   = cardEl.dataset.calendarId
+  const extId        = cardEl.dataset.extId
 
-  if (fromListId === toListId) {
-    if (fromListId === DONE_COL_ID) return
+  if (fromStatusId === toStatusId) {
+    if (fromStatusId === DONE_COL_ID) return
     // Same-column reorder: compute new order float from neighbors
     const cards   = [...to.children]
     const idx     = cards.indexOf(cardEl)
@@ -584,11 +603,12 @@ async function handleDrop(evt) {
 
     if (!isFinite(newOrder) || newOrder === prevOrd || newOrder === nextOrd) {
       // Float precision exhausted — rebalance the whole column
-      const listItems = _boardItems.filter(i =>
-        i.metadata?.listId === fromListId && i.status !== 'COMPLETED'
+      const colItems = _boardItems.filter(i =>
+        i.status !== 'COMPLETED' && i.source.account_id === calendarId &&
+        _effectiveStatusId(i) === fromStatusId
       )
       const token = await getToken()
-      if (token) await rebalanceColumn(token, calendarId, fromListId, listItems)
+      if (token) await rebalanceColumn(token, calendarId, colItems)
       _callbacks.onRefresh?.()
       return
     }
@@ -611,22 +631,22 @@ async function handleDrop(evt) {
   if (!token) { _callbacks.onRefresh?.(); return }
 
   try {
-    if (toListId === DONE_COL_ID) {
+    if (toStatusId === DONE_COL_ID) {
       const srcItem = _boardItems.find(i => i.source.external_id === extId)
       await completeTask(token, calendarId, extId, srcItem?.title ?? '')
-    } else if (fromListId === DONE_COL_ID) {
+    } else if (fromStatusId === DONE_COL_ID) {
       const srcItem = _boardItems.find(i => i.source.external_id === extId)
       await uncompleteTask(token, calendarId, extId, srcItem?.title ?? '')
-      if (toListId) await patchTaskProps(token, calendarId, extId, { listId: toListId })
+      if (toStatusId) await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
     } else {
       const srcItem  = _boardItems.find(i => i.source.external_id === extId)
       if (srcItem?.metadata?.unprocessed) {
         // Adopt: tag the master event (or the event itself if non-recurring) so
         // all instances are picked up by the isTask=true query on next load.
         const masterEventId = srcItem.metadata.recurringEventId ?? extId
-        await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', listId: toListId })
+        await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', statusId: toStatusId })
       } else {
-        await patchTaskProps(token, calendarId, extId, { listId: toListId })
+        await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
       }
     }
   } catch (err) {
@@ -644,11 +664,11 @@ async function handleColReorder() {
 
   await Promise.allSettled(
     colEls.map((el, i) => {
-      const listId   = el.dataset.listId
+      const statusId = el.dataset.statusId
       const newOrder = (i + 1) * 10
-      const list     = _taskLists.find(l => l.id === listId)
-      if (!list || Math.abs((list.order ?? 0) - newOrder) < 0.1) return Promise.resolve()
-      return updateList(token, listId, { order: newOrder })
+      const status   = _statuses.find(s => s.id === statusId)
+      if (!status || Math.abs((status.order ?? 0) - newOrder) < 0.1) return Promise.resolve()
+      return updateStatus(token, statusId, { order: newOrder })
     })
   )
 }

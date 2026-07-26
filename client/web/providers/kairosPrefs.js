@@ -7,7 +7,10 @@
 //     taskCalendars:       string[],   // ordered project/task calendars
 //     taskColumnSort:      { [calId]: 'manual' | 'date' },
 //     sweepSources:        [{ accountId, listId, listName }],
-//     defaultIntakeListId: string|null, // shared bucket — voice captures + swept tasks land here for processing
+//     defaultIntakeListId: string|null, // DEPRECATED (retired in intake cutover) — replaced by intakeStatusId
+//     intakeStatusId:      string|null, // shared bucket — voice captures + swept tasks land in this status; the
+//                                       // status record carries its own calendarId, so this one pointer resolves
+//                                       // to both the destination status and its project calendar
 //   }
 
 import { fsGet, fsSet } from './firestore.js'
@@ -18,7 +21,9 @@ const DEFAULTS = () => ({
   taskCalendars:       [],
   taskColumnSort:      {},
   sweepSources:        [],   // [{ accountId, listId, listName }]
-  defaultIntakeListId: null, // Kairos list ID — shared intake bucket for voice captures + swept tasks
+  defaultIntakeListId: null, // DEPRECATED — see intakeStatusId
+  intakeStatusId:      null, // Kairos status ID — shared intake bucket for voice captures + swept tasks
+  projectCalendarId:   null, // calendar the board + list views are scoped to (the active "project")
 })
 
 let _prefs       = null
@@ -68,6 +73,8 @@ export function getTaskCalendars()    { return _prefs?.taskCalendars     ?? [] }
 export function getTaskColumnSort()   { return _prefs?.taskColumnSort    ?? {} }
 export function getSweepSources()       { return _prefs?.sweepSources        ?? [] }
 export function getDefaultIntakeListId(){ return _prefs?.defaultIntakeListId ?? null }
+export function getIntakeStatusId()     { return _prefs?.intakeStatusId      ?? null }
+export function getProjectCalendarId()  { return _prefs?.projectCalendarId   ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +102,20 @@ export function setSweepSources(sources) {
 export function setDefaultIntakeListId(listId) {
   if (!_prefs) return
   _prefs.defaultIntakeListId = listId ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setIntakeStatusId(statusId) {
+  if (!_prefs) return
+  _prefs.intakeStatusId = statusId ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setProjectCalendarId(calendarId) {
+  if (!_prefs) return
+  _prefs.projectCalendarId = calendarId ?? null
   _dirty = true
   _scheduleSave()
 }

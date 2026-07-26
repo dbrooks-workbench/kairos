@@ -8,7 +8,7 @@
 import { parseTaskNotes } from './parsers.js'
 import { generateKairosId } from './driveTaskMeta.js'
 import { createTask } from './calendarTasks.js'
-import { getList } from './kairosLists.js'
+import { getStatus } from './kairosStatuses.js'
 
 const GT_BASE = 'https://www.googleapis.com/tasks/v1'
 
@@ -91,16 +91,17 @@ function _notesToHtml(body, checklist) {
 // accounts:      [{ id, email, primary, token }]  — all connected accounts
 // calToken:      primary account token (for Google Calendar writes)
 // webhookToken:  from /api/webhook-token; written into completion footer
-// sweepSources:  [{ accountId, listId, listName }]
-// targetListId:  Kairos list ID where swept tasks land
-// onProgress:    optional ({ swept, failed, skipped, total }) callback
+// sweepSources:   [{ accountId, listId, listName }]
+// targetStatusId: Kairos status ID (intake) where swept tasks land; its record
+//                 carries the calendarId that determines the destination calendar
+// onProgress:     optional ({ swept, failed, skipped, total }) callback
 //
 // Returns { swept, failed, skipped, total }.
-export async function runSweep({ accounts, calToken, webhookToken, sweepSources, targetListId, onProgress }) {
-  const targetList = getList(targetListId)
-  if (!targetList) throw new Error('Sweep target list not found — check sweep configuration.')
+export async function runSweep({ accounts, calToken, webhookToken, sweepSources, targetStatusId, onProgress }) {
+  const targetStatus = getStatus(targetStatusId)
+  if (!targetStatus) throw new Error('Sweep target status not found — check intake configuration.')
 
-  const targetCalId = targetList.calendarId
+  const targetCalId = targetStatus.calendarId
   let swept = 0, failed = 0, skipped = 0, total = 0
 
   for (const source of sweepSources) {
@@ -138,7 +139,7 @@ export async function runSweep({ accounts, calToken, webhookToken, sweepSources,
           title:        task.title,
           body:         htmlBody,
           kairosId,
-          listId:       targetListId,
+          statusId:     targetStatusId,
           order:        Date.now(),
           loe:          loe || null,
           date:         dateStr,

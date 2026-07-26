@@ -1,19 +1,21 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId } from './providers/kairosPrefs.js'
+import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
+import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
+import { renderList, destroyList } from './list.js'
 import { runMigration } from './migration.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.24.0'
+const VERSION   = '0.28.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -27,6 +29,76 @@ const state = {
   boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
+  pastDueTasks: [],        // incomplete tasks due in the last 30d — rolled forward to today on the calendar
+}
+
+// Incomplete tasks overdue within this window are "pushed forward" to today on
+// the calendar (render-time only — the stored due date is never mutated). Older
+// than this, they stay at their real date rather than roll forward forever.
+const ROLL_LOOKBACK_DAYS = 30
+
+function todayMidnight() {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
+
+// A dated, incomplete task whose due date is in [today-30d, today) — eligible to
+// be rolled forward. Undated tasks and tasks older than the window are excluded.
+function isRollablePastDue(item) {
+  // Only real Kairos tasks roll — matches exactly what refreshPastDueTasks fetches
+  // (isTask events), so native task-calendar events are never suppressed-then-lost.
+  if (item.item_type !== 'TASK' || item.status === 'COMPLETED') return false
+  if (!item.start || item.metadata?.noDate) return false
+  const t = todayMidnight()
+  const s = new Date(item.start)
+  return s < t && s >= new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+}
+
+// Render-time clone placed on today as an all-day chip (marked so it keeps the
+// red past-due ring even though its displayed date is now today).
+function rollToToday(item) {
+  const t = todayMidnight()
+  return {
+    ...item,
+    start:    t,
+    end:      null,
+    due:      t,
+    all_day:  true,
+    metadata: { ...item.metadata, rolledPastDue: true },
+  }
+}
+
+// Fetch incomplete, dated tasks due in the last 30 days across task calendars,
+// de-duplicating recurring series to the single most-recent overdue instance.
+async function refreshPastDueTasks() {
+  const token = await getToken()
+  if (!token) { state.pastDueTasks = []; return }
+  const t     = todayMidnight()
+  const since = new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  const calIds = getTaskCalendars()
+  const per = await Promise.all(
+    calIds.map(cal => getTaskEvents(token, cal, since, t).catch(() => []))
+  )
+  const all = per.flat().filter(x =>
+    x.status !== 'COMPLETED' && x.start && !x.metadata?.noDate && new Date(x.start) < t
+  )
+  const bySeries = new Map()
+  const singles  = []
+  for (const x of all) {
+    const sid = x.metadata?.recurringEventId
+    if (!sid) { singles.push(x); continue }
+    const prev = bySeries.get(sid)
+    if (!prev || new Date(x.start) > new Date(prev.start)) bySeries.set(sid, x)
+  }
+  state.pastDueTasks = [...singles, ...bySeries.values()]
+}
+
+// Status IDs flagged "in progress" — refreshed at the top of each render pass so
+// task chips in those statuses get the green ring (past-due red still wins).
+let _inProgressIds = new Set()
+function isInProgressItem(item, isTask, isDone) {
+  const sid = item.metadata?.statusId
+  return isTask && !isDone && !!sid && _inProgressIds.has(sid)
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -124,6 +196,9 @@ async function handleToggleTask(item) {
     else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'NEEDS_ACTION' : 'COMPLETED'
+    // Drop a just-completed rolled-forward task from today's pile immediately;
+    // a full refresh reconciles the rest.
+    if (!isDone) state.pastDueTasks = state.pastDueTasks.filter(t => t.id !== item.id)
     renderItems(getVisibleItems())
     appendLogEntry(token, {
       item_id:       item.id,
@@ -265,7 +340,8 @@ function preloadAdjacentWeeks() {
 
 async function refreshCalendarItems() {
   const end  = addDays(state.weekStart, 7)
-  state.items = await fetchItems(state.weekStart, end)
+  const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
+  state.items = items
   renderItems(getVisibleItems())
 }
 
@@ -285,15 +361,20 @@ function calendarModalCallbacks() {
 
 function setView(v) {
   state.view = v
-  document.getElementById('calendar').hidden    = v !== 'calendar'
-  document.getElementById('mobile-cal').hidden  = v !== 'calendar'
-  document.getElementById('board-toolbar').hidden = v !== 'board'
-  document.getElementById('board').hidden       = v !== 'board'
+  const isWork = v === 'board' || v === 'list'
+  document.getElementById('calendar').hidden      = v !== 'calendar'
+  document.getElementById('mobile-cal').hidden    = v !== 'calendar'
+  document.getElementById('board-toolbar').hidden = !isWork
+  document.getElementById('board').hidden         = v !== 'board'
+  document.getElementById('list').hidden          = v !== 'list'
+  if (v !== 'board') destroyBoard()
+  if (v !== 'list')  destroyList()
   document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
   document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
+  document.getElementById('btn-view-list').classList.toggle('active', v === 'list')
 
   stopPolling()
-  if (v === 'board') {
+  if (isWork) {
     loadBoardData()
     startPolling(60_000)
   } else {
@@ -311,11 +392,12 @@ function startPolling(ms) {
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
     await runSpawnScan()
-    if (state.view === 'board') {
+    if (state.view === 'board' || state.view === 'list') {
       await loadBoardData()
     } else {
       const end  = addDays(state.weekStart, 7)
-      state.items = await fetchItems(state.weekStart, end)
+      const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
+      state.items = items
       renderItems(getVisibleItems())
     }
   }, ms)
@@ -333,7 +415,7 @@ document.addEventListener('visibilitychange', () => {
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
-      if (state.view === 'board') loadBoardData()
+      if (state.view === 'board' || state.view === 'list') loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
         state.items = items
         renderItems(getVisibleItems())
@@ -343,10 +425,23 @@ document.addEventListener('visibilitychange', () => {
 
 // ── Board data + callbacks ────────────────────────────────────────────────────
 
+// The board + list views are scoped to one "project" calendar. Prefer the saved
+// choice when it's still a task calendar, else the intake status's calendar, else
+// the first task calendar.
+function currentProjectCalendarId() {
+  const taskCals = getTaskCalendars()
+  if (!taskCals.length) return null
+  const saved = getProjectCalendarId()
+  if (saved && taskCals.includes(saved)) return saved
+  const intakeStatus = getIntakeStatusId() ? getStatus(getIntakeStatusId()) : null
+  if (intakeStatus && taskCals.includes(intakeStatus.calendarId)) return intakeStatus.calendarId
+  return taskCals[0]
+}
+
 function boardCallbacks() {
   return {
-    onCreate:     (calendarId, listId) => openEditor(
-      { mode: 'task', calendarId: calendarId ?? getTaskCalendars()[0] ?? null, listId },
+    onCreate:     (calendarId, statusId) => openEditor(
+      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), statusId },
       { onSaved: loadBoardData },
     ),
     onEdit:       item    => openEditorForEdit(item, {
@@ -355,10 +450,40 @@ function boardCallbacks() {
     }),
     onRefresh:          loadBoardData,
     onDoneWindowChange: days => { state.doneWindow = days; loadBoardData() },
+    onCreateStatus: async name => {
+      const token = await getToken()
+      if (!token) return
+      const calId = currentProjectCalendarId()
+      if (!calId) return
+      try {
+        const calStatuses = getStatusesForCalendar(calId)
+        const maxOrder    = calStatuses.length ? Math.max(...calStatuses.map(s => s.order ?? 0)) : 0
+        await createStatus(token, calId, name, maxOrder + 10)
+        await loadBoardData()
+      } catch (err) {
+        console.error('Create status failed:', err)
+      }
+    },
+  }
+}
+
+function rerenderBoard() {
+  const calId = currentProjectCalendarId()
+  renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
+}
+
+function listCallbacks() {
+  return {
+    onCreate: (calendarId, listId) => openEditor(
+      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), listId },
+      { onSaved: loadBoardData },
+    ),
+    onEdit:   item => openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }),
+    onRefresh: loadBoardData,
     onCreateList: async name => {
       const token = await getToken()
       if (!token) return
-      const calId = getTaskCalendars()[0] ?? null
+      const calId = currentProjectCalendarId()
       if (!calId) return
       try {
         const calLists = getListsForCalendar(calId)
@@ -370,6 +495,34 @@ function boardCallbacks() {
       }
     },
   }
+}
+
+function renderListView() {
+  const calId = currentProjectCalendarId()
+  renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
+}
+
+// Re-render whichever work surface (board or list) is active.
+function rerenderWorkView() {
+  if (state.view === 'list') renderListView()
+  else rerenderBoard()
+}
+
+// Fill the board/list project-calendar <select> from the designated task calendars.
+function populateProjectSelector() {
+  const sel = document.getElementById('board-calendar-select')
+  if (!sel) return
+  const taskCals = getTaskCalendars()
+  const current  = currentProjectCalendarId()
+  sel.innerHTML = ''
+  for (const calId of taskCals) {
+    const opt = document.createElement('option')
+    opt.value       = calId
+    opt.textContent = state.calendars.find(c => c.id === calId)?.summary ?? calId
+    if (calId === current) opt.selected = true
+    sel.appendChild(opt)
+  }
+  sel.hidden = taskCals.length <= 1
 }
 
 function getBoardItems() {
@@ -426,9 +579,14 @@ async function loadBoardData() {
       ).then(results => { state.boardItems = results.flat() }),
       loadPrefs(token),
       loadLists(token),
+      loadStatuses(token),
     ])
+    // Backfill statuses for task calendars designated before statuses existed
+    // (ensureDefaultStatuses is a no-op where a calendar already has any).
+    await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
     state.taskLists = getAllLists()
-    renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+    populateProjectSelector()
+    rerenderWorkView()
     ensureFooters(token, state.boardItems).catch(console.warn)
     // Board changes (completion, snooze, move) must be visible immediately when the
     // user switches back to the calendar view — drop the cached week so render() re-fetches.
@@ -439,10 +597,13 @@ async function loadBoardData() {
 }
 
 // Filter already-fetched items by calendar visibility — no network call needed.
+// Also rolls past-due tasks (last 30d) forward: they're suppressed at their real
+// past date and re-emitted as all-day chips on today (see rollToToday).
 function getVisibleItems() {
-  return state.items.filter(item =>
-    item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
-  )
+  const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
+  const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
+  const rolled  = state.pastDueTasks.filter(visible).map(rollToToday)
+  return items.concat(rolled)
 }
 
 // ── Calendar picker ───────────────────────────────────────────────────────────
@@ -512,6 +673,7 @@ function renderCalendarPicker() {
         const token = await getToken()
         if (token) {
           await ensureDefaultLists(token, cal.id)
+          await ensureDefaultStatuses(token, cal.id)
           row.insertAdjacentElement('afterend', buildListsPanel(cal.id))
         }
       }
@@ -796,7 +958,7 @@ async function _fetchWebhookToken() {
 // Run a sweep pass if sources and target are configured. Silent unless tasks are swept.
 async function runSweepIfConfigured() {
   const sources  = getSweepSources()
-  const targetId = getDefaultIntakeListId()
+  const targetId = getIntakeStatusId()
   if (!sources.length || !targetId) return
 
   const accounts = await getTokens()
@@ -806,7 +968,7 @@ async function runSweepIfConfigured() {
   const webhookToken = await _fetchWebhookToken()
 
   try {
-    const result = await runSweep({ accounts, calToken, webhookToken, sweepSources: sources, targetListId: targetId })
+    const result = await runSweep({ accounts, calToken, webhookToken, sweepSources: sources, targetStatusId: targetId })
     if (result.swept > 0) {
       console.log(`[sweep] swept ${result.swept} tasks into Kairos`)
       _weekCache.clear()
@@ -821,7 +983,7 @@ async function runSweepIfConfigured() {
 async function openConfigDialog() {
   const dialog   = document.getElementById('sweep-dialog')
   const container = document.getElementById('sweep-sources-container')
-  const targetSel = document.getElementById('intake-list-select')
+  const targetSel = document.getElementById('intake-status-select')
   const status    = document.getElementById('sweep-dialog-status')
   const saveBtn      = document.getElementById('sweep-save-btn')
   const cancelBtn    = document.getElementById('sweep-cancel-btn')
@@ -830,15 +992,20 @@ async function openConfigDialog() {
   dialog.hidden = false
   status.textContent = ''
 
-  // Populate default intake list dropdown
-  targetSel.innerHTML = '<option value="">— select a list —</option>'
-  const savedTarget = getDefaultIntakeListId()
-  for (const list of getAllLists().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
-    const opt = document.createElement('option')
-    opt.value       = list.id
-    opt.textContent = list.name
-    opt.selected    = list.id === savedTarget
-    targetSel.appendChild(opt)
+  // Populate default intake status dropdown — statuses across all task calendars,
+  // each labelled with its calendar to disambiguate same-named statuses.
+  targetSel.innerHTML = '<option value="">— select a status —</option>'
+  const savedTarget = getIntakeStatusId()
+  const taskCalIds  = getTaskCalendars()
+  const calName     = id => state.calendars.find(c => c.id === id)?.summary ?? id
+  for (const calId of taskCalIds) {
+    for (const st of getStatusesForCalendar(calId)) {
+      const opt = document.createElement('option')
+      opt.value       = st.id
+      opt.textContent = `${st.name} — ${calName(calId)}`
+      opt.selected    = st.id === savedTarget
+      targetSel.appendChild(opt)
+    }
   }
 
   // Load GT lists per account and build source checkboxes
@@ -894,7 +1061,7 @@ async function openConfigDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setDefaultIntakeListId(targetSel.value || null)
+    setIntakeStatusId(targetSel.value || null)
     dialog.hidden = true
   }
 
@@ -906,11 +1073,11 @@ async function openConfigDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setDefaultIntakeListId(targetSel.value || null)
+    setIntakeStatusId(targetSel.value || null)
 
     const targetId = targetSel.value
     if (!sources.length) { status.textContent = 'No sources selected.'; return }
-    if (!targetId)        { status.textContent = 'No intake list selected.'; return }
+    if (!targetId)        { status.textContent = 'No intake status selected.'; return }
 
     nowBtn.disabled = true
     status.textContent = 'Sweeping…'
@@ -922,7 +1089,7 @@ async function openConfigDialog() {
     try {
       const result = await runSweep({
         accounts, calToken, webhookToken,
-        sweepSources: sources, targetListId: targetId,
+        sweepSources: sources, targetStatusId: targetId,
         onProgress: ({ swept, total }) => {
           status.textContent = `Sweeping… ${swept}/${total}`
         },
@@ -954,7 +1121,7 @@ async function runSpawnScan() {
     const items  = await fetchItems(today, future)
     const { spawned } = await processSpawnDirectives(items, state.taskLists)
     if (spawned > 0) {
-      if (state.view === 'board') loadBoardData()
+      if (state.view === 'board' || state.view === 'list') loadBoardData()
       else refreshCalendarItems()
     }
   } catch (err) {
@@ -1130,6 +1297,7 @@ let _calDragItem = null  // task being dragged in the calendar all-day area
 function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
+  _inProgressIds = getInProgressStatusIds()
   const _now = new Date()
   const _todayMidnight = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate())
 
@@ -1229,7 +1397,8 @@ function renderItems(items) {
         isTask ? 'type-task' : '',
         isDone    ? 'completed' : '',
         isPast && !isTask && !isDone ? 'is-past'   : '',
-        isPastDue                    ? 'past-due'   : '',
+        isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
+        !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
         span.startsEarly             ? 'continues-left'  : '',
         span.endsLate                ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
@@ -1361,6 +1530,7 @@ function renderItems(items) {
         _timedTask && _timedDone                   ? 'completed' : '',
         _timedPast && !_timedTask && !_timedDone ? 'is-past'  : '',
         _timedTask && _timedPast  && !_timedDone ? 'past-due' : '',
+        !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
       ].filter(Boolean).join(' ')
       el.dataset.itemId = item.id
       if (_timedTask && !_timedDone && item.color) applyColor(el, item.color)
@@ -1528,6 +1698,7 @@ function initMobileDayView() {
 function renderMobileDay() {
   if (window.innerWidth > 768) return  // desktop — skip
 
+  _inProgressIds = getInProgressStatusIds()
   const day      = state.mobileDay
   const dayStart = new Date(day); dayStart.setHours(0, 0, 0, 0)
   const dayEnd   = new Date(dayStart.getTime() + 86_400_000)
@@ -1570,7 +1741,8 @@ function renderMobileDay() {
       isTask    ? 'type-task' : '',
       isDone    ? 'completed' : '',
       isPast && !isTask && !isDone ? 'is-past'  : '',
-      isPastDue                    ? 'past-due' : '',
+      isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
+      !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
     ].filter(Boolean).join(' ')
     chip.title = item.title
 
@@ -1649,6 +1821,7 @@ function renderMobileDay() {
       _timedTask && _timedDone                 ? 'completed' : '',
       _timedPast && !_timedTask && !_timedDone ? 'is-past'   : '',
       _timedTask && _timedPast  && !_timedDone ? 'past-due'  : '',
+      !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
     ].filter(Boolean).join(' ')
     if (_timedTask && !_timedDone && item.color) applyColor(eventEl, item.color)
     else if (!_timedTask && item.color) applyColor(eventEl, item.color)
@@ -1921,11 +2094,15 @@ async function render() {
           state.taskCalendars   = new Set(getTaskCalendars())
         }) : null),
         getToken().then(t => t ? loadLists(t) : null),
+        getToken().then(t => t ? loadStatuses(t) : null),
       ])
       state.items = items
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
     }
+    // Roll past-due tasks onto today (needs prefs loaded for task calendars, so
+    // runs after the fetch above; re-renders once the set is in).
+    refreshPastDueTasks().then(() => renderItems(getVisibleItems())).catch(() => {})
   } catch (err) {
     console.error('Render failed:', err)
   }
@@ -1959,13 +2136,20 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 // View toggle
 document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
 document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
+document.getElementById('btn-view-list').addEventListener('click',     () => setView('list'))
+
+// Board / list project-calendar selector
+document.getElementById('board-calendar-select').addEventListener('change', e => {
+  setProjectCalendarId(e.target.value)
+  rerenderWorkView()
+})
 
 // Board recurring-task filter
 const _recurringToggle = document.getElementById('board-show-recurring')
 _recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
 _recurringToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:showRecurring', e.target.checked)
-  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+  rerenderWorkView()
 })
 
 // Board far-future filter
@@ -1973,7 +2157,7 @@ const _farFutureToggle = document.getElementById('board-hide-far-future')
 _farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
 _farFutureToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:hideFarFuture', e.target.checked)
-  renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
+  rerenderWorkView()
 })
 
 // Show version on hover over the app title
