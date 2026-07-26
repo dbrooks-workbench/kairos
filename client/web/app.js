@@ -4,6 +4,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
+import { loadStatuses, ensureDefaultStatuses } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -13,7 +14,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.24.0'
+const VERSION   = '0.24.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -426,7 +427,11 @@ async function loadBoardData() {
       ).then(results => { state.boardItems = results.flat() }),
       loadPrefs(token),
       loadLists(token),
+      loadStatuses(token),
     ])
+    // Backfill statuses for task calendars designated before statuses existed
+    // (ensureDefaultStatuses is a no-op where a calendar already has any).
+    await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
     state.taskLists = getAllLists()
     renderBoard(state.taskLists, getBoardItems(), boardCallbacks(), state.doneWindow)
     ensureFooters(token, state.boardItems).catch(console.warn)
@@ -512,6 +517,7 @@ function renderCalendarPicker() {
         const token = await getToken()
         if (token) {
           await ensureDefaultLists(token, cal.id)
+          await ensureDefaultStatuses(token, cal.id)
           row.insertAdjacentElement('afterend', buildListsPanel(cal.id))
         }
       }
@@ -1921,6 +1927,7 @@ async function render() {
           state.taskCalendars   = new Set(getTaskCalendars())
         }) : null),
         getToken().then(t => t ? loadLists(t) : null),
+        getToken().then(t => t ? loadStatuses(t) : null),
       ])
       state.items = items
       renderItems(getVisibleItems())
