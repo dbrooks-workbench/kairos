@@ -1440,7 +1440,8 @@ body.resize-active * { cursor: ns-resize !important; }
   accent-color: var(--today-color);
 }
 
-#board {
+#board,
+#list {
   flex: 1;
   min-height: 0;
   display: flex;

@@ -8,13 +8,14 @@ import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus,
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
+import { renderList, destroyList } from './list.js'
 import { runMigration } from './migration.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.26.1'
+const VERSION   = '0.27.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -294,15 +295,20 @@ function calendarModalCallbacks() {
 
 function setView(v) {
   state.view = v
-  document.getElementById('calendar').hidden    = v !== 'calendar'
-  document.getElementById('mobile-cal').hidden  = v !== 'calendar'
-  document.getElementById('board-toolbar').hidden = v !== 'board'
-  document.getElementById('board').hidden       = v !== 'board'
+  const isWork = v === 'board' || v === 'list'
+  document.getElementById('calendar').hidden      = v !== 'calendar'
+  document.getElementById('mobile-cal').hidden    = v !== 'calendar'
+  document.getElementById('board-toolbar').hidden = !isWork
+  document.getElementById('board').hidden         = v !== 'board'
+  document.getElementById('list').hidden          = v !== 'list'
+  if (v !== 'board') destroyBoard()
+  if (v !== 'list')  destroyList()
   document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
   document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
+  document.getElementById('btn-view-list').classList.toggle('active', v === 'list')
 
   stopPolling()
-  if (v === 'board') {
+  if (isWork) {
     loadBoardData()
     startPolling(60_000)
   } else {
@@ -320,7 +326,7 @@ function startPolling(ms) {
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
     await runSpawnScan()
-    if (state.view === 'board') {
+    if (state.view === 'board' || state.view === 'list') {
       await loadBoardData()
     } else {
       const end  = addDays(state.weekStart, 7)
@@ -342,7 +348,7 @@ document.addEventListener('visibilitychange', () => {
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
-      if (state.view === 'board') loadBoardData()
+      if (state.view === 'board' || state.view === 'list') loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
         state.items = items
         renderItems(getVisibleItems())
@@ -397,6 +403,42 @@ function boardCallbacks() {
 function rerenderBoard() {
   const calId = currentProjectCalendarId()
   renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
+}
+
+function listCallbacks() {
+  return {
+    onCreate: (calendarId, listId) => openEditor(
+      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), listId },
+      { onSaved: loadBoardData },
+    ),
+    onEdit:   item => openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }),
+    onRefresh: loadBoardData,
+    onCreateList: async name => {
+      const token = await getToken()
+      if (!token) return
+      const calId = currentProjectCalendarId()
+      if (!calId) return
+      try {
+        const calLists = getListsForCalendar(calId)
+        const maxOrder = calLists.length ? Math.max(...calLists.map(l => l.order ?? 0)) : 0
+        await createList(token, calId, name, maxOrder + 10)
+        await loadBoardData()
+      } catch (err) {
+        console.error('Create list failed:', err)
+      }
+    },
+  }
+}
+
+function renderListView() {
+  const calId = currentProjectCalendarId()
+  renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
+}
+
+// Re-render whichever work surface (board or list) is active.
+function rerenderWorkView() {
+  if (state.view === 'list') renderListView()
+  else rerenderBoard()
 }
 
 // Fill the board/list project-calendar <select> from the designated task calendars.
@@ -477,7 +519,7 @@ async function loadBoardData() {
     await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
     state.taskLists = getAllLists()
     populateProjectSelector()
-    rerenderBoard()
+    rerenderWorkView()
     ensureFooters(token, state.boardItems).catch(console.warn)
     // Board changes (completion, snooze, move) must be visible immediately when the
     // user switches back to the calendar view — drop the cached week so render() re-fetches.
@@ -1009,7 +1051,7 @@ async function runSpawnScan() {
     const items  = await fetchItems(today, future)
     const { spawned } = await processSpawnDirectives(items, state.taskLists)
     if (spawned > 0) {
-      if (state.view === 'board') loadBoardData()
+      if (state.view === 'board' || state.view === 'list') loadBoardData()
       else refreshCalendarItems()
     }
   } catch (err) {
@@ -2021,11 +2063,12 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 // View toggle
 document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
 document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
+document.getElementById('btn-view-list').addEventListener('click',     () => setView('list'))
 
 // Board / list project-calendar selector
 document.getElementById('board-calendar-select').addEventListener('change', e => {
   setProjectCalendarId(e.target.value)
-  rerenderBoard()
+  rerenderWorkView()
 })
 
 // Board recurring-task filter
@@ -2033,7 +2076,7 @@ const _recurringToggle = document.getElementById('board-show-recurring')
 _recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
 _recurringToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:showRecurring', e.target.checked)
-  rerenderBoard()
+  rerenderWorkView()
 })
 
 // Board far-future filter
@@ -2041,7 +2084,7 @@ const _farFutureToggle = document.getElementById('board-hide-far-future')
 _farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
 _farFutureToggle.addEventListener('change', e => {
   localStorage.setItem('kairos:hideFarFuture', e.target.checked)
-  rerenderBoard()
+  rerenderWorkView()
 })
 
 // Show version on hover over the app title
