@@ -122,8 +122,9 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
     loe?: string,               // e.g. "2d 4h"
     kairosId?: string,          // stable Kairos ID for task events (extendedProperty)
     webhookToken?: string,      // extracted from completion footer URL; used to rebuild footer on toggle
-    listId?: string,            // Kairos list assignment (extendedProperty)
-    order?: number,             // board sort order (extendedProperty)
+    listId?: string,            // Kairos list (organization axis) assignment (extendedProperty)
+    statusId?: string,          // Kairos status (workflow axis / board column) assignment (extendedProperty)
+    order?: number,             // board sort order within a status column (extendedProperty)
     completedAt?: string|null,  // ISO timestamp or null (extendedProperty)
     noDate?: boolean,           // undated task (sentineled start date)
     location?: string,
@@ -164,8 +165,9 @@ Tasks in Kairos are stored as Google Calendar events with private extended prope
 |---|---|---|
 | `isTask` | `'true'` | Marks the event as a Kairos task |
 | `kairosId` | string | Stable per-task ID; used for webhook completion lookup |
-| `listId` | string | Board column assignment |
-| `order` | string (number) | Board sort order |
+| `listId` | string | List (organization axis) assignment — the List view's columns |
+| `statusId` | string | Status (workflow axis) assignment — the Board's columns |
+| `order` | string (number) | Board sort order within a status column |
 | `completedAt` | ISO string \| null | Non-null = completed; encodes both state and time |
 | `loe` | string | Level of effort (e.g. `"2h"`) |
 | `noDate` | `'true'` | Task has no due date (start is a sentinel value) |
@@ -194,9 +196,27 @@ LOE: 2h  ·  3 comments  ·  Updated Jun 27, 2026
 
 ---
 
+## Two Axes: Status vs List
+
+Tasks are classified on two orthogonal axes, both stored on the calendar event and both scoped to the task calendar (so a calendar acts as a shareable "project" container — sharing the calendar shares its config):
+
+- **Status** (`statusId` → Firestore `statuses/{id}` = `{ calendarId, name, order, inProgress }`) — the **workflow** axis: intake → backlog → up next → in progress. This is the **Board's** column axis. Statuses are user-defined per calendar. Any status may be flagged `inProgress`; a task in an in-progress status gets a green ring wherever it renders (past-due red takes priority). One status per account is the designated **intake** destination (`intakeStatusId` pref) where voice captures + swept tasks land; the pointer resolves its calendar via the status record.
+- **List** (`listId` → Firestore `lists/{id}` = `{ calendarId, name, order, sortMode }`) — the **organization** axis (Home, Car, Work…). This is the **List view's** column axis.
+
+Three surfaces, three lenses on the same tasks:
+- **Calendar** — *when* am I working on this (time)
+- **Board** (`board.js`) — *priority* / workflow stage (status columns)
+- **List** (`list.js`) — *organization* / categorization (list columns)
+
+`kairosStatuses.js` mirrors `kairosLists.js` (calendar-scoped CRUD). Role behavior (intake, in-progress) is never name-matched — intake is a prefs pointer, in-progress is a per-status boolean — so statuses can be freely renamed.
+
 ## Board View
 
-The board (`board.js`) surfaces all task events in a Kanban layout grouped by Kairos list. Recurring tasks are deduplicated to one card per series (best upcoming instance). Cards show chips for: list, recurrence (↻), LOE, due date.
+The board (`board.js`) surfaces a **single project calendar's** task events in a Kanban layout grouped by **status** (the calendar is chosen via the project selector in the board toolbar, persisted as `projectCalendarId`). Columns are the calendar's statuses; tasks with missing/unknown `statusId` fall into the first (Intake) column. **Done** is synthetic (derived from `completedAt`), not a status value. Each column header has a hammer toggle to flag the status `inProgress`. Recurring tasks are deduplicated to one card per series. Drag rewrites `statusId`.
+
+## List View
+
+The list view (`list.js`) surfaces the same project calendar's **incomplete** task events grouped by **list**; tasks with no list fall into an Unlisted column. No Done column. Auto-sorted per column: in-progress first, then due date, then alphabetical (no manual order). Drag rewrites `listId`. Reuses the board's column/card CSS, snooze popover, and Sortable mechanics but is otherwise an isolated module.
 
 ---
 
