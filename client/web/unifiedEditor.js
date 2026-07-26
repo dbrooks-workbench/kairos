@@ -13,6 +13,7 @@ import {
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getListsForCalendar } from './providers/kairosLists.js'
+import { getStatusesForCalendar } from './providers/kairosStatuses.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
@@ -456,6 +457,7 @@ function _setMode(mode, { locked = false } = {}) {
   el('ue-mode-task').disabled  = locked
   el('ue-title').placeholder   = mode === 'task' ? 'Task title…' : 'Event title…'
   el('ue-list-row').hidden     = mode !== 'task'
+  el('ue-status-row').hidden   = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
   el('ue-item-id').hidden      = !(mode === 'task' && _editItem)
 
@@ -499,8 +501,11 @@ async function _populateCalendars(preferredId, preloaded) {
     .join('')
   if (preferredId) sel.value = preferredId
 
-  // Populate list dropdown after calendar is known (task mode only)
-  if (_mode === 'task') _populateList(_editItem?.metadata?.listId ?? null)
+  // Populate list + status dropdowns after calendar is known (task mode only)
+  if (_mode === 'task') {
+    _populateList(_editItem?.metadata?.listId ?? null)
+    _populateStatus(_editItem?.metadata?.statusId ?? null)
+  }
 }
 
 function _populateList(preferredListId) {
@@ -511,6 +516,16 @@ function _populateList(preferredListId) {
   sel.innerHTML = '<option value="">— No list —</option>'
     + lists.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
   if (preferredListId) sel.value = preferredListId
+}
+
+function _populateStatus(preferredStatusId) {
+  const calId = el('ue-calendar').value
+  if (!calId) return
+  const statuses = getStatusesForCalendar(calId)
+  const sel      = el('ue-status')
+  sel.innerHTML = '<option value="">— No status —</option>'
+    + statuses.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')
+  if (preferredStatusId) sel.value = preferredStatusId
 }
 
 // ── Webhook token (task mode) ─────────────────────────────────────────────────
@@ -582,7 +597,7 @@ export function initEditor() {
     _preserveRrule = null
   })
   el('ue-calendar').addEventListener('change', () => {
-    if (_mode === 'task') _populateList()
+    if (_mode === 'task') { _populateList(); _populateStatus() }
   })
 
   // Location URL link
@@ -687,9 +702,10 @@ export async function openEditor(opts = {}, callbacks = {}) {
 
   _resetCustomRecur(today)
   await _populateCalendars(opts.calendarId ?? (mode === 'task' ? getTaskCalendars()[0] : null), opts.calendars ?? null)
-  // List is populated (with blank option) inside _populateCalendars → _populateList.
-  // Caller can request a specific list via opts.listId.
-  if (mode === 'task' && opts.listId) el('ue-list').value = opts.listId
+  // List + status are populated (with blank option) inside _populateCalendars.
+  // Caller can request a specific list/status via opts.listId / opts.statusId.
+  if (mode === 'task' && opts.listId)   el('ue-list').value   = opts.listId
+  if (mode === 'task' && opts.statusId) el('ue-status').value = opts.statusId
 
   el('unified-editor').hidden = false
   el('ue-title').focus()
@@ -914,7 +930,8 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  const listId    = el('ue-list').value || null
+  const listId    = el('ue-list').value   || null
+  const statusId  = el('ue-status').value || null
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -941,6 +958,7 @@ async function _saveTask(title) {
     body,
     kairosId,
     listId,
+    statusId,
     order:        _editItem?.metadata?.order ?? Date.now(),
     loe,
     date:         startDate,

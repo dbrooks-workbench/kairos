@@ -121,6 +121,11 @@
             <label class="modal-label">List</label>
             <select id="ue-list" class="modal-select"></select>
           </div>
+          <!-- Task-only: status (board column) assignment -->
+          <div class="modal-field-row" id="ue-status-row" hidden>
+            <label class="modal-label">Status</label>
+            <select id="ue-status" class="modal-select"></select>
+          </div>
           <div class="modal-field-row">
             <label class="modal-label">When</label>
             <div class="when-fields">
@@ -295,13 +300,13 @@
       </div>
       <div class="sweep-panel-body">
         <div class="sweep-section">
-          <div class="sweep-section-label">Default intake list</div>
-          <div class="sweep-section-hint">New captures — voice items and swept tasks — land in this list for processing.</div>
-          <select id="intake-list-select" class="modal-select"></select>
+          <div class="sweep-section-label">Default intake status</div>
+          <div class="sweep-section-hint">New captures — voice items and swept tasks — land in this status for processing.</div>
+          <select id="intake-status-select" class="modal-select"></select>
         </div>
         <div class="sweep-section">
           <div class="sweep-section-label">Google Task Sweep</div>
-          <div class="sweep-section-hint">Tasks from these Google Tasks lists are swept into your default intake list automatically.</div>
+          <div class="sweep-section-hint">Tasks from these Google Tasks lists are swept into your default intake status automatically.</div>
           <div id="sweep-sources-container"></div>
         </div>
       </div>

@@ -2,9 +2,9 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, getDefaultIntakeListId, setSweepSources, setDefaultIntakeListId, getIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, createStatus } from './providers/kairosStatuses.js'
+import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -838,7 +838,7 @@ async function _fetchWebhookToken() {
 // Run a sweep pass if sources and target are configured. Silent unless tasks are swept.
 async function runSweepIfConfigured() {
   const sources  = getSweepSources()
-  const targetId = getDefaultIntakeListId()
+  const targetId = getIntakeStatusId()
   if (!sources.length || !targetId) return
 
   const accounts = await getTokens()
@@ -848,7 +848,7 @@ async function runSweepIfConfigured() {
   const webhookToken = await _fetchWebhookToken()
 
   try {
-    const result = await runSweep({ accounts, calToken, webhookToken, sweepSources: sources, targetListId: targetId })
+    const result = await runSweep({ accounts, calToken, webhookToken, sweepSources: sources, targetStatusId: targetId })
     if (result.swept > 0) {
       console.log(`[sweep] swept ${result.swept} tasks into Kairos`)
       _weekCache.clear()
@@ -863,7 +863,7 @@ async function runSweepIfConfigured() {
 async function openConfigDialog() {
   const dialog   = document.getElementById('sweep-dialog')
   const container = document.getElementById('sweep-sources-container')
-  const targetSel = document.getElementById('intake-list-select')
+  const targetSel = document.getElementById('intake-status-select')
   const status    = document.getElementById('sweep-dialog-status')
   const saveBtn      = document.getElementById('sweep-save-btn')
   const cancelBtn    = document.getElementById('sweep-cancel-btn')
@@ -872,15 +872,20 @@ async function openConfigDialog() {
   dialog.hidden = false
   status.textContent = ''
 
-  // Populate default intake list dropdown
-  targetSel.innerHTML = '<option value="">— select a list —</option>'
-  const savedTarget = getDefaultIntakeListId()
-  for (const list of getAllLists().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
-    const opt = document.createElement('option')
-    opt.value       = list.id
-    opt.textContent = list.name
-    opt.selected    = list.id === savedTarget
-    targetSel.appendChild(opt)
+  // Populate default intake status dropdown — statuses across all task calendars,
+  // each labelled with its calendar to disambiguate same-named statuses.
+  targetSel.innerHTML = '<option value="">— select a status —</option>'
+  const savedTarget = getIntakeStatusId()
+  const taskCalIds  = getTaskCalendars()
+  const calName     = id => state.calendars.find(c => c.id === id)?.summary ?? id
+  for (const calId of taskCalIds) {
+    for (const st of getStatusesForCalendar(calId)) {
+      const opt = document.createElement('option')
+      opt.value       = st.id
+      opt.textContent = `${st.name} — ${calName(calId)}`
+      opt.selected    = st.id === savedTarget
+      targetSel.appendChild(opt)
+    }
   }
 
   // Load GT lists per account and build source checkboxes
@@ -936,7 +941,7 @@ async function openConfigDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setDefaultIntakeListId(targetSel.value || null)
+    setIntakeStatusId(targetSel.value || null)
     dialog.hidden = true
   }
 
@@ -948,11 +953,11 @@ async function openConfigDialog() {
       sources.push({ accountId: cb.dataset.accountId, listId: cb.dataset.listId, listName: cb.dataset.listName })
     })
     setSweepSources(sources)
-    setDefaultIntakeListId(targetSel.value || null)
+    setIntakeStatusId(targetSel.value || null)
 
     const targetId = targetSel.value
     if (!sources.length) { status.textContent = 'No sources selected.'; return }
-    if (!targetId)        { status.textContent = 'No intake list selected.'; return }
+    if (!targetId)        { status.textContent = 'No intake status selected.'; return }
 
     nowBtn.disabled = true
     status.textContent = 'Sweeping…'
@@ -964,7 +969,7 @@ async function openConfigDialog() {
     try {
       const result = await runSweep({
         accounts, calToken, webhookToken,
-        sweepSources: sources, targetListId: targetId,
+        sweepSources: sources, targetStatusId: targetId,
         onProgress: ({ swept, total }) => {
           status.textContent = `Sweeping… ${swept}/${total}`
         },
