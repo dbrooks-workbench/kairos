@@ -223,6 +223,7 @@ The list view (`list.js`) surfaces the same project calendar's **incomplete** ta
 ## UI Details
 
 - **Past events**: regular past events fade to opacity 0.45 (`.is-past`); past-due incomplete tasks get a red urgency ring (`.past-due`)
+- **Past-due roll-forward**: incomplete tasks due in the last 30 days are *pushed forward* to today on the calendar — rendered as red-ringed all-day chips on today, suppressed at their real past date. Render-time only (`getVisibleItems` → `rollToToday`); the stored due date is never mutated. `state.pastDueTasks` is fetched by `refreshPastDueTasks()` (30-day window, task calendars, recurring deduped to the latest overdue instance). Tasks older than 30 days stay at their real date.
 - **Recurrence indicator**: `↻` appended to chip/card title for any item with `recurrence` or `metadata.recurringEventId`
 - **End date**: hidden by default in all-day mode; "Add end date" link reveals it; "Hide end date" collapses back
 - **All day** checkbox appears below the date row (logically modifies dates)

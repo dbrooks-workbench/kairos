@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
+import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.27.0'
+const VERSION   = '0.28.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -29,6 +29,68 @@ const state = {
   boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
+  pastDueTasks: [],        // incomplete tasks due in the last 30d — rolled forward to today on the calendar
+}
+
+// Incomplete tasks overdue within this window are "pushed forward" to today on
+// the calendar (render-time only — the stored due date is never mutated). Older
+// than this, they stay at their real date rather than roll forward forever.
+const ROLL_LOOKBACK_DAYS = 30
+
+function todayMidnight() {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
+
+// A dated, incomplete task whose due date is in [today-30d, today) — eligible to
+// be rolled forward. Undated tasks and tasks older than the window are excluded.
+function isRollablePastDue(item) {
+  // Only real Kairos tasks roll — matches exactly what refreshPastDueTasks fetches
+  // (isTask events), so native task-calendar events are never suppressed-then-lost.
+  if (item.item_type !== 'TASK' || item.status === 'COMPLETED') return false
+  if (!item.start || item.metadata?.noDate) return false
+  const t = todayMidnight()
+  const s = new Date(item.start)
+  return s < t && s >= new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+}
+
+// Render-time clone placed on today as an all-day chip (marked so it keeps the
+// red past-due ring even though its displayed date is now today).
+function rollToToday(item) {
+  const t = todayMidnight()
+  return {
+    ...item,
+    start:    t,
+    end:      null,
+    due:      t,
+    all_day:  true,
+    metadata: { ...item.metadata, rolledPastDue: true },
+  }
+}
+
+// Fetch incomplete, dated tasks due in the last 30 days across task calendars,
+// de-duplicating recurring series to the single most-recent overdue instance.
+async function refreshPastDueTasks() {
+  const token = await getToken()
+  if (!token) { state.pastDueTasks = []; return }
+  const t     = todayMidnight()
+  const since = new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  const calIds = getTaskCalendars()
+  const per = await Promise.all(
+    calIds.map(cal => getTaskEvents(token, cal, since, t).catch(() => []))
+  )
+  const all = per.flat().filter(x =>
+    x.status !== 'COMPLETED' && x.start && !x.metadata?.noDate && new Date(x.start) < t
+  )
+  const bySeries = new Map()
+  const singles  = []
+  for (const x of all) {
+    const sid = x.metadata?.recurringEventId
+    if (!sid) { singles.push(x); continue }
+    const prev = bySeries.get(sid)
+    if (!prev || new Date(x.start) > new Date(prev.start)) bySeries.set(sid, x)
+  }
+  state.pastDueTasks = [...singles, ...bySeries.values()]
 }
 
 // Status IDs flagged "in progress" — refreshed at the top of each render pass so
@@ -134,6 +196,9 @@ async function handleToggleTask(item) {
     else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
     const target = state.items.find(i => i.id === item.id)
     if (target) target.status = isDone ? 'NEEDS_ACTION' : 'COMPLETED'
+    // Drop a just-completed rolled-forward task from today's pile immediately;
+    // a full refresh reconciles the rest.
+    if (!isDone) state.pastDueTasks = state.pastDueTasks.filter(t => t.id !== item.id)
     renderItems(getVisibleItems())
     appendLogEntry(token, {
       item_id:       item.id,
@@ -275,7 +340,8 @@ function preloadAdjacentWeeks() {
 
 async function refreshCalendarItems() {
   const end  = addDays(state.weekStart, 7)
-  state.items = await fetchItems(state.weekStart, end)
+  const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
+  state.items = items
   renderItems(getVisibleItems())
 }
 
@@ -330,7 +396,8 @@ function startPolling(ms) {
       await loadBoardData()
     } else {
       const end  = addDays(state.weekStart, 7)
-      state.items = await fetchItems(state.weekStart, end)
+      const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
+      state.items = items
       renderItems(getVisibleItems())
     }
   }, ms)
@@ -530,10 +597,13 @@ async function loadBoardData() {
 }
 
 // Filter already-fetched items by calendar visibility — no network call needed.
+// Also rolls past-due tasks (last 30d) forward: they're suppressed at their real
+// past date and re-emitted as all-day chips on today (see rollToToday).
 function getVisibleItems() {
-  return state.items.filter(item =>
-    item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
-  )
+  const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
+  const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
+  const rolled  = state.pastDueTasks.filter(visible).map(rollToToday)
+  return items.concat(rolled)
 }
 
 // ── Calendar picker ───────────────────────────────────────────────────────────
@@ -1327,8 +1397,8 @@ function renderItems(items) {
         isTask ? 'type-task' : '',
         isDone    ? 'completed' : '',
         isPast && !isTask && !isDone ? 'is-past'   : '',
-        isPastDue                    ? 'past-due'   : '',
-        !isPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
+        isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
+        !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
         span.startsEarly             ? 'continues-left'  : '',
         span.endsLate                ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
@@ -1671,8 +1741,8 @@ function renderMobileDay() {
       isTask    ? 'type-task' : '',
       isDone    ? 'completed' : '',
       isPast && !isTask && !isDone ? 'is-past'  : '',
-      isPastDue                    ? 'past-due' : '',
-      !isPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
+      isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
+      !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
     ].filter(Boolean).join(' ')
     chip.title = item.title
 
@@ -2030,6 +2100,9 @@ async function render() {
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
     }
+    // Roll past-due tasks onto today (needs prefs loaded for task calendars, so
+    // runs after the fetch above; re-renders once the set is in).
+    refreshPastDueTasks().then(() => renderItems(getVisibleItems())).catch(() => {})
   } catch (err) {
     console.error('Render failed:', err)
   }
