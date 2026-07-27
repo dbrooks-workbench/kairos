@@ -364,7 +364,11 @@ function _buildCustomRrule() {
   let rule = `RRULE:FREQ=${_crpFreq}`
   if (_crpInterval > 1) rule += `;INTERVAL=${_crpInterval}`
   if (_crpFreq === 'WEEKLY' && _crpByDay.size > 0) rule += `;BYDAY=${[..._crpByDay].join(',')}`
-  if (_crpEndType === 'date'  && _crpEndDate)  rule += `;UNTIL=${_crpEndDate.replace(/-/g,'')}T235959Z`
+  if (_crpEndType === 'date'  && _crpEndDate) {
+    // UNTIL type must match DTSTART: DATE for all-day, DATE-TIME for timed.
+    const dateOnly = _crpEndDate.replace(/-/g, '')
+    rule += el('ue-allday').checked ? `;UNTIL=${dateOnly}` : `;UNTIL=${dateOnly}T235959Z`
+  }
   if (_crpEndType === 'count' && _crpEndCount) rule += `;COUNT=${_crpEndCount}`
   return rule
 }
@@ -1200,18 +1204,31 @@ async function _saveAll(token, body) {
   await updateEvent(token, calId, masterId, mb)
 }
 
+// RRULE UNTIL that bounds a series to end just before `instanceStart`. The UNTIL
+// value type MUST match DTSTART: an all-day series (master.start.date) needs a
+// DATE (YYYYMMDD); a timed series needs a UTC DATE-TIME. Mismatching the type
+// makes Google accept the PATCH but silently ignore the bound — so the series
+// keeps expanding (the "this and following" delete appeared to do nothing).
+function _untilBeforeInstance(instanceStart, masterStart) {
+  const pad = v => String(v).padStart(2, '0')
+  const d   = new Date(instanceStart)
+  if (masterStart?.date) {
+    d.setDate(d.getDate() - 1)   // local day arithmetic for all-day
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+  }
+  d.setUTCDate(d.getUTCDate() - 1)
+  d.setUTCHours(23, 59, 59, 0)
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`
+       + `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
+}
+
 async function _saveFollowing(token, body) {
   const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurringEventId
   const master   = await getEvent(token, calId, masterId)
   const mrule    = master.recurrence?.[0]
   if (mrule) {
-    const cutoff = new Date(_editItem.start)
-    cutoff.setUTCDate(cutoff.getUTCDate() - 1)
-    cutoff.setUTCHours(23, 59, 59, 0)
-    const pad = v => String(v).padStart(2, '0')
-    const until = `${cutoff.getUTCFullYear()}${pad(cutoff.getUTCMonth()+1)}${pad(cutoff.getUTCDate())}` +
-                  `T${pad(cutoff.getUTCHours())}${pad(cutoff.getUTCMinutes())}${pad(cutoff.getUTCSeconds())}Z`
+    const until = _untilBeforeInstance(_editItem.start, master.start)
     await updateEvent(token, calId, masterId, { recurrence: [mrule.replace(/;?(UNTIL|COUNT)=[^;]*/g,'') + `;UNTIL=${until}`] })
   }
   if (!body.recurrence && mrule) body.recurrence = [mrule.replace(/;?(UNTIL|COUNT)=[^;]*/g,'')]
@@ -1250,12 +1267,7 @@ async function _saveFollowingTask(token, calId, taskData) {
   const master   = await getEvent(token, calId, masterId)
   const mrule    = master.recurrence?.[0]
   if (mrule) {
-    const cutoff = new Date(_editItem.start)
-    cutoff.setUTCDate(cutoff.getUTCDate() - 1)
-    cutoff.setUTCHours(23, 59, 59, 0)
-    const pad = v => String(v).padStart(2, '0')
-    const until = `${cutoff.getUTCFullYear()}${pad(cutoff.getUTCMonth()+1)}${pad(cutoff.getUTCDate())}` +
-                  `T${pad(cutoff.getUTCHours())}${pad(cutoff.getUTCMinutes())}${pad(cutoff.getUTCSeconds())}Z`
+    const until = _untilBeforeInstance(_editItem.start, master.start)
     await updateEvent(token, calId, masterId, { recurrence: [mrule.replace(/;?(UNTIL|COUNT)=[^;]*/g,'') + `;UNTIL=${until}`] })
   }
   await createTask(token, calId, { ...taskData, kairosId: generateKairosId() })
@@ -1270,15 +1282,17 @@ async function _deleteFollowing(token) {
   const calId    = _editItem.source.account_id
   const masterId = _editItem.metadata.recurringEventId
   const master   = await getEvent(token, calId, masterId)
-  const mrule    = master.recurrence?.[0]
-  if (mrule) {
-    const cutoff = new Date(_editItem.start)
-    cutoff.setUTCDate(cutoff.getUTCDate() - 1)
-    cutoff.setUTCHours(23, 59, 59, 0)
-    const pad = v => String(v).padStart(2, '0')
-    const until = `${cutoff.getUTCFullYear()}${pad(cutoff.getUTCMonth()+1)}${pad(cutoff.getUTCDate())}` +
-                  `T${pad(cutoff.getUTCHours())}${pad(cutoff.getUTCMinutes())}${pad(cutoff.getUTCSeconds())}Z`
-    await updateEvent(token, calId, masterId, { recurrence: [mrule.replace(/;?(UNTIL|COUNT)=[^;]*/g,'') + `;UNTIL=${until}`] })
+  // Target the RRULE line specifically (it may not be recurrence[0] if EXDATE/
+  // RDATE lines are present) and keep the other lines, so the bound actually
+  // applies. Appending UNTIL to the wrong line makes Google silently ignore it.
+  const lines    = master.recurrence ?? []
+  const rruleIdx = lines.findIndex(r => /^RRULE/i.test(r))
+  if (rruleIdx !== -1) {
+    const until      = _untilBeforeInstance(_editItem.start, master.start)
+    const recurrence = [...lines]
+    recurrence[rruleIdx] = lines[rruleIdx].replace(/;?(UNTIL|COUNT)=[^;]*/gi, '') + `;UNTIL=${until}`
+    console.log('[deleteFollowing] rule:', lines[rruleIdx], '→', recurrence[rruleIdx])
+    await updateEvent(token, calId, masterId, { recurrence })
   } else {
     if (_mode === 'task') await deleteTask(token, calId, _editItem.source.external_id)
     else                  await deleteEvent(token, calId, _editItem.source.external_id)
