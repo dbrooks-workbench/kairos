@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.28.3'
+const VERSION   = '0.28.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -383,6 +383,16 @@ function setView(v) {
   }
 }
 
+// Board + List views only make sense with at least one task calendar. Hide their
+// nav buttons otherwise, and fall back to the calendar if a work view is active
+// when the last task calendar is removed.
+function updateWorkViewButtons() {
+  const hasTaskCals = getTaskCalendars().length > 0
+  document.getElementById('btn-view-board').hidden = !hasTaskCals
+  document.getElementById('btn-view-list').hidden  = !hasTaskCals
+  if (!hasTaskCals && (state.view === 'board' || state.view === 'list')) setView('calendar')
+}
+
 // ── Polling ───────────────────────────────────────────────────────────────────
 
 let _pollHandle = null
@@ -680,6 +690,7 @@ function renderCalendarPicker() {
         }
       }
       setTaskCalendars([...state.taskCalendars])
+      updateWorkViewButtons()
       refreshCalendarItems()
     })
 
@@ -2117,6 +2128,7 @@ async function render() {
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
     }
+    updateWorkViewButtons()
     // Roll past-due tasks onto today (needs prefs loaded for task calendars, so
     // runs after the fetch above; re-renders once the set is in).
     refreshPastDueTasks().then(() => renderItems(getVisibleItems())).catch(() => {})
