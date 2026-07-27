@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.28.2'
+const VERSION   = '0.28.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -522,7 +522,9 @@ function populateProjectSelector() {
     if (calId === current) opt.selected = true
     sel.appendChild(opt)
   }
-  sel.hidden = taskCals.length <= 1
+  // Always show when there's at least one task calendar — it doubles as a
+  // "you're working in project X" label, not just a switcher.
+  sel.hidden = taskCals.length === 0
 }
 
 function getBoardItems() {
