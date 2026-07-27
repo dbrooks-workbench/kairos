@@ -380,19 +380,40 @@ async function handleDrop(evt) {
   const token = await getToken()
   if (!token) { _callbacks.onRefresh?.(); return }
 
-  try {
-    const srcItem = _items.find(i => i.source.external_id === extId)
-    if (srcItem?.metadata?.unprocessed) {
+  const srcItem = _items.find(i => i.source.external_id === extId)
+
+  // Unprocessed adoption needs a refresh (isTask tagging); a plain list move does
+  // not change the card's look, so persist optimistically without rebuilding.
+  if (srcItem?.metadata?.unprocessed) {
+    try {
       const masterEventId = srcItem.metadata.recurringEventId ?? extId
       await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', listId: newListId })
-    } else {
-      await patchTaskProps(token, calendarId, extId, { listId: newListId })
+    } catch (err) {
+      console.error('List move failed:', err)
     }
-  } catch (err) {
-    console.error('List move failed:', err)
+    _callbacks.onRefresh?.()
+    return
   }
 
-  _callbacks.onRefresh?.()
+  try {
+    await patchTaskProps(token, calendarId, extId, { listId: newListId })
+    if (srcItem) srcItem.metadata.listId = newListId || null
+    cardEl.dataset.listId = newListId
+    _updateColumnCounts()
+  } catch (err) {
+    console.error('List move failed:', err)
+    _callbacks.onRefresh?.()
+  }
+}
+
+// Update each list column's count badge from its current DOM card count, after
+// an optimistic move — keeps counts correct without a full re-render.
+function _updateColumnCounts() {
+  document.querySelectorAll('#list .board-col').forEach(col => {
+    const body  = col.querySelector('.board-task-list')
+    const count = col.querySelector('.board-col-count')
+    if (body && count) count.textContent = body.children.length
+  })
 }
 
 async function handleColReorder() {

@@ -639,30 +639,53 @@ async function handleDrop(evt) {
   const token = await getToken()
   if (!token) { _callbacks.onRefresh?.(); return }
 
-  try {
-    if (toStatusId === DONE_COL_ID) {
-      const srcItem = _boardItems.find(i => i.source.external_id === extId)
-      await completeTask(token, calendarId, extId, srcItem?.title ?? '')
-    } else if (fromStatusId === DONE_COL_ID) {
-      const srcItem = _boardItems.find(i => i.source.external_id === extId)
-      await uncompleteTask(token, calendarId, extId, srcItem?.title ?? '')
-      if (toStatusId) await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
-    } else {
-      const srcItem  = _boardItems.find(i => i.source.external_id === extId)
-      if (srcItem?.metadata?.unprocessed) {
-        // Adopt: tag the master event (or the event itself if non-recurring) so
-        // all instances are picked up by the isTask=true query on next load.
+  const srcItem    = _boardItems.find(i => i.source.external_id === extId)
+  const isDoneMove = toStatusId === DONE_COL_ID || fromStatusId === DONE_COL_ID
+  const isAdopt    = !isDoneMove && !!srcItem?.metadata?.unprocessed
+
+  // Completion transitions and unprocessed-adoption change more than a card's
+  // column (title prefix/footer, isTask tagging), so fall back to a full refresh.
+  if (isDoneMove || isAdopt) {
+    try {
+      if (toStatusId === DONE_COL_ID) {
+        await completeTask(token, calendarId, extId, srcItem?.title ?? '')
+      } else if (fromStatusId === DONE_COL_ID) {
+        await uncompleteTask(token, calendarId, extId, srcItem?.title ?? '')
+        if (toStatusId) await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
+      } else {
         const masterEventId = srcItem.metadata.recurringEventId ?? extId
         await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', statusId: toStatusId })
-      } else {
-        await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
       }
+    } catch (err) {
+      console.error('Drop failed:', err)
     }
-  } catch (err) {
-    console.error('Drop failed:', err)
+    _callbacks.onRefresh?.()
+    return
   }
 
-  _callbacks.onRefresh?.()
+  // Plain status move: Sortable already moved the card. Persist in the background
+  // and refresh only this one card (for the in-progress ring), leaving the rest
+  // of the board intact so the next drag can start immediately — no full rebuild.
+  try {
+    const updated = await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
+    const idx = _boardItems.findIndex(i => i.source.external_id === extId)
+    if (idx >= 0) _boardItems[idx] = updated
+    cardEl.replaceWith(buildCard(updated))
+    _updateColumnCounts()
+  } catch (err) {
+    console.error('Move failed:', err)
+    _callbacks.onRefresh?.()   // reconcile the board on failure
+  }
+}
+
+// Update each column's count badge from its current card count in the DOM.
+// Used after an optimistic move so counts stay correct without a full re-render.
+function _updateColumnCounts() {
+  document.querySelectorAll('#board .board-col').forEach(col => {
+    const list  = col.querySelector('.board-task-list')
+    const count = col.querySelector('.board-col-count')
+    if (list && count) count.textContent = list.children.length
+  })
 }
 
 async function handleColReorder() {
