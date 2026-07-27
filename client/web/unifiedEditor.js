@@ -348,7 +348,10 @@ function _buildRrule(freq, startDate) {
   if (freq === 'ANNUALLY') return 'RRULE:FREQ=YEARLY'
   if (freq === 'WEEKDAYS') return 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'
   if (freq === 'WEEKLY') {
-    const d = new Date((startDate ?? '') + 'T00:00:00')
+    // Anchor BYDAY to the start date; fall back to today so we never emit
+    // BYDAY=undefined when no date is set (callers should validate first).
+    const src = startDate || new Date().toLocaleDateString('en-CA')  // yyyy-mm-dd, local
+    const d   = new Date(src + 'T00:00:00')
     return `RRULE:FREQ=WEEKLY;BYDAY=${DAY_SHORT[d.getDay()]}`
   }
   return null
@@ -947,6 +950,15 @@ async function _saveTask(title) {
   // Only send [] when the item was originally recurring (master has a rule); for non-recurring tasks
   // and recurring instances (recurrence field is on master, not instance) omit it — Google rejects
   // recurrence:[] combined with a start format change (e.g. timed→all-day) with "Invalid start time."
+  // A recurring task needs a start-date anchor — without one the series would be
+  // pinned to the undated sentinel (1970). Require a date before repeating.
+  if (freq && !startDate) {
+    el('ue-save-error').textContent = 'Add a start date to make this task repeat.'
+    el('ue-save-error').hidden = false
+    el('ue-save').disabled = false
+    return
+  }
+
   const recurrence = freq === 'CUSTOM'
     ? undefined
     : freq
@@ -1025,6 +1037,13 @@ async function _saveEvent(title) {
   } else {
     body.start = { dateTime: `${startDate}T${startTime}:00`, timeZone: tz }
     body.end   = { dateTime: `${endDate}T${endTime}:00`,     timeZone: tz }
+  }
+
+  if (freq && !startDate) {
+    el('ue-save-error').textContent = 'Add a start date to make this event repeat.'
+    el('ue-save-error').hidden = false
+    el('ue-save').disabled = false
+    return
   }
 
   let rrule
