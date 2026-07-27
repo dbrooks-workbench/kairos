@@ -124,6 +124,7 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
     webhookToken?: string,      // extracted from completion footer URL; used to rebuild footer on toggle
     listId?: string,            // Kairos list (organization axis) assignment (extendedProperty)
     statusId?: string,          // Kairos status (workflow axis / board column) assignment (extendedProperty)
+    dueDate?: Date | null,      // task deadline — when it must be done, independent of start/scheduling (extendedProperty 'YYYY-MM-DD')
     order?: number,             // board sort order within a status column (extendedProperty)
     completedAt?: string|null,  // ISO timestamp or null (extendedProperty)
     noDate?: boolean,           // undated task (sentineled start date)
@@ -167,6 +168,7 @@ Tasks in Kairos are stored as Google Calendar events with private extended prope
 | `kairosId` | string | Stable per-task ID; used for webhook completion lookup |
 | `listId` | string | List (organization axis) assignment — the List view's columns |
 | `statusId` | string | Status (workflow axis) assignment — the Board's columns |
+| `dueDate` | `'YYYY-MM-DD'` | Task deadline — when it must be done, independent of `start` (scheduling). Display-only; not wired to overdue logic |
 | `order` | string (number) | Board sort order within a status column |
 | `completedAt` | ISO string \| null | Non-null = completed; encodes both state and time |
 | `loe` | string | Level of effort (e.g. `"2h"`) |

@@ -553,6 +553,15 @@ function buildChips(item) {
     chips.push(chip)
   }
 
+  if (item.metadata?.dueDate) {
+    const d = new Date(item.metadata.dueDate)
+    const chip = document.createElement('span')
+    chip.className   = 'board-chip board-chip-deadline'
+    chip.textContent = `⚑ ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    chip.title       = 'Due by'
+    chips.push(chip)
+  }
+
   if (item.metadata?.loe) {
     const chip = document.createElement('span')
     chip.className   = 'board-chip board-chip-loe'

@@ -464,6 +464,7 @@ function _setMode(mode, { locked = false } = {}) {
   el('ue-title').placeholder   = mode === 'task' ? 'Task title…' : 'Event title…'
   el('ue-list-row').hidden     = mode !== 'task'
   el('ue-status-row').hidden   = mode !== 'task'
+  el('ue-due-row').hidden      = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
   el('ue-item-id').hidden      = !(mode === 'task' && _editItem)
 
@@ -692,6 +693,7 @@ export async function openEditor(opts = {}, callbacks = {}) {
   el('ue-location').value    = ''
   el('ue-recur').value       = ''
   el('ue-loe').value         = ''
+  el('ue-due-date').value    = opts.dueDate ?? ''
   el('ue-loe-error').hidden  = true
   el('ue-comment-input').value = ''
   el('custom-recur-panel').hidden = true
@@ -769,6 +771,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
 
   if (isTask) {
     el('ue-loe').value = item.metadata?.loe ?? ''
+    el('ue-due-date').value = item.metadata?.dueDate ? _fmtDate(item.metadata.dueDate) : ''
     const extId = item.source.external_id ?? '—'
     const kid   = item.metadata?.kairosId  ?? '—'
     el('ue-item-id').textContent = `event: ${extId}  ·  kId: ${kid}`
@@ -936,8 +939,9 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  const listId    = el('ue-list').value   || null
-  const statusId  = el('ue-status').value || null
+  const listId    = el('ue-list').value     || null
+  const statusId  = el('ue-status').value   || null
+  const dueDate   = el('ue-due-date').value || null
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -974,6 +978,7 @@ async function _saveTask(title) {
     kairosId,
     listId,
     statusId,
+    dueDate,
     order:        _editItem?.metadata?.order ?? Date.now(),
     loe,
     date:         startDate,
