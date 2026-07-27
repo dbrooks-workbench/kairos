@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.29.0'
+const VERSION   = '0.29.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -99,6 +99,17 @@ let _inProgressIds = new Set()
 function isInProgressItem(item, isTask, isDone) {
   const sid = item.metadata?.statusId
   return isTask && !isDone && !!sid && _inProgressIds.has(sid)
+}
+
+// Rank a calendar by its position in the user's calendar list — used to order
+// all-day items by calendar (then title).
+function calRank(id) {
+  const i = state.calendars.findIndex(c => c.id === id)
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i
+}
+function byCalendarThenTitle(a, b) {
+  return (calRank(a.source.account_id) - calRank(b.source.account_id))
+    || (a.title ?? '').localeCompare(b.title ?? '')
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -1381,9 +1392,9 @@ function renderItems(items) {
       })
     }
 
-    // Sort: earlier start first, then longer span first (mirrors Google Calendar)
+    // Sort by calendar (in the user's calendar order), then title, then start day.
     spans.sort((a, b) =>
-      (a.startDay - b.startDay) || ((b.endDay - b.startDay) - (a.endDay - a.startDay))
+      byCalendarThenTitle(a.item, b.item) || (a.startDay - b.startDay)
     )
 
     // Greedy row assignment: find the earliest row that doesn't overlap this span
@@ -1742,7 +1753,7 @@ function renderMobileDay() {
   const allDayContainer = document.getElementById('mobile-allday-items')
   allDayContainer.innerHTML = ''
 
-  for (const item of items) {
+  for (const item of [...items].sort(byCalendarThenTitle)) {
     const start = new Date(item.start)
     const end   = item.end ? new Date(item.end) : new Date(start.getTime() + 86_400_000)
 
