@@ -1,7 +1,7 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
-import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
+import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.28.1'
+const VERSION   = '0.28.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -2185,6 +2185,53 @@ window._kairos = {
     const n = await relinkLogEntries(token, oldItemId, kairosId)
     console.log(`relinkLog: updated ${n} entries (${oldItemId} → kairosId:${kairosId})`)
     return n
+  },
+
+  // Bulk-move every incomplete task from one status column to another, matched
+  // by status name (case-insensitive), on the currently selected project calendar.
+  // Usage: await _kairos.moveAllStatus('Intake', 'Backlog')
+  moveAllStatus: async (fromName, toName) => {
+    const token = await getToken()
+    if (!token) { console.warn('moveAllStatus: not signed in'); return 0 }
+    const calId = currentProjectCalendarId()
+    if (!calId) { console.warn('moveAllStatus: no project calendar selected'); return 0 }
+
+    const statuses = getStatusesForCalendar(calId)
+    const norm = s => (s ?? '').trim().toLowerCase()
+    const from = statuses.find(s => norm(s.name) === norm(fromName))
+    const to   = statuses.find(s => norm(s.name) === norm(toName))
+    if (!from) { console.warn(`moveAllStatus: no status named "${fromName}" on this calendar`); return 0 }
+    if (!to)   { console.warn(`moveAllStatus: no status named "${toName}" on this calendar`); return 0 }
+
+    // Column membership mirrors the board: unknown/missing statusId falls into the
+    // first (lowest-order) column, so "Intake" scoops up untriaged tasks too.
+    const firstId = [...statuses].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0]?.id
+    const known   = new Set(statuses.map(s => s.id))
+    const effId   = t => { const sid = t.metadata?.statusId; return (sid && known.has(sid)) ? sid : firstId }
+
+    const items = (await getAllTaskEvents(token, calId))
+      .filter(t => t.status !== 'COMPLETED' && effId(t) === from.id)
+
+    let moved = 0
+    for (const t of items) {
+      try {
+        const extId = t.source.external_id
+        if (t.metadata?.unprocessed) {
+          const master = t.metadata.recurringEventId ?? extId
+          await patchTaskProps(token, calId, master, { isTask: 'true', statusId: to.id })
+        } else {
+          await patchTaskProps(token, calId, extId, { statusId: to.id })
+        }
+        moved++
+      } catch (err) {
+        console.error(`moveAllStatus: failed for "${t.title}"`, err)
+      }
+    }
+
+    if (state.view === 'board' || state.view === 'list') await loadBoardData()
+    const calName = state.calendars.find(c => c.id === calId)?.summary ?? calId
+    console.log(`moveAllStatus: moved ${moved} task(s) ${from.name} → ${to.name} on ${calName}`)
+    return moved
   },
 }
 
