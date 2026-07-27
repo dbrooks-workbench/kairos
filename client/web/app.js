@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.29.3'
+const VERSION   = '0.29.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1392,9 +1392,11 @@ function renderItems(items) {
       })
     }
 
-    // Sort by calendar (in the user's calendar order), then title, then start day.
+    // Row-pack by start day first — the greedy row assignment below needs this to
+    // stay compact (out-of-order start days leave empty gaps). Items that start on
+    // the same day are then ordered by calendar, then title.
     spans.sort((a, b) =>
-      byCalendarThenTitle(a.item, b.item) || (a.startDay - b.startDay)
+      (a.startDay - b.startDay) || byCalendarThenTitle(a.item, b.item)
     )
 
     // Greedy row assignment: find the earliest row that doesn't overlap this span
