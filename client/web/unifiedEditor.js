@@ -333,11 +333,14 @@ const DAY_SHORT = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
 function _matchPreset(rrule) {
   if (!rrule) return ''
+  // An interval or explicit end (UNTIL/COUNT) means it's a custom rule, not a
+  // simple preset — otherwise "every 2 weeks" would collapse to plain "Weekly".
+  if (/(?:^|;)(?:INTERVAL|UNTIL|COUNT)=/.test(rrule)) return 'CUSTOM'
   if (rrule === 'RRULE:FREQ=DAILY')   return 'DAILY'
   if (rrule === 'RRULE:FREQ=MONTHLY') return 'MONTHLY'
   if (rrule === 'RRULE:FREQ=YEARLY')  return 'ANNUALLY'
-  if (/RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR/.test(rrule)) return 'WEEKDAYS'
-  if (/RRULE:FREQ=WEEKLY/.test(rrule)) return 'WEEKLY'
+  if (/^RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR$/.test(rrule)) return 'WEEKDAYS'
+  if (/^RRULE:FREQ=WEEKLY;BYDAY=(?:MO|TU|WE|TH|FR|SA|SU)$/.test(rrule)) return 'WEEKLY'
   return 'CUSTOM'
 }
 
@@ -1103,6 +1106,8 @@ async function _confirmDelete() {
   } catch (err) {
     console.error('Delete failed:', err)
     el('ue-delete').disabled = false
+    el('ue-save-error').textContent = `Delete failed: ${err.message || err}`
+    el('ue-save-error').hidden = false
   }
   _pendingAction = null
 }
@@ -1131,6 +1136,8 @@ async function _executeWithScope(scope) {
     } catch (err) {
       console.error('Delete failed:', err)
       el('ue-delete').disabled = false
+      el('ue-save-error').textContent = `Delete failed: ${err.message || err}`
+      el('ue-save-error').hidden = false
     }
     return
   }
