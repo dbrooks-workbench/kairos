@@ -9,6 +9,7 @@ import { generateKairosId } from './driveTaskMeta.js'
 //   listId      — Firestore list ID (organization axis)
 //   statusId    — Firestore status ID (workflow axis; board column)
 //   dueDate     — deadline 'YYYY-MM-DD' (when it must be done; independent of start)
+//   isReminder  — 'true' when the task is a reminder (no list/status/LOE; just done/not-done)
 //   order       — sparse float string for manual sorting
 //   loe         — level-of-effort string, optional
 //   noDate      — 'true' when undated (start.date = KAIROS_UNDATED_SENTINEL)
@@ -100,7 +101,7 @@ function _buildDescriptionPatch(item) {
 
 function _buildEventBody(taskData, isCreate = false) {
   const {
-    title, body, kairosId, listId, statusId, dueDate, order, loe,
+    title, body, kairosId, listId, statusId, dueDate, isReminder, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
     location, unprocessed, webhookToken, recurrence, completed, completedAt,
   } = taskData
@@ -139,6 +140,8 @@ function _buildEventBody(taskData, isCreate = false) {
   // Deadline: set when provided, clear (null) on edit when emptied; omit on create.
   if (dueDate)          props.dueDate = dueDate
   else if (!isCreate)   props.dueDate = null
+  if (isReminder)       props.isReminder = 'true'
+  else if (!isCreate)   props.isReminder = null
   if (loe)         props.loe         = loe
   // null clears an existing noDate property via PATCH merge; omit on POST (Google rejects null in extendedProperties)
   if (isUndated)        props.noDate = 'true'
@@ -201,6 +204,7 @@ export function normalizeTask(event, calendarId) {
       listId:           p.listId      || null,
       statusId:         p.statusId    || null,
       dueDate:          p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null,
+      isReminder:       p.isReminder === 'true',
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
       noDate:           isUndated,

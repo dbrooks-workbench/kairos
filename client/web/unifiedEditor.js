@@ -294,7 +294,7 @@ async function _addComment() {
   c._id = await appendLogEntry(token, {
     item_id:       itemId,
     kairosId:      _editItem?.metadata?.kairosId ?? undefined,
-    item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
+    item_type:     _isTaskMode() ? 'TASK' : 'EVENT',
     title:         _editItem?.title ?? '',
     verb:          'comment',
     action_detail: { verb: 'comment', text: c.text },
@@ -316,7 +316,7 @@ async function _logNewComments(token, itemId, title) {
     appendLogEntry(token, {
       item_id:       itemId,
       kairosId,
-      item_type:     _mode === 'task' ? 'TASK' : 'EVENT',
+      item_type:     _isTaskMode() ? 'TASK' : 'EVENT',
       title,
       verb:          'comment',
       action_detail: { verb: 'comment', text: c.text },
@@ -459,21 +459,28 @@ function _applyRruleToCustomPanel(rrule) {
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
 
+// Reminders are a lightweight sub-type of task (calendar-backed, completable),
+// so most task/event branching treats reminder like task.
+function _isTaskMode() { return _mode === 'task' || _mode === 'reminder' }
+
 function _setMode(mode, { locked = false } = {}) {
   _mode = mode
-  el('ue-mode-event').classList.toggle('active',   mode === 'event')
-  el('ue-mode-task').classList.toggle('active',    mode === 'task')
-  el('ue-mode-event').disabled = locked
-  el('ue-mode-task').disabled  = locked
-  el('ue-title').placeholder   = mode === 'task' ? 'Task title…' : 'Event title…'
+  el('ue-mode-event').classList.toggle('active',    mode === 'event')
+  el('ue-mode-task').classList.toggle('active',     mode === 'task')
+  el('ue-mode-reminder').classList.toggle('active', mode === 'reminder')
+  el('ue-mode-event').disabled    = locked
+  el('ue-mode-task').disabled     = locked
+  el('ue-mode-reminder').disabled = locked
+  el('ue-title').placeholder   = mode === 'reminder' ? 'Reminder…' : mode === 'task' ? 'Task title…' : 'Event title…'
+  // Reminders carry no list/status/deadline/LOE — just a title, a when, and done.
   el('ue-list-row').hidden     = mode !== 'task'
   el('ue-status-row').hidden   = mode !== 'task'
   el('ue-due-row').hidden      = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
-  el('ue-item-id').hidden      = !(mode === 'task' && _editItem)
+  el('ue-item-id').hidden      = !(_isTaskMode() && _editItem)
 
   const isDone = _editItem?.status === 'COMPLETED'
-  if (mode === 'task' && _editItem) {
+  if (_isTaskMode() && _editItem) {
     el('ue-complete').textContent = isDone ? 'Mark incomplete' : 'Mark complete'
     el('ue-complete').hidden      = false
     el('ue-complete').disabled    = false
@@ -505,7 +512,10 @@ async function _populateCalendars(preferredId, preloaded) {
 
   const filtered = _mode === 'task'
     ? cals.filter(c => taskCalIds.has(c.id))
-    : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
+    : _mode === 'reminder'
+      // Reminders are calendar-agnostic — any writable calendar.
+      ? cals.filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')
+      : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
 
   sel.innerHTML = filtered
     .map(c => `<option value="${esc(c.id)}"${c.primary ? ' selected' : ''}>${esc(c.summary)}</option>`)
@@ -574,6 +584,11 @@ export function initEditor() {
   el('ue-mode-task').addEventListener('click', () => {
     if (_mode === 'task') return
     _setMode('task')
+    _populateCalendars(getTaskCalendars()[0] ?? null, null)
+  })
+  el('ue-mode-reminder').addEventListener('click', () => {
+    if (_mode === 'reminder') return
+    _setMode('reminder')
     _populateCalendars(getTaskCalendars()[0] ?? null, null)
   })
 
@@ -737,7 +752,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   const isTask = item.item_type === 'TASK'
               || !!item.metadata?.task_calendar
               || taskCalSet.has(item.source.account_id)
-  const mode   = isTask ? 'task' : 'event'
+  const mode   = item.metadata?.isReminder ? 'reminder' : (isTask ? 'task' : 'event')
   _kairosId    = isTask ? (item.metadata?.kairosId ?? null) : null
 
   // Load activity log
@@ -921,8 +936,8 @@ async function _save() {
   el('ue-save-error').hidden = true
 
   try {
-    if (_mode === 'task') await _saveTask(title)
-    else                  await _saveEvent(title)
+    if (_isTaskMode()) await _saveTask(title)
+    else               await _saveEvent(title)
   } catch (err) {
     console.error('Save failed:', err)
     el('ue-save-error').textContent = err.message || 'Save failed'
@@ -932,7 +947,9 @@ async function _save() {
 }
 
 async function _saveTask(title) {
-  const rawLoe = el('ue-loe').value.trim()
+  const isReminder = _mode === 'reminder'
+  // Reminders carry no LOE — skip its validation and value entirely.
+  const rawLoe = isReminder ? '' : el('ue-loe').value.trim()
   const loe    = rawLoe ? normalizeLoe(rawLoe) : null
   if (rawLoe && !loe) {
     el('ue-loe-error').hidden = false
@@ -943,9 +960,10 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  const listId    = el('ue-list').value     || null
-  const statusId  = el('ue-status').value   || null
-  const dueDate   = el('ue-due-date').value || null
+  // Reminders have neither list, status, nor a separate deadline.
+  const listId    = isReminder ? null : (el('ue-list').value     || null)
+  const statusId  = isReminder ? null : (el('ue-status').value   || null)
+  const dueDate   = isReminder ? null : (el('ue-due-date').value || null)
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -983,6 +1001,7 @@ async function _saveTask(title) {
     listId,
     statusId,
     dueDate,
+    isReminder,
     order:        _editItem?.metadata?.order ?? Date.now(),
     loe,
     date:         startDate,
@@ -1105,7 +1124,7 @@ async function _confirmDelete() {
   const token = await getToken()
   if (!token) { el('ue-delete').disabled = false; _pendingAction = null; return }
   try {
-    if (_mode === 'task') {
+    if (_isTaskMode()) {
       await deleteTask(token, _editItem.source.account_id, _editItem.source.external_id)
     } else {
       await deleteEvent(token, _editItem.source.account_id, _editItem.source.external_id)
@@ -1137,8 +1156,8 @@ async function _executeWithScope(scope) {
       if (scope === 'all')            await _deleteAll(token)
       else if (scope === 'following') await _deleteFollowing(token)
       else {
-        if (_mode === 'task') await deleteTask(token, _editItem.source.account_id, _editItem.source.external_id)
-        else                  await deleteEvent(token, _editItem.source.account_id, _editItem.source.external_id)
+        if (_isTaskMode()) await deleteTask(token, _editItem.source.account_id, _editItem.source.external_id)
+        else               await deleteEvent(token, _editItem.source.account_id, _editItem.source.external_id)
       }
       _close()
       _callbacks.onDeleted?.()
@@ -1159,7 +1178,7 @@ async function _executeWithScope(scope) {
   if (!token || !pending) { saveBtn.disabled = false; return }
 
   try {
-    if (_mode === 'task') {
+    if (_isTaskMode()) {
       const { _taskData: td, calId } = pending
       const extId    = _editItem.source.external_id
       const masterId = _editItem.metadata.recurringEventId
@@ -1274,8 +1293,8 @@ async function _saveFollowingTask(token, calId, taskData) {
 }
 
 async function _deleteAll(token) {
-  if (_mode === 'task') await deleteTask(token, _editItem.source.account_id, _editItem.metadata.recurringEventId)
-  else                  await deleteEvent(token, _editItem.source.account_id, _editItem.metadata.recurringEventId)
+  if (_isTaskMode()) await deleteTask(token, _editItem.source.account_id, _editItem.metadata.recurringEventId)
+  else               await deleteEvent(token, _editItem.source.account_id, _editItem.metadata.recurringEventId)
 }
 
 async function _deleteFollowing(token) {
@@ -1294,7 +1313,7 @@ async function _deleteFollowing(token) {
     console.log('[deleteFollowing] rule:', lines[rruleIdx], '→', recurrence[rruleIdx])
     await updateEvent(token, calId, masterId, { recurrence })
   } else {
-    if (_mode === 'task') await deleteTask(token, calId, _editItem.source.external_id)
-    else                  await deleteEvent(token, calId, _editItem.source.external_id)
+    if (_isTaskMode()) await deleteTask(token, calId, _editItem.source.external_id)
+    else               await deleteEvent(token, calId, _editItem.source.external_id)
   }
 }
