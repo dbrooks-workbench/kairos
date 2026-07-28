@@ -243,7 +243,8 @@ body {
 
 /* ── Google Task Sweep dialog ────────────── */
 
-#sweep-dialog {
+#sweep-dialog,
+#visibility-dialog {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.35);
@@ -1651,6 +1652,19 @@ body.resize-active * { cursor: ns-resize !important; }
   color: var(--text);
   cursor: pointer;
 }
+
+/* Visibility-period indicator pill in the header */
+.visibility-pill {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.visibility-pill:hover { color: var(--text); border-color: var(--today-color); }
 
 .done-window-toggle {
   display: flex;

@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.29.4'
+const VERSION   = '0.29.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -29,7 +29,106 @@ const state = {
   boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
-  pastDueTasks: [],        // incomplete tasks due in the last 30d — rolled forward to today on the calendar
+  pastDueTasks: [],        // incomplete tasks in the window's past bound — rolled forward to today on the calendar
+  visibility: null,        // effective { start, end } window (Dates); session state, expands on calendar browse
+}
+
+// ── Visibility period ─────────────────────────────────────────────────────────
+// A date window (default [today-14d, today+14d]) that bounds the board/list/
+// reminders views and the calendar roll-forward. A custom window is persisted in
+// prefs; calendar browsing widens the effective window for the session only.
+const VIS_DEFAULT_DAYS = 14
+
+function _visDefaultWindow() {
+  const t = new Date(); t.setHours(0, 0, 0, 0)
+  return { start: addDays(t, -VIS_DEFAULT_DAYS), end: addDays(t, VIS_DEFAULT_DAYS) }
+}
+
+// Initialize the effective window from a saved custom window, else the default.
+function initVisibility() {
+  const cs = getVisibilityStart(), ce = getVisibilityEnd()
+  const def = _visDefaultWindow()
+  state.visibility = {
+    start: cs ? new Date(cs + 'T00:00:00') : def.start,
+    end:   ce ? new Date(ce + 'T00:00:00') : def.end,
+  }
+}
+
+// Effective window. Falls back to a fresh default (uncached) until prefs have
+// loaded and initVisibility() has run — so a saved custom window isn't masked by
+// an early pre-prefs read.
+let _visReady = false
+function visibilityWindow() {
+  return state.visibility ?? _visDefaultWindow()
+}
+
+// Initialize the session window from prefs exactly once, after prefs are loaded.
+function ensureVisibilityReady() {
+  if (_visReady) return
+  initVisibility()
+  _visReady = true
+}
+
+// Widen the effective window to cover [from, to). Session-only. Returns true if
+// the window actually grew (so callers can refresh dependent views).
+function expandVisibility(from, to) {
+  if (!state.visibility) initVisibility()
+  const w = state.visibility
+  let changed = false
+  if (from < w.start) { w.start = new Date(from); changed = true }
+  if (to   > w.end)   { w.end   = new Date(to);   changed = true }
+  return changed
+}
+
+function _fmtVisDate(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function _dateInputValue(d) {
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function renderVisibilityPill() {
+  const w  = visibilityWindow()
+  const el = document.getElementById('btn-visibility')
+  if (el) el.textContent = `${_fmtVisDate(w.start)} – ${_fmtVisDate(w.end)}`
+}
+
+// Re-render whichever surface is active (used after the window changes).
+function refreshActiveView() {
+  if (state.view === 'board' || state.view === 'list') loadBoardData()
+  else render()
+}
+
+function openVisibilityDialog() {
+  const dialog = document.getElementById('visibility-dialog')
+  const startI = document.getElementById('visibility-start-input')
+  const endI   = document.getElementById('visibility-end-input')
+  const w = visibilityWindow()
+  startI.value = _dateInputValue(w.start)
+  endI.value   = _dateInputValue(w.end)
+  dialog.hidden = false
+
+  const close = () => { dialog.hidden = true }
+  document.getElementById('visibility-cancel-btn').onclick   = close
+  document.getElementById('visibility-dialog-close').onclick = close
+  document.getElementById('visibility-default-btn').onclick  = () => {
+    setVisibilityWindow(null, null)
+    initVisibility()
+    renderVisibilityPill()
+    close()
+    refreshActiveView()
+  }
+  document.getElementById('visibility-save-btn').onclick = () => {
+    let s = startI.value || null, e = endI.value || null
+    if (s && e && s > e) [s, e] = [e, s]   // tolerate reversed range
+    setVisibilityWindow(s, e)
+    initVisibility()
+    renderVisibilityPill()
+    close()
+    refreshActiveView()
+  }
 }
 
 // Incomplete tasks overdue within this window are "pushed forward" to today on
@@ -384,6 +483,7 @@ function setView(v) {
   document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
   document.getElementById('btn-view-list').classList.toggle('active', v === 'list')
 
+  renderVisibilityPill()
   stopPolling()
   if (isWork) {
     loadBoardData()
@@ -607,6 +707,8 @@ async function loadBoardData() {
     // Backfill statuses for task calendars designated before statuses existed
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
     await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
+    ensureVisibilityReady()
+    renderVisibilityPill()
     state.taskLists = getAllLists()
     populateProjectSelector()
     rerenderWorkView()
@@ -1978,6 +2080,7 @@ async function navigateMobileDay(delta) {
   const newWeekStart = getWeekStart(newDay)
   if (newWeekStart.getTime() !== state.weekStart.getTime()) {
     state.weekStart = newWeekStart
+    expandVisibility(state.weekStart, addDays(state.weekStart, 7))
     const end = addDays(state.weekStart, 7)
     state.items = await fetchItems(state.weekStart, end)
     renderWeekLabel()
@@ -2109,6 +2212,7 @@ function initCreateHandlers() {
 
 async function render() {
   renderWeekLabel()
+  renderVisibilityPill()
   renderColumnHeaders()
   renderTimeGutter()
   renderDayColumns()
@@ -2137,6 +2241,8 @@ async function render() {
         getToken().then(t => t ? loadLists(t) : null),
         getToken().then(t => t ? loadStatuses(t) : null),
       ])
+      ensureVisibilityReady()
+      renderVisibilityPill()
       state.items = items
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
@@ -2156,10 +2262,12 @@ async function render() {
 
 document.getElementById('btn-prev').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, -7)
+  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
   render()
 })
 document.getElementById('btn-next').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, 7)
+  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
   render()
 })
 document.getElementById('btn-today').addEventListener('click', () => {
@@ -2167,6 +2275,8 @@ document.getElementById('btn-today').addEventListener('click', () => {
   state.mobileDay = new Date()
   render()
 })
+
+document.getElementById('btn-visibility').addEventListener('click', openVisibilityDialog)
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
