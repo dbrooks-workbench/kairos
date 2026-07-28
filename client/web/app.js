@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.30.3'
+const VERSION   = '0.30.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -476,8 +476,6 @@ function setView(v) {
   const isWork = WORK_VIEWS.includes(v)
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
-  // Toolbar (project selector) is only meaningful for board + list.
-  document.getElementById('board-toolbar').hidden = !(v === 'board' || v === 'list')
   document.getElementById('board').hidden         = v !== 'board'
   document.getElementById('list').hidden          = v !== 'list'
   document.getElementById('reminders').hidden     = v !== 'reminders'
@@ -485,6 +483,7 @@ function setView(v) {
   if (v !== 'list')  destroyList()
   const sel = document.getElementById('view-select')
   if (sel && sel.value !== v) sel.value = v
+  _syncProjectSelectorVisibility()
 
   renderVisibilityPill()
   stopPolling()
@@ -749,9 +748,15 @@ function populateProjectSelector() {
     if (calId === current) opt.selected = true
     sel.appendChild(opt)
   }
-  // Always show when there's at least one task calendar — it doubles as a
-  // "you're working in project X" label, not just a switcher.
-  sel.hidden = taskCals.length === 0
+  _syncProjectSelectorVisibility()
+}
+
+// The project selector lives in the header now; show it only on the board/list
+// views (it scopes those) and only when a task calendar exists.
+function _syncProjectSelectorVisibility() {
+  const sel = document.getElementById('board-calendar-select')
+  if (!sel) return
+  sel.hidden = !((state.view === 'board' || state.view === 'list') && getTaskCalendars().length > 0)
 }
 
 function getBoardItems() {
