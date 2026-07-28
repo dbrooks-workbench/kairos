@@ -131,26 +131,21 @@ function openVisibilityDialog() {
   }
 }
 
-// Incomplete tasks overdue within this window are "pushed forward" to today on
-// the calendar (render-time only — the stored due date is never mutated). Older
-// than this, they stay at their real date rather than roll forward forever.
-const ROLL_LOOKBACK_DAYS = 30
-
 function todayMidnight() {
   const n = new Date()
   return new Date(n.getFullYear(), n.getMonth(), n.getDate())
 }
 
-// A dated, incomplete task whose due date is in [today-30d, today) — eligible to
-// be rolled forward. Undated tasks and tasks older than the window are excluded.
+// A dated, incomplete task whose start is within the visibility window's past
+// bound and before today — eligible to be rolled forward. Undated tasks and tasks
+// older than the window's start are excluded.
 function isRollablePastDue(item) {
   // Only real Kairos tasks roll — matches exactly what refreshPastDueTasks fetches
   // (isTask events), so native task-calendar events are never suppressed-then-lost.
   if (item.item_type !== 'TASK' || item.status === 'COMPLETED') return false
   if (!item.start || item.metadata?.noDate) return false
-  const t = todayMidnight()
   const s = new Date(item.start)
-  return s < t && s >= new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  return s < todayMidnight() && s >= visibilityWindow().start
 }
 
 // Render-time clone placed on today as an all-day chip (marked so it keeps the
@@ -167,13 +162,13 @@ function rollToToday(item) {
   }
 }
 
-// Fetch incomplete, dated tasks due in the last 30 days across task calendars,
-// de-duplicating recurring series to the single most-recent overdue instance.
+// Fetch incomplete, dated tasks within the visibility window's past bound across
+// task calendars, de-duplicating recurring series to the most-recent overdue one.
 async function refreshPastDueTasks() {
   const token = await getToken()
   if (!token) { state.pastDueTasks = []; return }
   const t     = todayMidnight()
-  const since = new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  const since = visibilityWindow().start
   const calIds = getTaskCalendars()
   const per = await Promise.all(
     calIds.map(cal => getTaskEvents(token, cal, since, t).catch(() => []))
@@ -649,13 +644,14 @@ function populateProjectSelector() {
 }
 
 function getBoardItems() {
-  const showRecurring  = localStorage.getItem('kairos:showRecurring')  === 'true'
-  const hideFarFuture  = localStorage.getItem('kairos:hideFarFuture')  === 'true'
+  const showRecurring = localStorage.getItem('kairos:showRecurring') === 'true'
 
-  const cutoff = hideFarFuture ? addDays((() => { const d = new Date(); d.setHours(0,0,0,0); return d })(), 14) : null
-
-  let items = state.boardItems
-  if (cutoff) items = items.filter(i => !i.start || i.start <= cutoff || i.metadata?.noDate)
+  // Bound to the visibility window by task date; undated tasks always show.
+  const w       = visibilityWindow()
+  const endExcl = addDays(w.end, 1)   // include the whole end day
+  let items = state.boardItems.filter(i =>
+    !i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl)
+  )
   if (!showRecurring) return items.filter(i => !i.metadata?.recurringEventId)
 
   // Recurring tasks are shown as one card per series: the next upcoming non-completed
@@ -690,25 +686,28 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
+    // Prefs/lists/statuses first so the visibility window (and task calendars) are
+    // known before fetching — the task fetch is bounded to that window.
+    await Promise.all([loadPrefs(token), loadLists(token), loadStatuses(token)])
+    ensureVisibilityReady()
+    renderVisibilityPill()
     const taskCalIds = getTaskCalendars()
-    await Promise.all([
-      Promise.all(
-        taskCalIds.map(calId =>
-          getAllTaskEvents(token, calId).catch(err => {
-            console.warn(`Tasks fetch failed for ${calId}:`, err.message)
-            return []
-          })
-        )
-      ).then(results => { state.boardItems = results.flat() }),
-      loadPrefs(token),
-      loadLists(token),
-      loadStatuses(token),
-    ])
     // Backfill statuses for task calendars designated before statuses existed
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
     await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
-    ensureVisibilityReady()
-    renderVisibilityPill()
+    const w = visibilityWindow()
+    // Extend the fetch end by a day so tasks on the last visible day are included
+    // (the display filter already treats the end day inclusively).
+    const win = { start: w.start, end: addDays(w.end, 1) }
+    const results = await Promise.all(
+      taskCalIds.map(calId =>
+        getAllTaskEvents(token, calId, win).catch(err => {
+          console.warn(`Tasks fetch failed for ${calId}:`, err.message)
+          return []
+        })
+      )
+    )
+    state.boardItems = results.flat()
     state.taskLists = getAllLists()
     populateProjectSelector()
     rerenderWorkView()
@@ -722,8 +721,9 @@ async function loadBoardData() {
 }
 
 // Filter already-fetched items by calendar visibility — no network call needed.
-// Also rolls past-due tasks (last 30d) forward: they're suppressed at their real
-// past date and re-emitted as all-day chips on today (see rollToToday).
+// Also rolls past-due tasks (within the visibility window's past bound) forward:
+// they're suppressed at their real past date and re-emitted as all-day chips on
+// today (see rollToToday).
 function getVisibleItems() {
   const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
   const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
@@ -2304,13 +2304,6 @@ _recurringToggle.addEventListener('change', e => {
   rerenderWorkView()
 })
 
-// Board far-future filter
-const _farFutureToggle = document.getElementById('board-hide-far-future')
-_farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
-_farFutureToggle.addEventListener('change', e => {
-  localStorage.setItem('kairos:hideFarFuture', e.target.checked)
-  rerenderWorkView()
-})
 
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
