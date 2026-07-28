@@ -11,7 +11,7 @@ import Sortable from 'sortablejs'
 import { getToken } from './auth.js'
 import { patchTaskProps } from './providers/calendarTasks.js'
 import { updateList, deleteList } from './providers/kairosLists.js'
-import { getInProgressStatusIds } from './providers/kairosStatuses.js'
+import { getInProgressStatusIds } from './providers/kairosConfig.js'
 import { openSnoozePopover } from './board.js'
 
 const UNLISTED_COL_ID = '__unlisted__'

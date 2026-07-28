@@ -4,7 +4,22 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosConfig.js'
+import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
+
+// Load the per-calendar config events (statuses + tag palette), migrating any
+// legacy Firestore statuses into a calendar's config event the first time it's
+// created. Needs prefs loaded first (for the task-calendar list).
+async function loadStatusConfig(token) {
+  await loadFsStatuses(token).catch(() => {})   // migration source only
+  await loadConfig(token, getTaskCalendars(), calId => {
+    const fs = fsStatusesForCalendar(calId)
+    if (!fs.length) return null
+    const obj = {}
+    fs.forEach(s => { obj[s.id] = { name: s.name, order: s.order, inProgress: s.inProgress } })
+    return obj
+  })
+}
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
@@ -15,7 +30,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.31.1'
+const VERSION   = '0.32.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -801,9 +816,10 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
-    // Prefs/lists/statuses first so the visibility window (and task calendars) are
-    // known before fetching — the task fetch is bounded to that window.
-    await Promise.all([loadPrefs(token), loadLists(token), loadStatuses(token)])
+    // Prefs/lists first so the visibility window and task-calendar list are known
+    // (the config load and windowed fetch both need them).
+    await Promise.all([loadPrefs(token), loadLists(token)])
+    await loadStatusConfig(token)
     ensureVisibilityReady()
     renderVisibilityPill()
     const taskCalIds = getTaskCalendars()
@@ -2354,8 +2370,10 @@ async function render() {
           state.taskCalendars   = new Set(getTaskCalendars())
         }) : null),
         getToken().then(t => t ? loadLists(t) : null),
-        getToken().then(t => t ? loadStatuses(t) : null),
       ])
+      // Config events (statuses + tag palette) need the task-calendar list, so
+      // after prefs. Cosmetic for the calendar (in-progress ring), so non-blocking.
+      getToken().then(t => t ? loadStatusConfig(t).then(() => renderItems(getVisibleItems())) : null).catch(console.warn)
       ensureVisibilityReady()
       renderVisibilityPill()
       state.items = items

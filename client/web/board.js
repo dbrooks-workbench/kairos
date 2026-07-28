@@ -5,7 +5,7 @@ import {
 } from './providers/calendarTasks.js'
 import { patchTask } from './providers/googleTasksIntake.js'
 import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js'
-import { updateStatus, deleteStatus } from './providers/kairosStatuses.js'
+import { updateStatus, deleteStatus } from './providers/kairosConfig.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
 const DONE_COL_ID = '__done__'

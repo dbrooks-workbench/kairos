@@ -13,7 +13,7 @@ import {
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getListsForCalendar } from './providers/kairosLists.js'
-import { getStatusesForCalendar } from './providers/kairosStatuses.js'
+import { getStatusesForCalendar } from './providers/kairosConfig.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'

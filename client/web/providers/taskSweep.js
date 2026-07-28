@@ -8,7 +8,7 @@
 import { parseTaskNotes } from './parsers.js'
 import { generateKairosId } from './driveTaskMeta.js'
 import { createTask } from './calendarTasks.js'
-import { getStatus } from './kairosStatuses.js'
+import { getStatus } from './kairosConfig.js'
 
 const GT_BASE = 'https://www.googleapis.com/tasks/v1'
 
