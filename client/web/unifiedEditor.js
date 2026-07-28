@@ -20,7 +20,8 @@ import { openSnoozePopover } from './board.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _mode          = 'event'   // 'event' | 'task'
+let _mode          = 'event'   // 'event' | 'task' | 'reminder'
+let _originalMode  = null      // mode the item was opened as (to detect type conversions)
 let _editItem      = null      // null = create mode
 let _callbacks     = {}
 let _kairosId           = null   // task mode: stable ID (null until first save)
@@ -781,10 +782,10 @@ export async function openEditorForEdit(item, callbacks = {}) {
   _endDateExplicit = !!item.end && _fmtDate(item.start) !== _fmtDate(
     item.all_day && item.end ? new Date(new Date(item.end).getTime() - 86_400_000) : item.end
   )
-  // The type can be changed in edit mode (converts on save) — except for recurring
-  // items, where a type change would tangle with the this/following/all scope flow.
-  const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
-  _setMode(mode, { locked: isRecurring })
+  // The type can be changed in edit mode (converts on save). For recurring items a
+  // type change applies to the whole series (see _save), so it's allowed too.
+  _originalMode = mode
+  _setMode(mode, { locked: false })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
   el('ue-title').value       = item.title
@@ -1035,6 +1036,14 @@ async function _saveTask(title) {
     const extId   = _editItem.source.external_id
     const origCal = _originalCalendarId ?? _editItem.source.account_id
     if (_editItem.metadata?.recurringEventId) {
+      // A type conversion applies to the whole series (a mixed-type series makes
+      // no sense) — skip the this/following/all prompt and update the master.
+      if (_mode !== _originalMode) {
+        if (calId !== origCal) await moveTask(token, origCal, extId, calId)
+        await _saveAllTask(token, calId, taskData)
+        _close(); _callbacks.onSaved?.()
+        return
+      }
       _pendingBody = { _taskData: taskData, calId, origCal }
       document.querySelector('input[name="recur-scope"][value="this"]').checked = true
       el('recur-scope-modal').hidden = false
@@ -1107,6 +1116,14 @@ async function _saveEvent(title) {
   if (!token) { el('ue-save').disabled = false; return }
 
   if (_editItem?.metadata?.recurringEventId) {
+    // A type conversion applies to the whole series — skip the scope prompt.
+    if (_mode !== _originalMode) {
+      const origCal = _originalCalendarId ?? _editItem.source.account_id
+      if (calId !== origCal) await moveEvent(token, origCal, _editItem.source.external_id, calId)
+      await _saveAll(token, body)
+      _close(); _callbacks.onSaved?.()
+      return
+    }
     _pendingBody = body
     document.querySelector('input[name="recur-scope"][value="this"]').checked = true
     el('recur-scope-modal').hidden = false
@@ -1230,6 +1247,7 @@ async function _saveAll(token, body) {
   if (body.location)                   mb.location    = body.location
   if (body.description !== undefined)  mb.description = body.description
   if (body.recurrence?.length)         mb.recurrence  = body.recurrence
+  if (body.extendedProperties)         mb.extendedProperties = body.extendedProperties  // task→event marker clearing
   if (body.start?.dateTime && master.start?.dateTime) {
     const newTime  = body.start.dateTime.slice(11)
     const origDate = master.start.dateTime.slice(0, 11)
