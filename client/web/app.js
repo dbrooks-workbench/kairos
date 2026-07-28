@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.30.2'
+const VERSION   = '0.30.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -204,6 +204,11 @@ function calRank(id) {
 function byCalendarThenTitle(a, b) {
   return (calRank(a.source.account_id) - calRank(b.source.account_id))
     || (a.title ?? '').localeCompare(b.title ?? '')
+}
+
+// Chip title with a bell marker for reminders (plain title for everything else).
+function _titleWithBell(item) {
+  return (item.metadata?.isReminder ? '🔔 ' : '') + item.title
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -1667,7 +1672,7 @@ function renderItems(items) {
         })
 
         const titleSpan = document.createElement('span')
-        titleSpan.textContent = item.title
+        titleSpan.textContent = _titleWithBell(item)
 
         const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
         const recurIcon = isRecurring ? (() => {
@@ -1715,7 +1720,7 @@ function renderItems(items) {
       } else {
         if (item.color) applyColor(chipEl, item.color)
         const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-        chipEl.textContent = item.title
+        chipEl.textContent = _titleWithBell(item)
         if (isRecurringEv) {
           chipEl.style.paddingRight = '14px'
           const icon = document.createElement('span')
@@ -1814,7 +1819,7 @@ function renderItems(items) {
         textWrap.className = 'timed-task-text'
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = item.title
+        titleEl.textContent = _titleWithBell(item)
         const timeEl = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -1852,7 +1857,7 @@ function renderItems(items) {
       } else {
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = item.title
+        titleEl.textContent = _titleWithBell(item)
         const timeEl  = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -2005,7 +2010,7 @@ function renderMobileDay() {
       })
 
       const titleSpan = document.createElement('span')
-      titleSpan.textContent = item.title
+      titleSpan.textContent = _titleWithBell(item)
 
       const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
       const parts = [check, titleSpan]
@@ -2020,7 +2025,7 @@ function renderMobileDay() {
     } else {
       if (item.color) applyColor(chip, item.color)
       const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-      chip.textContent = item.title
+      chip.textContent = _titleWithBell(item)
       if (isRecurringEv) {
         chip.style.paddingRight = '14px'
         const icon = document.createElement('span')
@@ -2108,7 +2113,7 @@ function renderMobileDay() {
       textWrap.className = 'timed-task-text'
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = item.title
+      titleEl.textContent = _titleWithBell(item)
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)
@@ -2146,7 +2151,7 @@ function renderMobileDay() {
     } else {
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = item.title
+      titleEl.textContent = _titleWithBell(item)
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)
