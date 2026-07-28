@@ -125,6 +125,7 @@ All time-aware data normalizes to a `CalendarItem` (JavaScript object):
     listId?: string,            // Kairos list (organization axis) assignment (extendedProperty)
     statusId?: string,          // Kairos status (workflow axis / board column) assignment (extendedProperty)
     dueDate?: Date | null,      // task deadline — when it must be done, independent of start/scheduling (extendedProperty 'YYYY-MM-DD')
+    isReminder?: boolean,       // true = reminder (no list/status/LOE; just done/not-done) (extendedProperty 'true')
     order?: number,             // board sort order within a status column (extendedProperty)
     completedAt?: string|null,  // ISO timestamp or null (extendedProperty)
     noDate?: boolean,           // undated task (sentineled start date)
@@ -169,6 +170,7 @@ Tasks in Kairos are stored as Google Calendar events with private extended prope
 | `listId` | string | List (organization axis) assignment — the List view's columns |
 | `statusId` | string | Status (workflow axis) assignment — the Board's columns |
 | `dueDate` | `'YYYY-MM-DD'` | Task deadline — when it must be done, independent of `start` (scheduling). Display-only; not wired to overdue logic |
+| `isReminder` | `'true'` | Marks the task as a reminder (no list/status/LOE; renders on the calendar with a 🔔 and in the Reminders view) |
 | `order` | string (number) | Board sort order within a status column |
 | `completedAt` | ISO string \| null | Non-null = completed; encodes both state and time |
 | `loe` | string | Level of effort (e.g. `"2h"`) |
@@ -220,12 +222,31 @@ The board (`board.js`) surfaces a **single project calendar's** task events in a
 
 The list view (`list.js`) surfaces the same project calendar's **incomplete** task events grouped by **list**; tasks with no list fall into an Unlisted column. No Done column. Auto-sorted per column: in-progress first, then due date, then alphabetical (no manual order). Drag rewrites `listId`. Reuses the board's column/card CSS, snooze popover, and Sortable mechanics but is otherwise an isolated module.
 
+## Reminders
+
+A **reminder** is a lightweight sub-type of task (`isReminder` extendedProperty): calendar-backed and completable, but with **no list, status, deadline, or LOE** — just a title, a *when*, and done/not-done. It's the difference between *project work* (has a workflow) and a *nudge* (just fires at a time). Reminders are orthogonal to list/status, not to the calendar — they live on task calendars alongside tasks.
+
+- **Editor**: a third mode (Event · Task · Reminder). Reminder mode hides List/Status/Due/LOE, keeps Title / When / Repeats / complete. `_isTaskMode()` threads reminders through the task branches (item_type `TASK`, save/delete/recurring-scope).
+- **Excluded from board + list** (they have no status/list) — `getBoardItems` filters `isReminder` out.
+- **Reminders view** (4th surface): a flat list within the visibility window, deduped by recurring series, incomplete-first by date with completed dimmed after. Inline complete + click-to-edit + "New reminder".
+- **Calendar**: renders as a completable task chip with a 🔔 marker (`_titleWithBell`).
+- The four views are selected via a header **dropdown** (Calendar / Board / List / Reminders); the work views appear only when a task calendar exists.
+
+## Visibility Period
+
+A date window (default `[today − 14d, today + 14d]`) that bounds the aggregate views and the calendar roll-forward, keeping load in check. Session state in `state.visibility`; a custom window persists in prefs (`visibilityStart`/`visibilityEnd`), and "Use default" reverts to the relative default.
+
+- **Board / List / Reminders**: fetch *and* display are bounded to the window (`getAllTaskEvents(token, cal, window)` — recurring tasks expand only in-window; undated tasks always included/shown).
+- **Calendar**: navigation is free, but browsing to a week outside the window **widens** it for the session (never shifts — today stays the anchor), keeping the other views in sync and re-running the roll-forward against the wider past bound.
+- **Roll-forward** uses the window's past bound (replaced the old fixed 30-day lookback).
+- **Header**: a pill shows the window (e.g. `Jul 14 – Aug 11`) and opens a set/reset dialog.
+
 ---
 
 ## UI Details
 
 - **Past events**: regular past events fade to opacity 0.45 (`.is-past`); past-due incomplete tasks get a red urgency ring (`.past-due`)
-- **Past-due roll-forward**: incomplete tasks due in the last 30 days are *pushed forward* to today on the calendar — rendered as red-ringed all-day chips on today, suppressed at their real past date. Render-time only (`getVisibleItems` → `rollToToday`); the stored due date is never mutated. `state.pastDueTasks` is fetched by `refreshPastDueTasks()` (30-day window, task calendars, recurring deduped to the latest overdue instance). Tasks older than 30 days stay at their real date.
+- **Past-due roll-forward**: incomplete tasks within the **visibility window's past bound** are *pushed forward* to today on the calendar — rendered as red-ringed all-day chips on today, suppressed at their real past date. Render-time only (`getVisibleItems` → `rollToToday`); the stored due date is never mutated. `state.pastDueTasks` is fetched by `refreshPastDueTasks()` (window past bound, task calendars, recurring deduped to the latest overdue instance). Tasks older than the window's start stay at their real date. See **Visibility Period**.
 - **Recurrence indicator**: `↻` appended to chip/card title for any item with `recurrence` or `metadata.recurringEventId`
 - **End date**: hidden by default in all-day mode; "Add end date" link reveals it; "Hide end date" collapses back
 - **All day** checkbox appears below the date row (logically modifies dates)

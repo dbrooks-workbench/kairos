@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
 import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.29.4'
+const VERSION   = '0.30.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -29,29 +29,123 @@ const state = {
   boardItems: [],          // CalendarItem[] — all calendar task events
   doneWindow: 30,          // days of completed tasks to show in Done column
   mobileDay: new Date(),   // day currently shown in the mobile day view
-  pastDueTasks: [],        // incomplete tasks due in the last 30d — rolled forward to today on the calendar
+  pastDueTasks: [],        // incomplete tasks in the window's past bound — rolled forward to today on the calendar
+  visibility: null,        // effective { start, end } window (Dates); session state, expands on calendar browse
 }
 
-// Incomplete tasks overdue within this window are "pushed forward" to today on
-// the calendar (render-time only — the stored due date is never mutated). Older
-// than this, they stay at their real date rather than roll forward forever.
-const ROLL_LOOKBACK_DAYS = 30
+// ── Visibility period ─────────────────────────────────────────────────────────
+// A date window (default [today-14d, today+14d]) that bounds the board/list/
+// reminders views and the calendar roll-forward. A custom window is persisted in
+// prefs; calendar browsing widens the effective window for the session only.
+const VIS_DEFAULT_DAYS = 14
+
+function _visDefaultWindow() {
+  const t = new Date(); t.setHours(0, 0, 0, 0)
+  return { start: addDays(t, -VIS_DEFAULT_DAYS), end: addDays(t, VIS_DEFAULT_DAYS) }
+}
+
+// Initialize the effective window from a saved custom window, else the default.
+function initVisibility() {
+  const cs = getVisibilityStart(), ce = getVisibilityEnd()
+  const def = _visDefaultWindow()
+  state.visibility = {
+    start: cs ? new Date(cs + 'T00:00:00') : def.start,
+    end:   ce ? new Date(ce + 'T00:00:00') : def.end,
+  }
+}
+
+// Effective window. Falls back to a fresh default (uncached) until prefs have
+// loaded and initVisibility() has run — so a saved custom window isn't masked by
+// an early pre-prefs read.
+let _visReady = false
+function visibilityWindow() {
+  return state.visibility ?? _visDefaultWindow()
+}
+
+// Initialize the session window from prefs exactly once, after prefs are loaded.
+function ensureVisibilityReady() {
+  if (_visReady) return
+  initVisibility()
+  _visReady = true
+}
+
+// Widen the effective window to cover [from, to). Session-only. Returns true if
+// the window actually grew (so callers can refresh dependent views).
+function expandVisibility(from, to) {
+  if (!state.visibility) initVisibility()
+  const w = state.visibility
+  let changed = false
+  if (from < w.start) { w.start = new Date(from); changed = true }
+  if (to   > w.end)   { w.end   = new Date(to);   changed = true }
+  return changed
+}
+
+function _fmtVisDate(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function _dateInputValue(d) {
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function renderVisibilityPill() {
+  const w  = visibilityWindow()
+  const el = document.getElementById('btn-visibility')
+  if (el) el.textContent = `${_fmtVisDate(w.start)} – ${_fmtVisDate(w.end)}`
+}
+
+// Re-render whichever surface is active (used after the window changes).
+function refreshActiveView() {
+  if (WORK_VIEWS.includes(state.view)) loadBoardData()
+  else render()
+}
+
+function openVisibilityDialog() {
+  const dialog = document.getElementById('visibility-dialog')
+  const startI = document.getElementById('visibility-start-input')
+  const endI   = document.getElementById('visibility-end-input')
+  const w = visibilityWindow()
+  startI.value = _dateInputValue(w.start)
+  endI.value   = _dateInputValue(w.end)
+  dialog.hidden = false
+
+  const close = () => { dialog.hidden = true }
+  document.getElementById('visibility-cancel-btn').onclick   = close
+  document.getElementById('visibility-dialog-close').onclick = close
+  document.getElementById('visibility-default-btn').onclick  = () => {
+    setVisibilityWindow(null, null)
+    initVisibility()
+    renderVisibilityPill()
+    close()
+    refreshActiveView()
+  }
+  document.getElementById('visibility-save-btn').onclick = () => {
+    let s = startI.value || null, e = endI.value || null
+    if (s && e && s > e) [s, e] = [e, s]   // tolerate reversed range
+    setVisibilityWindow(s, e)
+    initVisibility()
+    renderVisibilityPill()
+    close()
+    refreshActiveView()
+  }
+}
 
 function todayMidnight() {
   const n = new Date()
   return new Date(n.getFullYear(), n.getMonth(), n.getDate())
 }
 
-// A dated, incomplete task whose due date is in [today-30d, today) — eligible to
-// be rolled forward. Undated tasks and tasks older than the window are excluded.
+// A dated, incomplete task whose start is within the visibility window's past
+// bound and before today — eligible to be rolled forward. Undated tasks and tasks
+// older than the window's start are excluded.
 function isRollablePastDue(item) {
   // Only real Kairos tasks roll — matches exactly what refreshPastDueTasks fetches
   // (isTask events), so native task-calendar events are never suppressed-then-lost.
   if (item.item_type !== 'TASK' || item.status === 'COMPLETED') return false
   if (!item.start || item.metadata?.noDate) return false
-  const t = todayMidnight()
   const s = new Date(item.start)
-  return s < t && s >= new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  return s < todayMidnight() && s >= visibilityWindow().start
 }
 
 // Render-time clone placed on today as an all-day chip (marked so it keeps the
@@ -68,13 +162,13 @@ function rollToToday(item) {
   }
 }
 
-// Fetch incomplete, dated tasks due in the last 30 days across task calendars,
-// de-duplicating recurring series to the single most-recent overdue instance.
+// Fetch incomplete, dated tasks within the visibility window's past bound across
+// task calendars, de-duplicating recurring series to the most-recent overdue one.
 async function refreshPastDueTasks() {
   const token = await getToken()
   if (!token) { state.pastDueTasks = []; return }
   const t     = todayMidnight()
-  const since = new Date(t.getTime() - ROLL_LOOKBACK_DAYS * 86_400_000)
+  const since = visibilityWindow().start
   const calIds = getTaskCalendars()
   const per = await Promise.all(
     calIds.map(cal => getTaskEvents(token, cal, since, t).catch(() => []))
@@ -110,6 +204,11 @@ function calRank(id) {
 function byCalendarThenTitle(a, b) {
   return (calRank(a.source.account_id) - calRank(b.source.account_id))
     || (a.title ?? '').localeCompare(b.title ?? '')
+}
+
+// Chip title with a bell marker for reminders (plain title for everything else).
+function _titleWithBell(item) {
+  return (item.metadata?.isReminder ? '🔔 ' : '') + item.title
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -370,20 +469,24 @@ function calendarModalCallbacks() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
+const WORK_VIEWS = ['board', 'list', 'reminders']
+
 function setView(v) {
   state.view = v
-  const isWork = v === 'board' || v === 'list'
+  const isWork = WORK_VIEWS.includes(v)
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
-  document.getElementById('board-toolbar').hidden = !isWork
+  // Toolbar (project selector) is only meaningful for board + list.
+  document.getElementById('board-toolbar').hidden = !(v === 'board' || v === 'list')
   document.getElementById('board').hidden         = v !== 'board'
   document.getElementById('list').hidden          = v !== 'list'
+  document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
   if (v !== 'list')  destroyList()
-  document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
-  document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
-  document.getElementById('btn-view-list').classList.toggle('active', v === 'list')
+  const sel = document.getElementById('view-select')
+  if (sel && sel.value !== v) sel.value = v
 
+  renderVisibilityPill()
   stopPolling()
   if (isWork) {
     loadBoardData()
@@ -394,14 +497,22 @@ function setView(v) {
   }
 }
 
-// Board + List views only make sense with at least one task calendar. Hide their
-// nav buttons otherwise, and fall back to the calendar if a work view is active
-// when the last task calendar is removed.
-function updateWorkViewButtons() {
+// The work views (board/list/reminders) only make sense with a task calendar.
+// Rebuild the view dropdown accordingly and fall back to the calendar if a work
+// view is active when the last task calendar is removed.
+function populateViewSelect() {
+  const sel = document.getElementById('view-select')
+  if (!sel) return
   const hasTaskCals = getTaskCalendars().length > 0
-  document.getElementById('btn-view-board').hidden = !hasTaskCals
-  document.getElementById('btn-view-list').hidden  = !hasTaskCals
-  if (!hasTaskCals && (state.view === 'board' || state.view === 'list')) setView('calendar')
+  const opts = [['calendar', 'Calendar']]
+  if (hasTaskCals) opts.push(['board', 'Board'], ['list', 'List'], ['reminders', 'Reminders'])
+  sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
+  sel.value = state.view
+}
+
+function updateWorkViewButtons() {
+  populateViewSelect()
+  if (getTaskCalendars().length === 0 && WORK_VIEWS.includes(state.view)) setView('calendar')
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
@@ -413,7 +524,7 @@ function startPolling(ms) {
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
     await runSpawnScan()
-    if (state.view === 'board' || state.view === 'list') {
+    if (WORK_VIEWS.includes(state.view)) {
       await loadBoardData()
     } else {
       const end  = addDays(state.weekStart, 7)
@@ -436,7 +547,7 @@ document.addEventListener('visibilitychange', () => {
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
-      if (state.view === 'board' || state.view === 'list') loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
         state.items = items
         renderItems(getVisibleItems())
@@ -523,10 +634,105 @@ function renderListView() {
   renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
 }
 
-// Re-render whichever work surface (board or list) is active.
+// Re-render whichever work surface (board / list / reminders) is active.
 function rerenderWorkView() {
-  if (state.view === 'list') renderListView()
+  if (state.view === 'reminders') renderReminders()
+  else if (state.view === 'list')  renderListView()
   else rerenderBoard()
+}
+
+// ── Reminders view ──────────────────────────────────────────────────────────
+// A flat list of reminders (isReminder task events) within the visibility window,
+// deduped by recurring series. Incomplete first (by date), completed dimmed after.
+function getReminders() {
+  const w       = visibilityWindow()
+  const endExcl = addDays(w.end, 1)
+  const rems = state.boardItems.filter(i =>
+    i.metadata?.isReminder &&
+    (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
+  )
+  const today = todayMidnight()
+  const bestBySeries = new Map()
+  for (const item of rems) {
+    const sid = item.metadata?.recurringEventId
+    if (!sid || item.status === 'COMPLETED') continue
+    const prev = bestBySeries.get(sid)
+    const is = item.start ?? new Date(0), ps = prev?.start ?? new Date(0)
+    const ia = is >= today, pa = ps >= today
+    if (!prev || (ia && !pa) || (ia && pa && is < ps) || (!ia && !pa && is > ps)) bestBySeries.set(sid, item)
+  }
+  return [...rems.filter(i => !i.metadata?.recurringEventId), ...bestBySeries.values()]
+}
+
+async function toggleReminder(item) {
+  const token = await getToken()
+  if (!token) return
+  const isDone = item.status === 'COMPLETED'
+  try {
+    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
+    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
+    await loadBoardData()   // refetch + re-render the active (reminders) view
+  } catch (err) {
+    console.error('Toggle reminder failed:', err)
+  }
+}
+
+function _reminderWhen(item) {
+  if (!item.start || item.metadata?.noDate) return 'No date'
+  const d = new Date(item.start)
+  const datePart = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  if (item.all_day) return datePart
+  return `${datePart} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+}
+
+function renderReminders() {
+  const root = document.getElementById('reminders')
+  root.innerHTML = ''
+
+  const header = el('div', 'reminders-header')
+  const addBtn = el('button', 'reminders-add-btn')
+  addBtn.textContent = '+ New reminder'
+  addBtn.addEventListener('click', () =>
+    openEditor({ mode: 'reminder', calendarId: currentProjectCalendarId() }, { onSaved: loadBoardData }))
+  header.appendChild(addBtn)
+  root.appendChild(header)
+
+  const rems = getReminders()
+  const rank    = i => i.status === 'COMPLETED' ? 1 : 0
+  const dateVal = i => i.start ? +new Date(i.start) : Infinity
+  rems.sort((a, b) =>
+    rank(a) - rank(b) || dateVal(a) - dateVal(b) || (a.title ?? '').localeCompare(b.title ?? ''))
+
+  if (!rems.length) {
+    const empty = el('div', 'reminders-empty')
+    empty.textContent = 'No reminders in view.'
+    root.appendChild(empty)
+    return
+  }
+
+  const listEl = el('div', 'reminders-list')
+  for (const item of rems) {
+    const isDone = item.status === 'COMPLETED'
+    const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+    const row = el('div', `reminder-row${isDone ? ' done' : ''}`)
+
+    const check = el('button', `reminder-check${isDone ? ' done' : ''}`)
+    check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+    if (isDone) check.textContent = '✓'
+    check.addEventListener('click', e => { e.stopPropagation(); toggleReminder(item) })
+
+    const title = el('div', 'reminder-title')
+    title.textContent = `🔔 ${item.title}${isRecurring ? ' ↻' : ''}`
+
+    const when = el('div', 'reminder-when')
+    when.textContent = _reminderWhen(item)
+
+    row.append(check, title, when)
+    row.addEventListener('click', () =>
+      openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }))
+    listEl.appendChild(row)
+  }
+  root.appendChild(listEl)
 }
 
 // Fill the board/list project-calendar <select> from the designated task calendars.
@@ -549,14 +755,14 @@ function populateProjectSelector() {
 }
 
 function getBoardItems() {
-  const showRecurring  = localStorage.getItem('kairos:showRecurring')  === 'true'
-  const hideFarFuture  = localStorage.getItem('kairos:hideFarFuture')  === 'true'
-
-  const cutoff = hideFarFuture ? addDays((() => { const d = new Date(); d.setHours(0,0,0,0); return d })(), 14) : null
-
-  let items = state.boardItems
-  if (cutoff) items = items.filter(i => !i.start || i.start <= cutoff || i.metadata?.noDate)
-  if (!showRecurring) return items.filter(i => !i.metadata?.recurringEventId)
+  // Exclude reminders (no list/status — they live in the Reminders view) and bound
+  // to the visibility window by task date; undated tasks always show.
+  const w       = visibilityWindow()
+  const endExcl = addDays(w.end, 1)   // include the whole end day
+  const items = state.boardItems.filter(i =>
+    !i.metadata?.isReminder &&
+    (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
+  )
 
   // Recurring tasks are shown as one card per series: the next upcoming non-completed
   // instance. Falls back to the most recent past non-completed instance if none upcoming.
@@ -590,23 +796,28 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
+    // Prefs/lists/statuses first so the visibility window (and task calendars) are
+    // known before fetching — the task fetch is bounded to that window.
+    await Promise.all([loadPrefs(token), loadLists(token), loadStatuses(token)])
+    ensureVisibilityReady()
+    renderVisibilityPill()
     const taskCalIds = getTaskCalendars()
-    await Promise.all([
-      Promise.all(
-        taskCalIds.map(calId =>
-          getAllTaskEvents(token, calId).catch(err => {
-            console.warn(`Tasks fetch failed for ${calId}:`, err.message)
-            return []
-          })
-        )
-      ).then(results => { state.boardItems = results.flat() }),
-      loadPrefs(token),
-      loadLists(token),
-      loadStatuses(token),
-    ])
     // Backfill statuses for task calendars designated before statuses existed
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
     await Promise.all(taskCalIds.map(calId => ensureDefaultStatuses(token, calId).catch(console.warn)))
+    const w = visibilityWindow()
+    // Extend the fetch end by a day so tasks on the last visible day are included
+    // (the display filter already treats the end day inclusively).
+    const win = { start: w.start, end: addDays(w.end, 1) }
+    const results = await Promise.all(
+      taskCalIds.map(calId =>
+        getAllTaskEvents(token, calId, win).catch(err => {
+          console.warn(`Tasks fetch failed for ${calId}:`, err.message)
+          return []
+        })
+      )
+    )
+    state.boardItems = results.flat()
     state.taskLists = getAllLists()
     populateProjectSelector()
     rerenderWorkView()
@@ -620,8 +831,9 @@ async function loadBoardData() {
 }
 
 // Filter already-fetched items by calendar visibility — no network call needed.
-// Also rolls past-due tasks (last 30d) forward: they're suppressed at their real
-// past date and re-emitted as all-day chips on today (see rollToToday).
+// Also rolls past-due tasks (within the visibility window's past bound) forward:
+// they're suppressed at their real past date and re-emitted as all-day chips on
+// today (see rollToToday).
 function getVisibleItems() {
   const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
   const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
@@ -1145,7 +1357,7 @@ async function runSpawnScan() {
     const items  = await fetchItems(today, future)
     const { spawned } = await processSpawnDirectives(items, state.taskLists)
     if (spawned > 0) {
-      if (state.view === 'board' || state.view === 'list') loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) loadBoardData()
       else refreshCalendarItems()
     }
   } catch (err) {
@@ -1460,7 +1672,7 @@ function renderItems(items) {
         })
 
         const titleSpan = document.createElement('span')
-        titleSpan.textContent = item.title
+        titleSpan.textContent = _titleWithBell(item)
 
         const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
         const recurIcon = isRecurring ? (() => {
@@ -1508,7 +1720,7 @@ function renderItems(items) {
       } else {
         if (item.color) applyColor(chipEl, item.color)
         const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-        chipEl.textContent = item.title
+        chipEl.textContent = _titleWithBell(item)
         if (isRecurringEv) {
           chipEl.style.paddingRight = '14px'
           const icon = document.createElement('span')
@@ -1607,7 +1819,7 @@ function renderItems(items) {
         textWrap.className = 'timed-task-text'
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = item.title
+        titleEl.textContent = _titleWithBell(item)
         const timeEl = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -1645,7 +1857,7 @@ function renderItems(items) {
       } else {
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = item.title
+        titleEl.textContent = _titleWithBell(item)
         const timeEl  = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -1798,7 +2010,7 @@ function renderMobileDay() {
       })
 
       const titleSpan = document.createElement('span')
-      titleSpan.textContent = item.title
+      titleSpan.textContent = _titleWithBell(item)
 
       const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
       const parts = [check, titleSpan]
@@ -1813,7 +2025,7 @@ function renderMobileDay() {
     } else {
       if (item.color) applyColor(chip, item.color)
       const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-      chip.textContent = item.title
+      chip.textContent = _titleWithBell(item)
       if (isRecurringEv) {
         chip.style.paddingRight = '14px'
         const icon = document.createElement('span')
@@ -1901,7 +2113,7 @@ function renderMobileDay() {
       textWrap.className = 'timed-task-text'
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = item.title
+      titleEl.textContent = _titleWithBell(item)
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)
@@ -1939,7 +2151,7 @@ function renderMobileDay() {
     } else {
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = item.title
+      titleEl.textContent = _titleWithBell(item)
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)
@@ -1978,6 +2190,7 @@ async function navigateMobileDay(delta) {
   const newWeekStart = getWeekStart(newDay)
   if (newWeekStart.getTime() !== state.weekStart.getTime()) {
     state.weekStart = newWeekStart
+    expandVisibility(state.weekStart, addDays(state.weekStart, 7))
     const end = addDays(state.weekStart, 7)
     state.items = await fetchItems(state.weekStart, end)
     renderWeekLabel()
@@ -2109,6 +2322,7 @@ function initCreateHandlers() {
 
 async function render() {
   renderWeekLabel()
+  renderVisibilityPill()
   renderColumnHeaders()
   renderTimeGutter()
   renderDayColumns()
@@ -2137,6 +2351,8 @@ async function render() {
         getToken().then(t => t ? loadLists(t) : null),
         getToken().then(t => t ? loadStatuses(t) : null),
       ])
+      ensureVisibilityReady()
+      renderVisibilityPill()
       state.items = items
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
@@ -2156,10 +2372,12 @@ async function render() {
 
 document.getElementById('btn-prev').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, -7)
+  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
   render()
 })
 document.getElementById('btn-next').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, 7)
+  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
   render()
 })
 document.getElementById('btn-today').addEventListener('click', () => {
@@ -2167,6 +2385,8 @@ document.getElementById('btn-today').addEventListener('click', () => {
   state.mobileDay = new Date()
   render()
 })
+
+document.getElementById('btn-visibility').addEventListener('click', openVisibilityDialog)
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
@@ -2176,29 +2396,12 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 }
 
 // View toggle
-document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
-document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
-document.getElementById('btn-view-list').addEventListener('click',     () => setView('list'))
+document.getElementById('view-select').addEventListener('change', e => setView(e.target.value))
+populateViewSelect()
 
 // Board / list project-calendar selector
 document.getElementById('board-calendar-select').addEventListener('change', e => {
   setProjectCalendarId(e.target.value)
-  rerenderWorkView()
-})
-
-// Board recurring-task filter
-const _recurringToggle = document.getElementById('board-show-recurring')
-_recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
-_recurringToggle.addEventListener('change', e => {
-  localStorage.setItem('kairos:showRecurring', e.target.checked)
-  rerenderWorkView()
-})
-
-// Board far-future filter
-const _farFutureToggle = document.getElementById('board-hide-far-future')
-_farFutureToggle.checked = localStorage.getItem('kairos:hideFarFuture') === 'true'
-_farFutureToggle.addEventListener('change', e => {
-  localStorage.setItem('kairos:hideFarFuture', e.target.checked)
   rerenderWorkView()
 })
 
@@ -2255,7 +2458,7 @@ window._kairos = {
       }
     }
 
-    if (state.view === 'board' || state.view === 'list') await loadBoardData()
+    if (WORK_VIEWS.includes(state.view)) await loadBoardData()
     const calName = state.calendars.find(c => c.id === calId)?.summary ?? calId
     console.log(`moveAllStatus: moved ${moved} task(s) ${from.name} → ${to.name} on ${calName}`)
     return moved

@@ -9,6 +9,7 @@ import { generateKairosId } from './driveTaskMeta.js'
 //   listId      — Firestore list ID (organization axis)
 //   statusId    — Firestore status ID (workflow axis; board column)
 //   dueDate     — deadline 'YYYY-MM-DD' (when it must be done; independent of start)
+//   isReminder  — 'true' when the task is a reminder (no list/status/LOE; just done/not-done)
 //   order       — sparse float string for manual sorting
 //   loe         — level-of-effort string, optional
 //   noDate      — 'true' when undated (start.date = KAIROS_UNDATED_SENTINEL)
@@ -100,7 +101,7 @@ function _buildDescriptionPatch(item) {
 
 function _buildEventBody(taskData, isCreate = false) {
   const {
-    title, body, kairosId, listId, statusId, dueDate, order, loe,
+    title, body, kairosId, listId, statusId, dueDate, isReminder, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
     location, unprocessed, webhookToken, recurrence, completed, completedAt,
   } = taskData
@@ -139,6 +140,8 @@ function _buildEventBody(taskData, isCreate = false) {
   // Deadline: set when provided, clear (null) on edit when emptied; omit on create.
   if (dueDate)          props.dueDate = dueDate
   else if (!isCreate)   props.dueDate = null
+  if (isReminder)       props.isReminder = 'true'
+  else if (!isCreate)   props.isReminder = null
   if (loe)         props.loe         = loe
   // null clears an existing noDate property via PATCH merge; omit on POST (Google rejects null in extendedProperties)
   if (isUndated)        props.noDate = 'true'
@@ -201,6 +204,7 @@ export function normalizeTask(event, calendarId) {
       listId:           p.listId      || null,
       statusId:         p.statusId    || null,
       dueDate:          p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null,
+      isReminder:       p.isReminder === 'true',
       order:            p.order != null ? parseFloat(p.order) : null,
       loe:              p.loe         ?? null,
       noDate:           isUndated,
@@ -354,32 +358,53 @@ export async function getTaskEvents(token, calendarId, start, end) {
   return (await _fetchPage(token, calendarId, params)).map(e => normalizeTask(e, calendarId))
 }
 
-// Returns all task events for board view: Kairos-tagged events (full range,
-// including undated sentinel) plus any untagged events in a rolling ±window
-// (so raw calendar events and recurring tasks surface in the Unlisted column).
-export async function getAllTaskEvents(token, calendarId) {
-  const now     = new Date()
-  const past    = new Date(now.getTime() - 30  * 86_400_000)
-  const future  = new Date(now.getTime() + 180 * 86_400_000)
+// Returns all task events for board view: Kairos-tagged events plus any untagged
+// events (so raw calendar events surface in the Unlisted column).
+//
+// When `window` = { start, end } is given, the fetch is bounded to it — recurring
+// tasks expand only within the window instead of out to 2099 — while undated tasks
+// (at the sentinel date) are always included. Without a window, the full range is
+// fetched (used by admin utilities that must see every task).
+export async function getAllTaskEvents(token, calendarId, window = null) {
+  const sentinelMin = new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString()
 
-  const [tagged, all] = await Promise.all([
-    _fetchPage(token, calendarId, new URLSearchParams({
+  const taggedFetches = []
+  let untaggedMin, untaggedMax
+  if (window) {
+    const winMin = window.start.toISOString()
+    const winMax = window.end.toISOString()
+    // Undated tasks (sentinel day) — always included regardless of the window.
+    taggedFetches.push(_fetchPage(token, calendarId, new URLSearchParams({
       privateExtendedProperty: 'isTask=true',
-      timeMin:      new Date(KAIROS_UNDATED_SENTINEL + 'T00:00:00Z').toISOString(),
-      timeMax:      new Date('2099-12-31T23:59:59Z').toISOString(),
-      singleEvents: 'true',
-      orderBy:      'startTime',
-      maxResults:   '2500',
-    })),
+      timeMin: sentinelMin, timeMax: new Date(KAIROS_UNDATED_SENTINEL + 'T23:59:59Z').toISOString(),
+      singleEvents: 'true', orderBy: 'startTime', maxResults: '2500',
+    })))
+    // Dated tagged tasks within the window (recurring expanded only in-window).
+    taggedFetches.push(_fetchPage(token, calendarId, new URLSearchParams({
+      privateExtendedProperty: 'isTask=true',
+      timeMin: winMin, timeMax: winMax,
+      singleEvents: 'true', orderBy: 'startTime', maxResults: '2500',
+    })))
+    untaggedMin = winMin; untaggedMax = winMax
+  } else {
+    taggedFetches.push(_fetchPage(token, calendarId, new URLSearchParams({
+      privateExtendedProperty: 'isTask=true',
+      timeMin: sentinelMin, timeMax: new Date('2099-12-31T23:59:59Z').toISOString(),
+      singleEvents: 'true', orderBy: 'startTime', maxResults: '2500',
+    })))
+    const now = new Date()
+    untaggedMin = new Date(now.getTime() - 30  * 86_400_000).toISOString()
+    untaggedMax = new Date(now.getTime() + 180 * 86_400_000).toISOString()
+  }
+
+  const [taggedArrs, all] = await Promise.all([
+    Promise.all(taggedFetches),
     _fetchPage(token, calendarId, new URLSearchParams({
-      timeMin:      past.toISOString(),
-      timeMax:      future.toISOString(),
-      singleEvents: 'true',
-      orderBy:      'startTime',
-      maxResults:   '2500',
+      timeMin: untaggedMin, timeMax: untaggedMax,
+      singleEvents: 'true', orderBy: 'startTime', maxResults: '2500',
     })),
   ])
-
+  const tagged    = taggedArrs.flat()
   const taggedIds = new Set(tagged.map(e => e.id))
 
   // Deduplicate recurring instances in the untagged set: keep only the first

@@ -24,6 +24,8 @@ const DEFAULTS = () => ({
   defaultIntakeListId: null, // DEPRECATED — see intakeStatusId
   intakeStatusId:      null, // Kairos status ID — shared intake bucket for voice captures + swept tasks
   projectCalendarId:   null, // calendar the board + list views are scoped to (the active "project")
+  visibilityStart:     null, // custom visibility-window start 'YYYY-MM-DD' (null = default: today-14d)
+  visibilityEnd:       null, // custom visibility-window end   'YYYY-MM-DD' (null = default: today+14d)
 })
 
 let _prefs       = null
@@ -75,6 +77,8 @@ export function getSweepSources()       { return _prefs?.sweepSources        ?? 
 export function getDefaultIntakeListId(){ return _prefs?.defaultIntakeListId ?? null }
 export function getIntakeStatusId()     { return _prefs?.intakeStatusId      ?? null }
 export function getProjectCalendarId()  { return _prefs?.projectCalendarId   ?? null }
+export function getVisibilityStart()    { return _prefs?.visibilityStart     ?? null }
+export function getVisibilityEnd()      { return _prefs?.visibilityEnd       ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -116,6 +120,15 @@ export function setIntakeStatusId(statusId) {
 export function setProjectCalendarId(calendarId) {
   if (!_prefs) return
   _prefs.projectCalendarId = calendarId ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+// Persist a custom visibility window (both null = revert to the relative default).
+export function setVisibilityWindow(startStr, endStr) {
+  if (!_prefs) return
+  _prefs.visibilityStart = startStr ?? null
+  _prefs.visibilityEnd   = endStr   ?? null
   _dirty = true
   _scheduleSave()
 }

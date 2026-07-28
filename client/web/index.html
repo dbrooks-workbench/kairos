@@ -20,12 +20,9 @@
         <span id="week-label"></span>
       </div>
       <div id="header-right">
+        <button id="btn-visibility" class="visibility-pill" title="Visibility window — click to adjust"></button>
         <button id="btn-add" class="btn-add" title="New event or task">+</button>
-        <div class="view-toggle">
-          <button id="btn-view-calendar" class="view-toggle-btn active">Calendar</button>
-          <button id="btn-view-board"    class="view-toggle-btn">Board</button>
-          <button id="btn-view-list"     class="view-toggle-btn">List</button>
-        </div>
+        <select id="view-select" class="view-select"></select>
         <div id="cal-picker-wrap">
           <button id="btn-calendars">Calendars</button>
           <div id="cal-picker-panel" hidden></div>
@@ -88,14 +85,6 @@
     <!-- Board toolbar (visible only in board view) -->
     <div id="board-toolbar" hidden>
       <select id="board-calendar-select" class="board-calendar-select" title="Project (calendar)" hidden></select>
-      <label class="board-filter-label">
-        <input type="checkbox" id="board-show-recurring">
-        Show recurring tasks
-      </label>
-      <label class="board-filter-label">
-        <input type="checkbox" id="board-hide-far-future">
-        Hide tasks due 14+ days out
-      </label>
     </div>
 
     <!-- Board view -->
@@ -104,14 +93,18 @@
     <!-- List view (organization axis; shares board styling) -->
     <div id="list" hidden></div>
 
+    <!-- Reminders view (flat list of reminders) -->
+    <div id="reminders" hidden></div>
+
     <!-- Unified event / task editor modal -->
     <div id="unified-editor" hidden>
       <div class="modal-panel" id="unified-editor-panel">
         <div class="modal-header">
           <input id="ue-title" class="modal-title-input" type="text" placeholder="Event title…">
           <div class="editor-mode-toggle">
-            <button type="button" id="ue-mode-event" class="mode-btn active">Event</button>
-            <button type="button" id="ue-mode-task"  class="mode-btn">Task</button>
+            <button type="button" id="ue-mode-event"    class="mode-btn active">Event</button>
+            <button type="button" id="ue-mode-task"     class="mode-btn">Task</button>
+            <button type="button" id="ue-mode-reminder" class="mode-btn">Reminder</button>
           </div>
           <button id="ue-close" class="modal-close-btn" title="Close">×</button>
         </div>
@@ -325,6 +318,37 @@
           <button id="sweep-now-btn" class="btn-secondary">Sweep now</button>
           <button id="sweep-cancel-btn" class="btn-ghost">Cancel</button>
           <button id="sweep-save-btn" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Visibility period dialog -->
+  <div id="visibility-dialog" hidden>
+    <div class="sweep-panel">
+      <div class="sweep-panel-header">
+        <span class="sweep-panel-title">Visibility period</span>
+        <button id="visibility-dialog-close" class="modal-close-btn" title="Close">×</button>
+      </div>
+      <div class="sweep-panel-body">
+        <div class="sweep-section">
+          <div class="sweep-section-hint">Bounds the board, list, and reminders views — and how far back past-due tasks roll forward onto today. Default is 14 days before and after today.</div>
+          <div class="modal-field-row">
+            <label class="modal-label">Start</label>
+            <input id="visibility-start-input" class="modal-input" type="date">
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-label">End</label>
+            <input id="visibility-end-input" class="modal-input" type="date">
+          </div>
+        </div>
+      </div>
+      <div class="sweep-panel-footer">
+        <div class="sweep-dialog-status"></div>
+        <div class="sweep-panel-actions">
+          <button id="visibility-default-btn" class="btn-secondary">Use default</button>
+          <button id="visibility-cancel-btn" class="btn-ghost">Cancel</button>
+          <button id="visibility-save-btn" class="btn-primary">Save</button>
         </div>
       </div>
     </div>
