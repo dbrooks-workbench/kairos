@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.30.1'
+const VERSION   = '0.30.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -97,7 +97,7 @@ function renderVisibilityPill() {
 
 // Re-render whichever surface is active (used after the window changes).
 function refreshActiveView() {
-  if (state.view === 'board' || state.view === 'list') loadBoardData()
+  if (WORK_VIEWS.includes(state.view)) loadBoardData()
   else render()
 }
 
@@ -464,19 +464,22 @@ function calendarModalCallbacks() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
+const WORK_VIEWS = ['board', 'list', 'reminders']
+
 function setView(v) {
   state.view = v
-  const isWork = v === 'board' || v === 'list'
+  const isWork = WORK_VIEWS.includes(v)
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
-  document.getElementById('board-toolbar').hidden = !isWork
+  // Toolbar (project selector) is only meaningful for board + list.
+  document.getElementById('board-toolbar').hidden = !(v === 'board' || v === 'list')
   document.getElementById('board').hidden         = v !== 'board'
   document.getElementById('list').hidden          = v !== 'list'
+  document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
   if (v !== 'list')  destroyList()
-  document.getElementById('btn-view-calendar').classList.toggle('active', v === 'calendar')
-  document.getElementById('btn-view-board').classList.toggle('active', v === 'board')
-  document.getElementById('btn-view-list').classList.toggle('active', v === 'list')
+  const sel = document.getElementById('view-select')
+  if (sel && sel.value !== v) sel.value = v
 
   renderVisibilityPill()
   stopPolling()
@@ -489,14 +492,22 @@ function setView(v) {
   }
 }
 
-// Board + List views only make sense with at least one task calendar. Hide their
-// nav buttons otherwise, and fall back to the calendar if a work view is active
-// when the last task calendar is removed.
-function updateWorkViewButtons() {
+// The work views (board/list/reminders) only make sense with a task calendar.
+// Rebuild the view dropdown accordingly and fall back to the calendar if a work
+// view is active when the last task calendar is removed.
+function populateViewSelect() {
+  const sel = document.getElementById('view-select')
+  if (!sel) return
   const hasTaskCals = getTaskCalendars().length > 0
-  document.getElementById('btn-view-board').hidden = !hasTaskCals
-  document.getElementById('btn-view-list').hidden  = !hasTaskCals
-  if (!hasTaskCals && (state.view === 'board' || state.view === 'list')) setView('calendar')
+  const opts = [['calendar', 'Calendar']]
+  if (hasTaskCals) opts.push(['board', 'Board'], ['list', 'List'], ['reminders', 'Reminders'])
+  sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
+  sel.value = state.view
+}
+
+function updateWorkViewButtons() {
+  populateViewSelect()
+  if (getTaskCalendars().length === 0 && WORK_VIEWS.includes(state.view)) setView('calendar')
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
@@ -508,7 +519,7 @@ function startPolling(ms) {
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
     await runSpawnScan()
-    if (state.view === 'board' || state.view === 'list') {
+    if (WORK_VIEWS.includes(state.view)) {
       await loadBoardData()
     } else {
       const end  = addDays(state.weekStart, 7)
@@ -531,7 +542,7 @@ document.addEventListener('visibilitychange', () => {
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
-      if (state.view === 'board' || state.view === 'list') loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) loadBoardData()
       else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
         state.items = items
         renderItems(getVisibleItems())
@@ -618,10 +629,105 @@ function renderListView() {
   renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
 }
 
-// Re-render whichever work surface (board or list) is active.
+// Re-render whichever work surface (board / list / reminders) is active.
 function rerenderWorkView() {
-  if (state.view === 'list') renderListView()
+  if (state.view === 'reminders') renderReminders()
+  else if (state.view === 'list')  renderListView()
   else rerenderBoard()
+}
+
+// ── Reminders view ──────────────────────────────────────────────────────────
+// A flat list of reminders (isReminder task events) within the visibility window,
+// deduped by recurring series. Incomplete first (by date), completed dimmed after.
+function getReminders() {
+  const w       = visibilityWindow()
+  const endExcl = addDays(w.end, 1)
+  const rems = state.boardItems.filter(i =>
+    i.metadata?.isReminder &&
+    (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
+  )
+  const today = todayMidnight()
+  const bestBySeries = new Map()
+  for (const item of rems) {
+    const sid = item.metadata?.recurringEventId
+    if (!sid || item.status === 'COMPLETED') continue
+    const prev = bestBySeries.get(sid)
+    const is = item.start ?? new Date(0), ps = prev?.start ?? new Date(0)
+    const ia = is >= today, pa = ps >= today
+    if (!prev || (ia && !pa) || (ia && pa && is < ps) || (!ia && !pa && is > ps)) bestBySeries.set(sid, item)
+  }
+  return [...rems.filter(i => !i.metadata?.recurringEventId), ...bestBySeries.values()]
+}
+
+async function toggleReminder(item) {
+  const token = await getToken()
+  if (!token) return
+  const isDone = item.status === 'COMPLETED'
+  try {
+    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
+    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
+    await loadBoardData()   // refetch + re-render the active (reminders) view
+  } catch (err) {
+    console.error('Toggle reminder failed:', err)
+  }
+}
+
+function _reminderWhen(item) {
+  if (!item.start || item.metadata?.noDate) return 'No date'
+  const d = new Date(item.start)
+  const datePart = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  if (item.all_day) return datePart
+  return `${datePart} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+}
+
+function renderReminders() {
+  const root = document.getElementById('reminders')
+  root.innerHTML = ''
+
+  const header = el('div', 'reminders-header')
+  const addBtn = el('button', 'reminders-add-btn')
+  addBtn.textContent = '+ New reminder'
+  addBtn.addEventListener('click', () =>
+    openEditor({ mode: 'reminder', calendarId: currentProjectCalendarId() }, { onSaved: loadBoardData }))
+  header.appendChild(addBtn)
+  root.appendChild(header)
+
+  const rems = getReminders()
+  const rank    = i => i.status === 'COMPLETED' ? 1 : 0
+  const dateVal = i => i.start ? +new Date(i.start) : Infinity
+  rems.sort((a, b) =>
+    rank(a) - rank(b) || dateVal(a) - dateVal(b) || (a.title ?? '').localeCompare(b.title ?? ''))
+
+  if (!rems.length) {
+    const empty = el('div', 'reminders-empty')
+    empty.textContent = 'No reminders in view.'
+    root.appendChild(empty)
+    return
+  }
+
+  const listEl = el('div', 'reminders-list')
+  for (const item of rems) {
+    const isDone = item.status === 'COMPLETED'
+    const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+    const row = el('div', `reminder-row${isDone ? ' done' : ''}`)
+
+    const check = el('button', `reminder-check${isDone ? ' done' : ''}`)
+    check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
+    if (isDone) check.textContent = '✓'
+    check.addEventListener('click', e => { e.stopPropagation(); toggleReminder(item) })
+
+    const title = el('div', 'reminder-title')
+    title.textContent = `🔔 ${item.title}${isRecurring ? ' ↻' : ''}`
+
+    const when = el('div', 'reminder-when')
+    when.textContent = _reminderWhen(item)
+
+    row.append(check, title, when)
+    row.addEventListener('click', () =>
+      openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }))
+    listEl.appendChild(row)
+  }
+  root.appendChild(listEl)
 }
 
 // Fill the board/list project-calendar <select> from the designated task calendars.
@@ -1246,7 +1352,7 @@ async function runSpawnScan() {
     const items  = await fetchItems(today, future)
     const { spawned } = await processSpawnDirectives(items, state.taskLists)
     if (spawned > 0) {
-      if (state.view === 'board' || state.view === 'list') loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) loadBoardData()
       else refreshCalendarItems()
     }
   } catch (err) {
@@ -2285,9 +2391,8 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 }
 
 // View toggle
-document.getElementById('btn-view-calendar').addEventListener('click', () => setView('calendar'))
-document.getElementById('btn-view-board').addEventListener('click',    () => setView('board'))
-document.getElementById('btn-view-list').addEventListener('click',     () => setView('list'))
+document.getElementById('view-select').addEventListener('change', e => setView(e.target.value))
+populateViewSelect()
 
 // Board / list project-calendar selector
 document.getElementById('board-calendar-select').addEventListener('change', e => {
@@ -2348,7 +2453,7 @@ window._kairos = {
       }
     }
 
-    if (state.view === 'board' || state.view === 'list') await loadBoardData()
+    if (WORK_VIEWS.includes(state.view)) await loadBoardData()
     const calName = state.calendars.find(c => c.id === calId)?.summary ?? calId
     console.log(`moveAllStatus: moved ${moved} task(s) ${from.name} → ${to.name} on ${calName}`)
     return moved

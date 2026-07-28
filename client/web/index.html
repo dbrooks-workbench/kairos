@@ -22,11 +22,7 @@
       <div id="header-right">
         <button id="btn-visibility" class="visibility-pill" title="Visibility window — click to adjust"></button>
         <button id="btn-add" class="btn-add" title="New event or task">+</button>
-        <div class="view-toggle">
-          <button id="btn-view-calendar" class="view-toggle-btn active">Calendar</button>
-          <button id="btn-view-board"    class="view-toggle-btn">Board</button>
-          <button id="btn-view-list"     class="view-toggle-btn">List</button>
-        </div>
+        <select id="view-select" class="view-select"></select>
         <div id="cal-picker-wrap">
           <button id="btn-calendars">Calendars</button>
           <div id="cal-picker-panel" hidden></div>
@@ -96,6 +92,9 @@
 
     <!-- List view (organization axis; shares board styling) -->
     <div id="list" hidden></div>
+
+    <!-- Reminders view (flat list of reminders) -->
+    <div id="reminders" hidden></div>
 
     <!-- Unified event / task editor modal -->
     <div id="unified-editor" hidden>

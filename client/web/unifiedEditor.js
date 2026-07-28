@@ -510,12 +510,11 @@ async function _populateCalendars(preferredId, preloaded) {
     }
   }
 
-  const filtered = _mode === 'task'
+  // Reminders live on task calendars alongside tasks (orthogonal to list/status,
+  // not to the calendar) so the board fetch surfaces them for the Reminders view.
+  const filtered = _isTaskMode()
     ? cals.filter(c => taskCalIds.has(c.id))
-    : _mode === 'reminder'
-      // Reminders are calendar-agnostic — any writable calendar.
-      ? cals.filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')
-      : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
+    : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
 
   sel.innerHTML = filtered
     .map(c => `<option value="${esc(c.id)}"${c.primary ? ' selected' : ''}>${esc(c.summary)}</option>`)
