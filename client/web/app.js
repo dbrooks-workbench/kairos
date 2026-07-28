@@ -15,7 +15,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.29.5'
+const VERSION   = '0.30.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -644,15 +644,14 @@ function populateProjectSelector() {
 }
 
 function getBoardItems() {
-  const showRecurring = localStorage.getItem('kairos:showRecurring') === 'true'
-
-  // Bound to the visibility window by task date; undated tasks always show.
+  // Exclude reminders (no list/status — they live in the Reminders view) and bound
+  // to the visibility window by task date; undated tasks always show.
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)   // include the whole end day
-  let items = state.boardItems.filter(i =>
-    !i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl)
+  const items = state.boardItems.filter(i =>
+    !i.metadata?.isReminder &&
+    (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
-  if (!showRecurring) return items.filter(i => !i.metadata?.recurringEventId)
 
   // Recurring tasks are shown as one card per series: the next upcoming non-completed
   // instance. Falls back to the most recent past non-completed instance if none upcoming.
@@ -2295,15 +2294,6 @@ document.getElementById('board-calendar-select').addEventListener('change', e =>
   setProjectCalendarId(e.target.value)
   rerenderWorkView()
 })
-
-// Board recurring-task filter
-const _recurringToggle = document.getElementById('board-show-recurring')
-_recurringToggle.checked = localStorage.getItem('kairos:showRecurring') === 'true'
-_recurringToggle.addEventListener('change', e => {
-  localStorage.setItem('kairos:showRecurring', e.target.checked)
-  rerenderWorkView()
-})
-
 
 // Show version on hover over the app title
 document.getElementById('app-name').dataset.tooltip = `v${VERSION}`
