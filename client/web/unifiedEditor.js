@@ -575,20 +575,26 @@ export function initEditor() {
     )
   })
 
+  // Switching mode keeps the current calendar when it's valid for the new type
+  // (_populateCalendars falls back to a default when it isn't) — so an in-place
+  // type conversion doesn't needlessly move the item.
   el('ue-mode-event').addEventListener('click', () => {
     if (_mode === 'event') return
+    const cur = el('ue-calendar').value
     _setMode('event')
-    _populateCalendars(null, null)
+    _populateCalendars(cur || null, null)
   })
   el('ue-mode-task').addEventListener('click', () => {
     if (_mode === 'task') return
+    const cur = el('ue-calendar').value
     _setMode('task')
-    _populateCalendars(getTaskCalendars()[0] ?? null, null)
+    _populateCalendars(cur || getTaskCalendars()[0] || null, null)
   })
   el('ue-mode-reminder').addEventListener('click', () => {
     if (_mode === 'reminder') return
+    const cur = el('ue-calendar').value
     _setMode('reminder')
-    _populateCalendars(getTaskCalendars()[0] ?? null, null)
+    _populateCalendars(cur || getTaskCalendars()[0] || null, null)
   })
 
   el('ue-allday').addEventListener('change', () => _setAllDayUI(el('ue-allday').checked))
@@ -775,7 +781,10 @@ export async function openEditorForEdit(item, callbacks = {}) {
   _endDateExplicit = !!item.end && _fmtDate(item.start) !== _fmtDate(
     item.all_day && item.end ? new Date(new Date(item.end).getTime() - 86_400_000) : item.end
   )
-  _setMode(mode, { locked: true })
+  // The type can be changed in edit mode (converts on save) — except for recurring
+  // items, where a type change would tangle with the this/following/all scope flow.
+  const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
+  _setMode(mode, { locked: isRecurring })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
   el('ue-title').value       = item.title
@@ -1083,6 +1092,16 @@ async function _saveEvent(title) {
     body.recurrence = [rrule]
   else if (_editItem && !freq && _editItem.recurrence)
     body.recurrence = []   // only clear if item was originally recurring
+
+  // Converting a task/reminder → event: strip the task markers (and completion
+  // prefix/footer, handled by summary/description above) so it becomes a plain event.
+  if (_editItem?.item_type === 'TASK') {
+    body.extendedProperties = { private: {
+      isTask:  null, isReminder: null, kairosId: null,
+      listId:  null, statusId:   null, dueDate:  null, loe: null,
+      order:   null, noDate:     null, unprocessed: null, completedAt: null,
+    } }
+  }
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
