@@ -13,7 +13,7 @@ import {
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getListsForCalendar } from './providers/kairosLists.js'
-import { getStatusesForCalendar } from './providers/kairosConfig.js'
+import { getStatusesForCalendar, getStatus } from './providers/kairosConfig.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
@@ -970,9 +970,10 @@ async function _saveTask(title) {
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
   // Reminders have neither list, status, nor a separate deadline.
-  const listId    = isReminder ? null : (el('ue-list').value     || null)
-  const statusId  = isReminder ? null : (el('ue-status').value   || null)
-  const dueDate   = isReminder ? null : (el('ue-due-date').value || null)
+  const listId     = isReminder ? null : (el('ue-list').value     || null)
+  const statusId   = isReminder ? null : (el('ue-status').value   || null)
+  const statusName = statusId ? (getStatus(statusId)?.name ?? null) : null   // recovery backup
+  const dueDate    = isReminder ? null : (el('ue-due-date').value || null)
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -1009,6 +1010,7 @@ async function _saveTask(title) {
     kairosId,
     listId,
     statusId,
+    statusName,
     dueDate,
     isReminder,
     order:        _editItem?.metadata?.order ?? Date.now(),

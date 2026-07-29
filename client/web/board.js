@@ -642,6 +642,8 @@ async function handleDrop(evt) {
   const srcItem    = _boardItems.find(i => i.source.external_id === extId)
   const isDoneMove = toStatusId === DONE_COL_ID || fromStatusId === DONE_COL_ID
   const isAdopt    = !isDoneMove && !!srcItem?.metadata?.unprocessed
+  // Denormalized status name written alongside statusId (recovery backup).
+  const toStatusName = _statuses.find(s => s.id === toStatusId)?.name ?? ''
 
   // Completion transitions and unprocessed-adoption change more than a card's
   // column (title prefix/footer, isTask tagging), so fall back to a full refresh.
@@ -651,10 +653,10 @@ async function handleDrop(evt) {
         await completeTask(token, calendarId, extId, srcItem?.title ?? '')
       } else if (fromStatusId === DONE_COL_ID) {
         await uncompleteTask(token, calendarId, extId, srcItem?.title ?? '')
-        if (toStatusId) await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
+        if (toStatusId) await patchTaskProps(token, calendarId, extId, { statusId: toStatusId, statusName: toStatusName })
       } else {
         const masterEventId = srcItem.metadata.recurringEventId ?? extId
-        await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', statusId: toStatusId })
+        await patchTaskProps(token, calendarId, masterEventId, { isTask: 'true', statusId: toStatusId, statusName: toStatusName })
       }
     } catch (err) {
       console.error('Drop failed:', err)
@@ -667,7 +669,7 @@ async function handleDrop(evt) {
   // and refresh only this one card (for the in-progress ring), leaving the rest
   // of the board intact so the next drag can start immediately — no full rebuild.
   try {
-    const updated = await patchTaskProps(token, calendarId, extId, { statusId: toStatusId })
+    const updated = await patchTaskProps(token, calendarId, extId, { statusId: toStatusId, statusName: toStatusName })
     const idx = _boardItems.findIndex(i => i.source.external_id === extId)
     if (idx >= 0) _boardItems[idx] = updated
     cardEl.replaceWith(buildCard(updated))
