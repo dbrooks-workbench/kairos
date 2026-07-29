@@ -240,6 +240,17 @@ export async function ensureTag(token, calendarId, name, color = null) {
   await _patchEvent(token ?? _saveToken, calendarId, c.eventId, { tagPalette: JSON.stringify(c.palette) })
 }
 
+// Add any not-yet-known tag names to the palette in a single PATCH (hash colours).
+export async function ensureTags(token, calendarId, names) {
+  const c = _config[calendarId]
+  if (!c) return
+  let changed = false
+  for (const name of names) {
+    if (name && !(name in c.palette)) { c.palette[name] = defaultTagColor(name); changed = true }
+  }
+  if (changed) await _patchEvent(token ?? _saveToken, calendarId, c.eventId, { tagPalette: JSON.stringify(c.palette) })
+}
+
 export async function removeTagFromPalette(token, calendarId, name) {
   const c = _config[calendarId]
   if (!c || !(name in c.palette)) return

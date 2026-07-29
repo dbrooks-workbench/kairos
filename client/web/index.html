@@ -119,6 +119,15 @@
             <label class="modal-label">Status</label>
             <select id="ue-status" class="modal-select"></select>
           </div>
+          <!-- Tags (all item types) -->
+          <div class="modal-field-row" id="ue-tags-row">
+            <label class="modal-label">Tags</label>
+            <div class="ue-tags-field">
+              <div id="ue-tags-chips" class="ue-tags-chips"></div>
+              <input id="ue-tags-input" class="modal-input ue-tags-input" type="text" placeholder="Add a tag…" list="ue-tags-datalist" autocomplete="off">
+              <datalist id="ue-tags-datalist"></datalist>
+            </div>
+          </div>
           <div class="modal-field-row">
             <label class="modal-label">When</label>
             <div class="when-fields">

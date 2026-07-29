@@ -13,7 +13,8 @@ import {
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getListsForCalendar } from './providers/kairosLists.js'
-import { getStatusesForCalendar, getStatus } from './providers/kairosConfig.js'
+import { getStatusesForCalendar, getStatus, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
+import { encodeTags } from './providers/tagCodec.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
@@ -22,6 +23,7 @@ import { openSnoozePopover } from './board.js'
 
 let _mode          = 'event'   // 'event' | 'task' | 'reminder'
 let _originalMode  = null      // mode the item was opened as (to detect type conversions)
+let _tags          = []        // tag names currently on the item being edited
 let _editItem      = null      // null = create mode
 let _callbacks     = {}
 let _kairosId           = null   // task mode: stable ID (null until first save)
@@ -549,6 +551,42 @@ function _populateStatus(preferredStatusId) {
   if (preferredStatusId) sel.value = preferredStatusId
 }
 
+// ── Tags (all item types) ─────────────────────────────────────────────────────
+function _renderTags() {
+  const calId = el('ue-calendar').value
+  const chips = el('ue-tags-chips')
+  chips.innerHTML = ''
+  for (const name of _tags) {
+    const chip = document.createElement('span')
+    chip.className = 'ue-tag-chip'
+    chip.style.background = getTagColor(calId, name)
+    chip.textContent = name
+    const x = document.createElement('button')
+    x.type = 'button'; x.className = 'ue-tag-remove'; x.textContent = '×'
+    x.title = 'Remove tag'
+    x.addEventListener('click', () => _removeTag(name))
+    chip.appendChild(x)
+    chips.appendChild(chip)
+  }
+  // Typeahead suggestions from this calendar's palette (minus already-applied tags).
+  el('ue-tags-datalist').innerHTML = getPaletteTagNames(calId)
+    .filter(n => !_tags.includes(n))
+    .map(n => `<option value="${esc(n)}"></option>`).join('')
+}
+
+function _addTag(raw) {
+  const name = (raw ?? '').trim()
+  if (!name || _tags.includes(name)) return
+  _tags.push(name)
+  el('ue-tags-input').value = ''
+  _renderTags()
+}
+
+function _removeTag(name) {
+  _tags = _tags.filter(t => t !== name)
+  _renderTags()
+}
+
 // ── Webhook token (task mode) ─────────────────────────────────────────────────
 
 async function _ensureWebhookToken() {
@@ -630,6 +668,11 @@ export function initEditor() {
   })
   el('ue-calendar').addEventListener('change', () => {
     if (_mode === 'task') { _populateList(); _populateStatus() }
+    _renderTags()   // palette colours + suggestions are per-calendar
+  })
+
+  el('ue-tags-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); _addTag(e.target.value) }
   })
 
   // Location URL link
@@ -719,6 +762,7 @@ export async function openEditor(opts = {}, callbacks = {}) {
   el('ue-recur').value       = ''
   el('ue-loe').value         = ''
   el('ue-due-date').value    = opts.dueDate ?? ''
+  _tags = [...(opts.tags ?? [])]
   el('ue-loe-error').hidden  = true
   el('ue-comment-input').value = ''
   el('custom-recur-panel').hidden = true
@@ -739,6 +783,7 @@ export async function openEditor(opts = {}, callbacks = {}) {
   // Caller can request a specific list/status via opts.listId / opts.statusId.
   if (mode === 'task' && opts.listId)   el('ue-list').value   = opts.listId
   if (mode === 'task' && opts.statusId) el('ue-status').value = opts.statusId
+  _renderTags()
 
   el('unified-editor').hidden = false
   el('ue-title').focus()
@@ -785,6 +830,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   // The type can be changed in edit mode (converts on save). For recurring items a
   // type change applies to the whole series (see _save), so it's allowed too.
   _originalMode = mode
+  _tags = [...(item.metadata?.tags ?? [])]   // all item types carry tags
   _setMode(mode, { locked: false })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
@@ -856,6 +902,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
     _locLink.hidden = !/^https?:\/\//i.test(locVal)
     _locLink.href   = locVal
   }
+  _renderTags()
 
   el('unified-editor').hidden = false
   el('ue-title').focus()
@@ -1011,6 +1058,7 @@ async function _saveTask(title) {
     listId,
     statusId,
     statusName,
+    tags:         _tags,
     dueDate,
     isReminder,
     order:        _editItem?.metadata?.order ?? Date.now(),
@@ -1031,6 +1079,7 @@ async function _saveTask(title) {
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
+  ensureTags(token, calId, _tags).catch(console.warn)   // add new tags to the palette
 
   if (!_editItem) {
     await createTask(token, calId, taskData)
@@ -1104,18 +1153,21 @@ async function _saveEvent(title) {
   else if (_editItem && !freq && _editItem.recurrence)
     body.recurrence = []   // only clear if item was originally recurring
 
+  // Tags apply to events too.
+  body.extendedProperties = { private: { tags: encodeTags(_tags) } }
   // Converting a task/reminder → event: strip the task markers (and completion
   // prefix/footer, handled by summary/description above) so it becomes a plain event.
   if (_editItem?.item_type === 'TASK') {
-    body.extendedProperties = { private: {
+    Object.assign(body.extendedProperties.private, {
       isTask:  null, isReminder: null, kairosId: null,
-      listId:  null, statusId:   null, dueDate:  null, loe: null,
+      listId:  null, statusId:   null, statusName: null, dueDate: null, loe: null,
       order:   null, noDate:     null, unprocessed: null, completedAt: null,
-    } }
+    })
   }
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
+  ensureTags(token, calId, _tags).catch(console.warn)   // add new tags to the palette
 
   if (_editItem?.metadata?.recurringEventId) {
     // A type conversion applies to the whole series — skip the scope prompt.

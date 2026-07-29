@@ -1761,8 +1761,52 @@ body.resize-active * { cursor: ns-resize !important; }
 .board-chip-deadline       { background: #fef7e0; color: #b06000; }
 .board-chip-loe            { background: #e8eaf6; color: #3949ab; }
 .board-chip-recur          { background: #f1f3f4; color: var(--text-muted); }
+.board-chip-tag            { color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.25); }
 .board-chip-cl             { background: #f1f3f4; color: var(--text-muted); }
 .board-chip-cl.complete    { background: #e6f4ea; color: #188038; }
+
+/* Editor tag input */
+.ue-tags-field {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.ue-tags-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ue-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+.ue-tag-remove {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.8;
+}
+.ue-tag-remove:hover { opacity: 1; }
+.ue-tags-input { flex: 1; min-width: 120px; }
+
+/* Reminder-row tags */
+.reminder-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.reminder-tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  white-space: nowrap;
+}
 .board-chip-comments       { background: #f1f3f4; color: var(--text-muted); }
 
 .board-ghost    { opacity: 0.25 !important; }

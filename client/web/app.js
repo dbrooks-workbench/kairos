@@ -4,7 +4,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosConfig.js'
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor } from './providers/kairosConfig.js'
 import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
 
 // Load the per-calendar config events (statuses + tag palette), migrating any
@@ -30,7 +30,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.0'
+const VERSION   = '0.32.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -738,10 +738,18 @@ function renderReminders() {
     const title = el('div', 'reminder-title')
     title.textContent = `🔔 ${item.title}${isRecurring ? ' ↻' : ''}`
 
+    const tags = el('div', 'reminder-tags')
+    for (const t of item.metadata?.tags ?? []) {
+      const chip = el('span', 'reminder-tag')
+      chip.style.background = getTagColor(item.source.account_id, t)
+      chip.textContent = t
+      tags.appendChild(chip)
+    }
+
     const when = el('div', 'reminder-when')
     when.textContent = _reminderWhen(item)
 
-    row.append(check, title, when)
+    row.append(check, title, tags, when)
     row.addEventListener('click', () =>
       openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }))
     listEl.appendChild(row)

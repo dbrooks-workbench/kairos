@@ -5,7 +5,7 @@ import {
 } from './providers/calendarTasks.js'
 import { patchTask } from './providers/googleTasksIntake.js'
 import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js'
-import { updateStatus, deleteStatus } from './providers/kairosConfig.js'
+import { updateStatus, deleteStatus, getTagColor } from './providers/kairosConfig.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
 const DONE_COL_ID = '__done__'
@@ -574,6 +574,14 @@ function buildChips(item) {
     chip.className   = 'board-chip board-chip-recur'
     chip.textContent = '↻ Recurring'
     chip.title       = item.recurrence ?? ''
+    chips.push(chip)
+  }
+
+  for (const t of item.metadata?.tags ?? []) {
+    const chip = document.createElement('span')
+    chip.className       = 'board-chip board-chip-tag'
+    chip.style.background = getTagColor(item.source.account_id, t)
+    chip.textContent     = t
     chips.push(chip)
   }
 
