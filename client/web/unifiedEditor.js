@@ -12,7 +12,6 @@ import {
 } from './providers/calendarTasks.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
-import { getListsForCalendar } from './providers/kairosLists.js'
 import { getStatusesForCalendar, getStatus, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
@@ -476,7 +475,6 @@ function _setMode(mode, { locked = false } = {}) {
   el('ue-mode-reminder').disabled = locked
   el('ue-title').placeholder   = mode === 'reminder' ? 'Reminder…' : mode === 'task' ? 'Task title…' : 'Event title…'
   // Reminders carry no list/status/deadline/LOE — just a title, a when, and done.
-  el('ue-list-row').hidden     = mode !== 'task'
   el('ue-status-row').hidden   = mode !== 'task'
   el('ue-due-row').hidden      = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
@@ -524,21 +522,8 @@ async function _populateCalendars(preferredId, preloaded) {
     .join('')
   if (preferredId) sel.value = preferredId
 
-  // Populate list + status dropdowns after calendar is known (task mode only)
-  if (_mode === 'task') {
-    _populateList(_editItem?.metadata?.listId ?? null)
-    _populateStatus(_editItem?.metadata?.statusId ?? null)
-  }
-}
-
-function _populateList(preferredListId) {
-  const calId = el('ue-calendar').value
-  if (!calId) return
-  const lists = getListsForCalendar(calId)
-  const sel   = el('ue-list')
-  sel.innerHTML = '<option value="">— No list —</option>'
-    + lists.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
-  if (preferredListId) sel.value = preferredListId
+  // Populate the status dropdown after calendar is known (task mode only)
+  if (_mode === 'task') _populateStatus(_editItem?.metadata?.statusId ?? null)
 }
 
 function _populateStatus(preferredStatusId) {
@@ -667,7 +652,7 @@ export function initEditor() {
     _preserveRrule = null
   })
   el('ue-calendar').addEventListener('change', () => {
-    if (_mode === 'task') { _populateList(); _populateStatus() }
+    if (_mode === 'task') _populateStatus()
     _renderTags()   // palette colours + suggestions are per-calendar
   })
 
@@ -780,8 +765,7 @@ export async function openEditor(opts = {}, callbacks = {}) {
   _resetCustomRecur(today)
   await _populateCalendars(opts.calendarId ?? (mode === 'task' ? getTaskCalendars()[0] : null), opts.calendars ?? null)
   // List + status are populated (with blank option) inside _populateCalendars.
-  // Caller can request a specific list/status via opts.listId / opts.statusId.
-  if (mode === 'task' && opts.listId)   el('ue-list').value   = opts.listId
+  // Caller can request a specific status via opts.statusId.
   if (mode === 'task' && opts.statusId) el('ue-status').value = opts.statusId
   _renderTags()
 
@@ -1016,8 +1000,7 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  // Reminders have neither list, status, nor a separate deadline.
-  const listId     = isReminder ? null : (el('ue-list').value     || null)
+  // Reminders have neither status nor a separate deadline.
   const statusId   = isReminder ? null : (el('ue-status').value   || null)
   const statusName = statusId ? (getStatus(statusId)?.name ?? null) : null   // recovery backup
   const dueDate    = isReminder ? null : (el('ue-due-date').value || null)
@@ -1055,7 +1038,6 @@ async function _saveTask(title) {
     title,
     body,
     kairosId,
-    listId,
     statusId,
     statusName,
     tags:         _tags,

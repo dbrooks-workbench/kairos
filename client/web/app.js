@@ -2,10 +2,44 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
-import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames } from './providers/kairosConfig.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
+import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags } from './providers/kairosConfig.js'
+import { encodeTags } from './providers/tagCodec.js'
 import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
+
+// One-time: convert each task's legacy listId into a tag named after the list,
+// then clear the listId. Operates on state.boardItems (already loaded); patches the
+// recurring master once. Sets a prefs flag so it never re-runs after a clean pass.
+async function migrateListsToTags(token) {
+  if (getListsMigrated()) return
+  const targets = new Map()   // "calId:eventId" -> { calId, targetId, tagName }
+  for (const item of state.boardItems) {
+    if (!item.metadata?.listId) continue
+    const tagName = getList(item.metadata.listId)?.name
+    if (!tagName) continue
+    const calId    = item.source.account_id
+    const targetId = item.metadata.recurringEventId ?? item.source.external_id
+    targets.set(`${calId}:${targetId}`, { calId, targetId, tagName, tags: item.metadata.tags ?? [] })
+  }
+  let failures = 0
+  for (const { calId, targetId, tagName, tags } of targets.values()) {
+    const newTags = [...new Set([...tags, tagName])]
+    try {
+      await ensureTags(token, calId, [tagName])
+      await patchTaskProps(token, calId, targetId, { tags: encodeTags(newTags), listId: null })
+    } catch (err) { console.warn('list->tag migration failed:', err.message); failures++ }
+  }
+  // Reflect in the in-memory items so the current render shows tags, not lists.
+  for (const item of state.boardItems) {
+    const tagName = item.metadata?.listId ? getList(item.metadata.listId)?.name : null
+    if (tagName) {
+      item.metadata.tags   = [...new Set([...(item.metadata.tags ?? []), tagName])]
+      item.metadata.listId = null
+    }
+  }
+  if (failures === 0) { setListsMigrated(true); if (targets.size) console.log(`Migrated ${targets.size} lists to tags.`) }
+}
 
 // Load the per-calendar config events (statuses + tag palette), migrating any
 // legacy Firestore statuses into a calendar's config event the first time it's
@@ -23,14 +57,13 @@ async function loadStatusConfig(token) {
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
-import { renderList, destroyList } from './list.js'
 import { runMigration } from './migration.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.2'
+const VERSION   = '0.32.3'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -521,7 +554,7 @@ function calendarModalCallbacks() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
-const WORK_VIEWS = ['board', 'list', 'reminders']
+const WORK_VIEWS = ['board', 'reminders']
 
 function setView(v) {
   state.view = v
@@ -529,10 +562,8 @@ function setView(v) {
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
   document.getElementById('board').hidden         = v !== 'board'
-  document.getElementById('list').hidden          = v !== 'list'
   document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
-  if (v !== 'list')  destroyList()
   const sel = document.getElementById('view-select')
   if (sel && sel.value !== v) sel.value = v
   _syncProjectSelectorVisibility()
@@ -557,7 +588,7 @@ function populateViewSelect() {
   if (!sel) return
   const hasTaskCals = getTaskCalendars().length > 0
   const opts = [['calendar', 'Calendar']]
-  if (hasTaskCals) opts.push(['board', 'Board'], ['list', 'List'], ['reminders', 'Reminders'])
+  if (hasTaskCals) opts.push(['board', 'Board'], ['reminders', 'Reminders'])
   sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
   sel.value = state.view
 }
@@ -656,40 +687,9 @@ function rerenderBoard() {
   renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
 }
 
-function listCallbacks() {
-  return {
-    onCreate: (calendarId, listId) => openEditor(
-      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), listId },
-      { onSaved: loadBoardData },
-    ),
-    onEdit:   item => openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }),
-    onRefresh: loadBoardData,
-    onCreateList: async name => {
-      const token = await getToken()
-      if (!token) return
-      const calId = currentProjectCalendarId()
-      if (!calId) return
-      try {
-        const calLists = getListsForCalendar(calId)
-        const maxOrder = calLists.length ? Math.max(...calLists.map(l => l.order ?? 0)) : 0
-        await createList(token, calId, name, maxOrder + 10)
-        await loadBoardData()
-      } catch (err) {
-        console.error('Create list failed:', err)
-      }
-    },
-  }
-}
-
-function renderListView() {
-  const calId = currentProjectCalendarId()
-  renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
-}
-
-// Re-render whichever work surface (board / list / reminders) is active.
+// Re-render whichever work surface (board / reminders) is active.
 function rerenderWorkView() {
   if (state.view === 'reminders') renderReminders()
-  else if (state.view === 'list')  renderListView()
   else rerenderBoard()
 }
 
@@ -817,7 +817,7 @@ function populateProjectSelector() {
 function _syncProjectSelectorVisibility() {
   const sel = document.getElementById('board-calendar-select')
   if (!sel) return
-  sel.hidden = !((state.view === 'board' || state.view === 'list') && getTaskCalendars().length > 0)
+  sel.hidden = !(state.view === 'board' && getTaskCalendars().length > 0)
 }
 
 function getBoardItems() {
@@ -886,7 +886,7 @@ async function loadBoardData() {
       )
     )
     state.boardItems = results.flat()
-    state.taskLists = getAllLists()
+    await migrateListsToTags(token).catch(console.warn)   // one-time listId -> tag
     populateProjectSelector()
     rerenderWorkView()
     ensureFooters(token, state.boardItems).catch(console.warn)
@@ -969,16 +969,11 @@ function renderCalendarPicker() {
       if (state.taskCalendars.has(cal.id)) {
         state.taskCalendars.delete(cal.id)
         taskBtn.classList.remove('active')
-        panel.querySelector(`.cal-lists-panel[data-cal-id="${cal.id}"]`)?.remove()
       } else {
         state.taskCalendars.add(cal.id)
         taskBtn.classList.add('active')
         const token = await getToken()
-        if (token) {
-          await ensureDefaultLists(token, cal.id)
-          await ensureDefaultStatuses(token, cal.id)
-          row.insertAdjacentElement('afterend', buildListsPanel(cal.id))
-        }
+        if (token) await ensureDefaultStatuses(token, cal.id)   // seeds the config event
       }
       setTaskCalendars([...state.taskCalendars])
       updateWorkViewButtons()
@@ -987,156 +982,9 @@ function renderCalendarPicker() {
 
     row.append(lbl, taskBtn)
     panel.appendChild(row)
-
-    // ── Lists sub-panel (already a task calendar) ─────────────────────────
-    if (isTaskCal) panel.appendChild(buildListsPanel(cal.id))
   }
 }
 
-function buildListsPanel(calendarId) {
-  const lists = getListsForCalendar(calendarId)
-
-  const wrap = document.createElement('div')
-  wrap.className = 'cal-lists-panel'
-  wrap.dataset.calId = calendarId
-
-  const items = document.createElement('div')
-  items.className = 'cal-lists-items'
-  for (const list of lists) items.appendChild(buildListRow(list))
-
-  const addRow = document.createElement('div')
-  addRow.className = 'cal-lists-add-row'
-
-  const inp = document.createElement('input')
-  inp.type = 'text'
-  inp.className = 'cal-list-add-input'
-  inp.placeholder = 'New list…'
-
-  const addBtn = document.createElement('button')
-  addBtn.className = 'cal-list-add-btn'
-  addBtn.textContent = '+'
-
-  const doAdd = async () => {
-    const name = inp.value.trim()
-    if (!name) return
-    const token = await getToken()
-    if (!token) return
-    const all   = getListsForCalendar(calendarId)
-    const order = all.length ? Math.max(...all.map(l => l.order ?? 0)) + 10 : 0
-    const list  = await createList(token, calendarId, name, order)
-    inp.value   = ''
-    items.appendChild(buildListRow(list))
-  }
-  addBtn.addEventListener('click', doAdd)
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd() })
-
-  addRow.append(inp, addBtn)
-  wrap.append(items, addRow, buildMigrateSection(calendarId))
-  return wrap
-}
-
-function buildMigrateSection(calendarId) {
-  const section = document.createElement('div')
-  section.className = 'cal-migrate-section'
-
-  const btn = document.createElement('button')
-  btn.className   = 'cal-migrate-btn'
-  btn.textContent = 'Import Google Tasks →'
-  btn.title       = 'Migrate active Google Tasks into this calendar (tasks are marked complete in GT and auto-deleted by Google after 30 days)'
-
-  const status = document.createElement('div')
-  status.className = 'cal-migrate-status'
-  status.hidden    = true
-
-  btn.addEventListener('click', async () => {
-    if (!confirm(
-      'Migrate all active Google Tasks to this calendar?\n\n' +
-      'Each task will be imported as a calendar event. ' +
-      'The originals will be marked complete in Google Tasks (auto-deleted by Google after 30 days).'
-    )) return
-
-    btn.disabled  = true
-    status.hidden = false
-    status.textContent = 'Migrating…'
-
-    try {
-      const token = await getToken()
-      if (!token) { btn.disabled = false; return }
-
-      const result = await runMigration(token, ({ migrated, failed, total }) => {
-        status.textContent = `Migrating… ${migrated + failed}/${total}`
-      })
-
-      const parts = [`${result.migrated} imported`]
-      if (result.failed)  parts.push(`${result.failed} failed`)
-      if (result.skipped) parts.push(`${result.skipped} skipped`)
-      status.textContent = `Done — ${parts.join(', ')}`
-
-      if (result.migrated > 0) loadBoardData()
-    } catch (err) {
-      console.error('Migration failed:', err)
-      status.textContent = `Error: ${err.message}`
-      btn.disabled = false
-    }
-  })
-
-  section.append(btn, status)
-  return section
-}
-
-function buildListRow(list) {
-  const row = document.createElement('div')
-  row.className = 'cal-list-row'
-
-  const nameEl = document.createElement('span')
-  nameEl.className = 'cal-list-name'
-  nameEl.textContent = list.name
-
-  const renameBtn = document.createElement('button')
-  renameBtn.className = 'cal-list-btn'
-  renameBtn.title = 'Rename'
-  renameBtn.textContent = '✎'
-  renameBtn.addEventListener('click', () => {
-    const field = document.createElement('input')
-    field.type = 'text'
-    field.className = 'cal-list-rename-input'
-    field.value = nameEl.textContent
-    nameEl.replaceWith(field)
-    renameBtn.disabled = true
-    field.focus(); field.select()
-
-    const commit = async () => {
-      const val = field.value.trim() || nameEl.textContent
-      if (val !== nameEl.textContent) {
-        const token = await getToken()
-        if (token) await updateList(token, list.id, { name: val })
-      }
-      nameEl.textContent = val
-      field.replaceWith(nameEl)
-      renameBtn.disabled = false
-    }
-    field.addEventListener('blur', commit)
-    field.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  { e.preventDefault(); field.blur() }
-      if (e.key === 'Escape') { field.value = nameEl.textContent; field.blur() }
-    })
-  })
-
-  const delBtn = document.createElement('button')
-  delBtn.className = 'cal-list-btn'
-  delBtn.title = 'Delete'
-  delBtn.textContent = '×'
-  delBtn.addEventListener('click', async () => {
-    if (!confirm(`Delete "${nameEl.textContent}"?`)) return
-    const token = await getToken()
-    if (!token) return
-    await deleteList(token, list.id)
-    row.remove()
-  })
-
-  row.append(nameEl, renameBtn, delBtn)
-  return row
-}
 
 // Toggle all-day between top-3 cap and show-all
 document.getElementById('btn-allday-toggle').addEventListener('click', () => {
