@@ -57,13 +57,12 @@ async function loadStatusConfig(token) {
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
-import { runMigration } from './migration.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.3'
+const VERSION   = '0.32.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
