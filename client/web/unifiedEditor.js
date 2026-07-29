@@ -5,7 +5,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
 
 import { getToken } from './auth.js'
-import { createEvent, updateEvent, getEvent, deleteEvent, moveEvent, getCalendars } from './providers/googleCalendar.js'
+import { createEvent, updateEvent, getEvent, deleteEvent, moveEvent, getCalendars, getEventInstances } from './providers/googleCalendar.js'
 import {
   createTask, updateTask, deleteTask, moveTask,
   completeTask, uncompleteTask,
@@ -1389,9 +1389,30 @@ async function _deleteFollowing(token) {
     const recurrence = [...lines]
     recurrence[rruleIdx] = lines[rruleIdx].replace(/;?(UNTIL|COUNT)=[^;]*/gi, '') + `;UNTIL=${until}`
     console.log('[deleteFollowing] rule:', lines[rruleIdx], '→', recurrence[rruleIdx])
-    await updateEvent(token, calId, masterId, { recurrence })
+    try {
+      await updateEvent(token, calId, masterId, { recurrence })
+    } catch (err) {
+      // Rewriting the shared master's RRULE is organizer-only; a guest gets 403.
+      // The Google UI handles "this and following" for a guest by removing those
+      // occurrences from their own calendar — mirror that by deleting each
+      // following instance individually (a guest-permitted operation).
+      if (!/\b403\b/.test(err.message || '')) throw err
+      await _removeFollowingInstances(token, calId, masterId)
+    }
   } else {
     if (_isTaskMode()) await deleteTask(token, calId, _editItem.source.external_id)
     else               await deleteEvent(token, calId, _editItem.source.external_id)
+  }
+}
+
+// Guest fallback for "this and following": delete every occurrence from the
+// selected one onward. Bounds an unbounded series at +5 years so the instance
+// expansion terminates; that covers any practical horizon a user is viewing.
+async function _removeFollowingInstances(token, calId, masterId) {
+  const from   = new Date(_editItem.start)
+  const timeMax = new Date(from); timeMax.setFullYear(timeMax.getFullYear() + 5)
+  const instances = await getEventInstances(token, calId, masterId, from.toISOString(), timeMax.toISOString())
+  for (const inst of instances) {
+    await deleteEvent(token, calId, inst.id)
   }
 }

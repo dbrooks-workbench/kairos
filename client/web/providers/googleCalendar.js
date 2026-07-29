@@ -123,6 +123,18 @@ export async function getEvent(token, calendarId, eventId) {
   return get(token, `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`)
 }
 
+// Expanded occurrences of a recurring master between timeMin/timeMax (ISO). Used
+// to remove "this and following" occurrences one-by-one when we can't rewrite the
+// master's RRULE (non-organizer / read-only calendar) — the same thing the Google
+// Calendar UI does for a guest.
+export async function getEventInstances(token, calendarId, masterId, timeMin, timeMax) {
+  const qs = new URLSearchParams({ timeMin, timeMax, showDeleted: 'false', maxResults: '2500' })
+  return paginate(
+    token,
+    `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(masterId)}/instances?${qs}`,
+  )
+}
+
 export async function updateEvent(token, calendarId, eventId, body) {
   const res = await fetch(
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
