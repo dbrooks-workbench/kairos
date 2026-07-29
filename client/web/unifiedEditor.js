@@ -1235,7 +1235,13 @@ async function _executeWithScope(scope) {
     } catch (err) {
       console.error('Delete failed:', err)
       el('ue-delete').disabled = false
-      el('ue-save-error').textContent = `Delete failed: ${err.message || err}`
+      // "This and following" truncates the series by editing the master's RRULE,
+      // which Google forbids (403) when you aren't the organizer / lack writer
+      // access on that calendar. Translate the raw code into guidance.
+      const is403 = /\b403\b/.test(err.message || '')
+      el('ue-save-error').textContent = (scope === 'following' && is403)
+        ? "Can't end this series here — you're not the organizer of this recurring event (or have read-only access to its calendar). Try deleting just this occurrence."
+        : `Delete failed: ${err.message || err}`
       el('ue-save-error').hidden = false
     }
     return

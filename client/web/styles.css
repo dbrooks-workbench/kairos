@@ -1849,8 +1849,12 @@ body.resize-active * { cursor: ns-resize !important; }
 .tag-mgr-del:hover { color: #c5221f; }
 
 /* Calendar-chip tag dots */
-.cal-tag-dots { display: inline-flex; gap: 2px; margin-left: 4px; vertical-align: middle; }
-.cal-tag-dot  { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.cal-tag-dots { display: inline-flex; gap: 2px; margin-left: 4px; vertical-align: middle; flex: none; flex-shrink: 0; }
+.cal-tag-dot  { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; }
+/* Beat the blanket `.allday-event.type-task span { flex: 1 }` rule (specificity
+   0,2,1) so the dots stay fixed 6px circles instead of stretching into ovals. */
+.allday-event.type-task .cal-tag-dots,
+.allday-event.type-task .cal-tag-dot { flex: none; }
 
 /* Reminder-row tags */
 .reminder-tags { display: flex; flex-wrap: wrap; gap: 4px; }

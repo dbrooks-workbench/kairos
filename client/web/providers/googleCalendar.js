@@ -19,6 +19,20 @@ async function get(token, url) {
   return res.json()
 }
 
+// Build an Error whose message includes Google's actual reason (e.g.
+// "forbiddenForNonOrganizer", "You need to have writer access…") — a bare
+// status code hides why a 403/400 happened, which is exactly what a user
+// deleting a shared or non-owned recurring event needs to see.
+export async function apiError(label, res) {
+  let reason = res.statusText || ''
+  try {
+    const body = await res.json()
+    const e = body?.error
+    reason = e?.message || e?.errors?.[0]?.message || e?.errors?.[0]?.reason || reason
+  } catch { /* non-JSON body */ }
+  return new Error(`${label}: ${res.status}${reason ? ` ${reason}` : ''}`)
+}
+
 async function paginate(token, url) {
   const items = []
   let pageToken = null
@@ -118,7 +132,7 @@ export async function updateEvent(token, calendarId, eventId, body) {
       body: JSON.stringify(body),
     }
   )
-  if (!res.ok) throw new Error(`updateEvent: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw await apiError('updateEvent', res)
   return res.json()
 }
 
@@ -127,7 +141,7 @@ export async function moveEvent(token, sourceCalId, eventId, destCalId) {
     `${BASE}/calendars/${encodeURIComponent(sourceCalId)}/events/${encodeURIComponent(eventId)}/move?destination=${encodeURIComponent(destCalId)}`,
     { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }
   )
-  if (!res.ok) throw new Error(`moveEvent: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw await apiError('moveEvent', res)
   return res.json()
 }
 
@@ -136,7 +150,7 @@ export async function deleteEvent(token, calendarId, eventId) {
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }
   )
-  if (!res.ok) throw new Error(`deleteEvent: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw await apiError('deleteEvent', res)
 }
 
 export async function createEvent(token, calendarId, body) {
@@ -148,7 +162,7 @@ export async function createEvent(token, calendarId, body) {
       body: JSON.stringify(body),
     }
   )
-  if (!res.ok) throw new Error(`createEvent: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw await apiError('createEvent', res)
   return res.json()
 }
 
