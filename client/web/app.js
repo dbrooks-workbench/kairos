@@ -4,7 +4,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
 import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
-import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags } from './providers/kairosConfig.js'
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags, getTagPalette, setTagColor, removeTagFromPalette } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
 import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
 
@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.4'
+const VERSION   = '0.32.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -293,6 +293,23 @@ function byCalendarThenTitle(a, b) {
 // Chip title with a bell marker for reminders (plain title for everything else).
 function _titleWithBell(item) {
   return (item.metadata?.isReminder ? '🔔 ' : '') + item.title
+}
+
+// Small coloured dots for an item's tags, appended to calendar chips (so tagged
+// items — including events — read as tagged). Returns null when there are none.
+function _tagDots(item) {
+  const tags = item.metadata?.tags ?? []
+  if (!tags.length) return null
+  const wrap = document.createElement('span')
+  wrap.className = 'cal-tag-dots'
+  wrap.title = tags.join(', ')
+  for (const t of tags.slice(0, 3)) {
+    const dot = document.createElement('span')
+    dot.className = 'cal-tag-dot'
+    dot.style.background = getTagColor(item.source.account_id, t)
+    wrap.appendChild(dot)
+  }
+  return wrap
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -1131,6 +1148,46 @@ async function runSweepIfConfigured() {
 }
 
 // Open the Configure Kairos dialog (default intake list + Google Task Sweep).
+// Tag manager (in Configure Kairos): recolor or delete tags, grouped by calendar.
+function renderTagManager() {
+  const wrap = document.getElementById('tag-manager')
+  if (!wrap) return
+  wrap.innerHTML = ''
+  let any = false
+  for (const calId of getTaskCalendars()) {
+    const palette = getTagPalette(calId)
+    const names   = Object.keys(palette).sort((a, b) => a.localeCompare(b))
+    if (!names.length) continue
+    any = true
+    const calLbl = el('div', 'tag-mgr-cal')
+    calLbl.textContent = state.calendars.find(c => c.id === calId)?.summary ?? calId
+    wrap.appendChild(calLbl)
+    for (const name of names) {
+      const row   = el('div', 'tag-mgr-row')
+      const color = el('input', 'tag-mgr-color'); color.type = 'color'; color.value = palette[name]
+      color.addEventListener('change', async () => setTagColor(await getToken(), calId, name, color.value).catch(console.warn))
+      const label = el('span', 'tag-mgr-name'); label.textContent = name
+      const del   = el('button', 'tag-mgr-del'); del.textContent = '×'; del.title = 'Delete tag'
+      del.addEventListener('click', async () => {
+        if (!confirm(`Delete tag "${name}"? It will be removed from the palette and from loaded items on this calendar.`)) return
+        const token = await getToken(); if (!token) return
+        await removeTagFromPalette(token, calId, name).catch(console.warn)
+        // Untag loaded items (board + calendar) on this calendar.
+        for (const item of [...state.boardItems, ...state.items]) {
+          if (item.source.account_id !== calId || !item.metadata?.tags?.includes(name)) continue
+          const nt = item.metadata.tags.filter(t => t !== name)
+          await patchTaskProps(token, calId, item.source.external_id, { tags: encodeTags(nt) }).catch(console.warn)
+          item.metadata.tags = nt
+        }
+        renderTagManager()
+      })
+      row.append(color, label, del)
+      wrap.appendChild(row)
+    }
+  }
+  if (!any) { const e = el('div', 'sweep-section-hint'); e.textContent = 'No tags yet.'; wrap.appendChild(e) }
+}
+
 async function openConfigDialog() {
   const dialog   = document.getElementById('sweep-dialog')
   const container = document.getElementById('sweep-sources-container')
@@ -1142,6 +1199,7 @@ async function openConfigDialog() {
 
   dialog.hidden = false
   status.textContent = ''
+  renderTagManager()
 
   // Populate default intake status dropdown — statuses across all task calendars,
   // each labelled with its calendar to disambiguate same-named statuses.
@@ -1649,6 +1707,7 @@ function renderItems(items) {
         })
       }
 
+      { const d = _tagDots(item); if (d) chipEl.appendChild(d) }
       container.appendChild(chipEl)
     }
 
@@ -1794,6 +1853,7 @@ function renderItems(items) {
           el.appendChild(handle)
         }
       }
+      { const d = _tagDots(item); if (d) el.appendChild(d) }
       dayCol.appendChild(el)
     }
   }
@@ -1953,6 +2013,7 @@ function renderMobileDay() {
     chip.addEventListener('click', () => {
       openEditorForEdit(item, calendarModalCallbacks())
     })
+    { const d = _tagDots(item); if (d) chip.appendChild(d) }
     allDayContainer.appendChild(chip)
   }
 
@@ -2083,6 +2144,7 @@ function renderMobileDay() {
         openEditorForEdit(item, calendarModalCallbacks())
       })
     }
+    { const d = _tagDots(item); if (d) eventEl.appendChild(d) }
     col.appendChild(eventEl)
   }
 

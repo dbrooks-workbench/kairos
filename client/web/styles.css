@@ -1840,6 +1840,18 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 .filter-clear:hover { color: var(--text); }
 
+/* Tag manager (Configure Kairos) */
+.tag-mgr-cal { font-size: 11px; color: var(--text-muted); margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.tag-mgr-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.tag-mgr-color { width: 24px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: none; }
+.tag-mgr-name { flex: 1; font-size: 13px; color: var(--text); }
+.tag-mgr-del { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.tag-mgr-del:hover { color: #c5221f; }
+
+/* Calendar-chip tag dots */
+.cal-tag-dots { display: inline-flex; gap: 2px; margin-left: 4px; vertical-align: middle; }
+.cal-tag-dot  { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+
 /* Reminder-row tags */
 .reminder-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .reminder-tag {
