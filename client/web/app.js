@@ -4,7 +4,7 @@ import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
 import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor } from './providers/kairosConfig.js'
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames } from './providers/kairosConfig.js'
 import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
 
 // Load the per-calendar config events (statuses + tag palette), migrating any
@@ -30,7 +30,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.1'
+const VERSION   = '0.32.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -46,6 +46,43 @@ const state = {
   mobileDay: new Date(),   // day currently shown in the mobile day view
   pastDueTasks: [],        // incomplete tasks in the window's past bound — rolled forward to today on the calendar
   visibility: null,        // effective { start, end } window (Dates); session state, expands on calendar browse
+  filter: { text: '', tags: [] },   // active-view filter: title substring + tag AND-set (session only)
+}
+
+// Does an item pass the active filter? Title substring (case-insensitive) AND
+// must carry every filter tag. Empty filter passes everything.
+function matchesFilter(item) {
+  const f = state.filter
+  if (f.text && !(item.title ?? '').toLowerCase().includes(f.text.toLowerCase())) return false
+  if (f.tags.length) {
+    const tags = item.metadata?.tags ?? []
+    if (!f.tags.every(t => tags.includes(t))) return false
+  }
+  return true
+}
+
+function renderFilterBar() {
+  const chips = document.getElementById('filter-tags')
+  if (!chips) return
+  chips.innerHTML = ''
+  for (const name of state.filter.tags) {
+    const chip = el('span', 'filter-tag')
+    chip.textContent = name
+    const x = el('button', 'filter-tag-remove'); x.textContent = '×'
+    x.addEventListener('click', () => { state.filter.tags = state.filter.tags.filter(t => t !== name); renderFilterBar(); applyFilter() })
+    chip.appendChild(x)
+    chips.appendChild(chip)
+  }
+  document.getElementById('filter-datalist').innerHTML =
+    getAllTagNames().filter(n => !state.filter.tags.includes(n)).map(n => `<option value="${n}"></option>`).join('')
+  const active = !!state.filter.text || state.filter.tags.length > 0
+  document.getElementById('filter-clear').hidden = !active
+}
+
+// Re-apply the filter to the active view (no refetch — client-side).
+function applyFilter() {
+  if (state.view === 'calendar') renderItems(getVisibleItems())
+  else rerenderWorkView()
 }
 
 // ── Visibility period ─────────────────────────────────────────────────────────
@@ -501,6 +538,7 @@ function setView(v) {
   _syncProjectSelectorVisibility()
 
   renderVisibilityPill()
+  renderFilterBar()
   stopPolling()
   if (isWork) {
     loadBoardData()
@@ -662,7 +700,7 @@ function getReminders() {
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)
   const rems = state.boardItems.filter(i =>
-    i.metadata?.isReminder &&
+    i.metadata?.isReminder && matchesFilter(i) &&
     (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
   const today = todayMidnight()
@@ -788,7 +826,7 @@ function getBoardItems() {
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)   // include the whole end day
   const items = state.boardItems.filter(i =>
-    !i.metadata?.isReminder &&
+    !i.metadata?.isReminder && matchesFilter(i) &&
     (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
 
@@ -830,6 +868,7 @@ async function loadBoardData() {
     await loadStatusConfig(token)
     ensureVisibilityReady()
     renderVisibilityPill()
+    renderFilterBar()
     const taskCalIds = getTaskCalendars()
     // Backfill statuses for task calendars designated before statuses existed
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
@@ -867,7 +906,7 @@ function getVisibleItems() {
   const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
   const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
   const rolled  = state.pastDueTasks.filter(visible).map(rollToToday)
-  return items.concat(rolled)
+  return items.concat(rolled).filter(matchesFilter)
 }
 
 // ── Calendar picker ───────────────────────────────────────────────────────────
@@ -2381,7 +2420,7 @@ async function render() {
       ])
       // Config events (statuses + tag palette) need the task-calendar list, so
       // after prefs. Cosmetic for the calendar (in-progress ring), so non-blocking.
-      getToken().then(t => t ? loadStatusConfig(t).then(() => renderItems(getVisibleItems())) : null).catch(console.warn)
+      getToken().then(t => t ? loadStatusConfig(t).then(() => { renderItems(getVisibleItems()); renderFilterBar() }) : null).catch(console.warn)
       ensureVisibilityReady()
       renderVisibilityPill()
       state.items = items
@@ -2429,6 +2468,31 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 // View toggle
 document.getElementById('view-select').addEventListener('change', e => setView(e.target.value))
 populateViewSelect()
+
+// Filter bar
+document.getElementById('filter-input').addEventListener('input', e => {
+  state.filter.text = e.target.value
+  document.getElementById('filter-clear').hidden = !(state.filter.text || state.filter.tags.length)
+  applyFilter()
+})
+document.getElementById('filter-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return
+  const val = e.target.value.trim()
+  const match = getAllTagNames().find(n => n.toLowerCase() === val.toLowerCase())
+  if (match && !state.filter.tags.includes(match)) {
+    state.filter.tags.push(match)
+    state.filter.text = ''
+    e.target.value = ''
+    renderFilterBar()
+    applyFilter()
+  }
+})
+document.getElementById('filter-clear').addEventListener('click', () => {
+  state.filter = { text: '', tags: [] }
+  document.getElementById('filter-input').value = ''
+  renderFilterBar()
+  applyFilter()
+})
 
 // Board / list project-calendar selector
 document.getElementById('board-calendar-select').addEventListener('change', e => {

@@ -225,6 +225,13 @@ export function getPaletteTagNames(calendarId) {
   return Object.keys(_config[calendarId]?.palette ?? {}).sort((a, b) => a.localeCompare(b))
 }
 
+// Every tag name across all loaded calendars (for the global filter typeahead).
+export function getAllTagNames() {
+  const set = new Set()
+  for (const c of Object.values(_config)) for (const n of Object.keys(c.palette)) set.add(n)
+  return [...set].sort((a, b) => a.localeCompare(b))
+}
+
 export async function setTagColor(token, calendarId, name, color) {
   const c = _config[calendarId]
   if (!c) return

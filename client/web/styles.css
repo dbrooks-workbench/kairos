@@ -1797,6 +1797,49 @@ body.resize-active * { cursor: ns-resize !important; }
 .ue-tag-remove:hover { opacity: 1; }
 .ue-tags-input { flex: 1; min-width: 120px; }
 
+/* Filter bar */
+#filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.filter-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #e8f0fe;
+  color: #1a73e8;
+}
+.filter-tag-remove {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px; opacity: 0.7;
+}
+.filter-tag-remove:hover { opacity: 1; }
+.filter-input {
+  flex: 1;
+  min-width: 160px;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.filter-clear {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 18px; line-height: 1; padding: 0 6px;
+}
+.filter-clear:hover { color: var(--text); }
+
 /* Reminder-row tags */
 .reminder-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .reminder-tag {
