@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.7'
+const VERSION   = '0.32.8'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -162,6 +162,19 @@ function expandVisibility(from, to) {
   if (from < w.start) { w.start = new Date(from); changed = true }
   if (to   > w.end)   { w.end   = new Date(to);   changed = true }
   return changed
+}
+
+// Keep the effective window a rolling buffer around the viewed week: always
+// extend it to cover VIS_DEFAULT_DAYS beyond both ends of the current week, so
+// stepping one week toward an edge pushes the bound out another 7 days (and the
+// dependent views / past-due fetch pull in that range) instead of only widening
+// once we actually hit the edge. Session-only; never contracts. Returns true if
+// the window grew.
+function syncVisibilityToWeek(weekStart) {
+  return expandVisibility(
+    addDays(weekStart, -VIS_DEFAULT_DAYS),
+    addDays(weekStart, 7 + VIS_DEFAULT_DAYS),
+  )
 }
 
 function _fmtVisDate(d) {
@@ -2167,7 +2180,7 @@ async function navigateMobileDay(delta) {
   const newWeekStart = getWeekStart(newDay)
   if (newWeekStart.getTime() !== state.weekStart.getTime()) {
     state.weekStart = newWeekStart
-    expandVisibility(state.weekStart, addDays(state.weekStart, 7))
+    syncVisibilityToWeek(state.weekStart)
     const end = addDays(state.weekStart, 7)
     state.items = await fetchItems(state.weekStart, end)
     renderWeekLabel()
@@ -2351,12 +2364,12 @@ async function render() {
 
 document.getElementById('btn-prev').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, -7)
-  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
+  syncVisibilityToWeek(state.weekStart)
   render()
 })
 document.getElementById('btn-next').addEventListener('click', () => {
   state.weekStart = addDays(state.weekStart, 7)
-  expandVisibility(state.weekStart, addDays(state.weekStart, 7))
+  syncVisibilityToWeek(state.weekStart)
   render()
 })
 document.getElementById('btn-today').addEventListener('click', () => {
