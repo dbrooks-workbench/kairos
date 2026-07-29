@@ -35,6 +35,14 @@
       </div>
     </header>
 
+    <!-- Filter bar (applies to the active view: title text + tag AND-filter) -->
+    <div id="filter-bar">
+      <div id="filter-tags" class="filter-tags"></div>
+      <input id="filter-input" class="filter-input" type="text" placeholder="Filter by title or tag…" list="filter-datalist" autocomplete="off">
+      <datalist id="filter-datalist"></datalist>
+      <button id="filter-clear" class="filter-clear" title="Clear filter" hidden>×</button>
+    </div>
+
     <div id="loading-bar"></div>
 
     <div id="connect-banner">
@@ -86,9 +94,6 @@
     <!-- Board view -->
     <div id="board" hidden></div>
 
-    <!-- List view (organization axis; shares board styling) -->
-    <div id="list" hidden></div>
-
     <!-- Reminders view (flat list of reminders) -->
     <div id="reminders" hidden></div>
 
@@ -110,14 +115,19 @@
             <select id="ue-calendar" class="modal-select"></select>
           </div>
           <!-- Task-only: list assignment -->
-          <div class="modal-field-row" id="ue-list-row" hidden>
-            <label class="modal-label">List</label>
-            <select id="ue-list" class="modal-select"></select>
-          </div>
           <!-- Task-only: status (board column) assignment -->
           <div class="modal-field-row" id="ue-status-row" hidden>
             <label class="modal-label">Status</label>
             <select id="ue-status" class="modal-select"></select>
+          </div>
+          <!-- Tags (all item types) -->
+          <div class="modal-field-row" id="ue-tags-row">
+            <label class="modal-label">Tags</label>
+            <div class="ue-tags-field">
+              <div id="ue-tags-chips" class="ue-tags-chips"></div>
+              <input id="ue-tags-input" class="modal-input ue-tags-input" type="text" placeholder="Add a tag…" list="ue-tags-datalist" autocomplete="off">
+              <datalist id="ue-tags-datalist"></datalist>
+            </div>
           </div>
           <div class="modal-field-row">
             <label class="modal-label">When</label>
@@ -301,6 +311,11 @@
           <div class="sweep-section-label">Default intake status</div>
           <div class="sweep-section-hint">New captures — voice items and swept tasks — land in this status for processing.</div>
           <select id="intake-status-select" class="modal-select"></select>
+        </div>
+        <div class="sweep-section">
+          <div class="sweep-section-label">Tags</div>
+          <div class="sweep-section-hint">Recolor or delete tags. Deleting removes the tag from the palette and from loaded items on that calendar.</div>
+          <div id="tag-manager"></div>
         </div>
         <div class="sweep-section">
           <div class="sweep-section-label">Google Task Sweep</div>

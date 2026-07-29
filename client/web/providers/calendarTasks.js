@@ -1,4 +1,5 @@
 import { generateKairosId } from './driveTaskMeta.js'
+import { encodeTags, decodeTags } from './tagCodec.js'
 
 // Task events stored in Google Calendar using extendedProperties.private.
 // isTask='true' marks the event as a Kairos task (never a regular event).
@@ -7,7 +8,9 @@ import { generateKairosId } from './driveTaskMeta.js'
 //   kairosId    — stable identifier (survives events.move)
 //   isTask      — 'true' always
 //   listId      — Firestore list ID (organization axis)
-//   statusId    — Firestore status ID (workflow axis; board column)
+//   statusId    — status ID (workflow axis; board column) — lives in the config event
+//   statusName  — denormalized status name (recovery backup; config event is authoritative)
+//   tags        — unit-separated tag names (name IS the identity; palette in config event)
 //   dueDate     — deadline 'YYYY-MM-DD' (when it must be done; independent of start)
 //   isReminder  — 'true' when the task is a reminder (no list/status/LOE; just done/not-done)
 //   order       — sparse float string for manual sorting
@@ -101,7 +104,7 @@ function _buildDescriptionPatch(item) {
 
 function _buildEventBody(taskData, isCreate = false) {
   const {
-    title, body, kairosId, listId, statusId, dueDate, isReminder, order, loe,
+    title, body, kairosId, listId, statusId, statusName, tags, dueDate, isReminder, order, loe,
     date, noDate, allDay, startTime, endDate, endTime, timeZone,
     location, unprocessed, webhookToken, recurrence, completed, completedAt,
   } = taskData
@@ -137,6 +140,11 @@ function _buildEventBody(taskData, isCreate = false) {
   // from extendedProperties.private preserves the stored value (Google merges),
   // so editor saves that don't carry statusId won't wipe a task's column.
   if (statusId !== undefined) props.statusId = statusId ?? ''
+  // Denormalized status name (recovery backup) — set alongside statusId.
+  if (statusName !== undefined) props.statusName = statusName ?? ''
+  // Tags: set when provided, clear on edit when emptied; omit on create.
+  if (tags && tags.length) props.tags = encodeTags(tags)
+  else if (tags !== undefined && !isCreate) props.tags = null
   // Deadline: set when provided, clear (null) on edit when emptied; omit on create.
   if (dueDate)          props.dueDate = dueDate
   else if (!isCreate)   props.dueDate = null
@@ -203,6 +211,8 @@ export function normalizeTask(event, calendarId) {
       hasPrefix,
       listId:           p.listId      || null,
       statusId:         p.statusId    || null,
+      statusName:       p.statusName  || null,
+      tags:             decodeTags(p.tags),
       dueDate:          p.dueDate ? new Date(p.dueDate + 'T00:00:00') : null,
       isReminder:       p.isReminder === 'true',
       order:            p.order != null ? parseFloat(p.order) : null,

@@ -2,20 +2,67 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow } from './providers/kairosPrefs.js'
-import { loadLists, getListsForCalendar, createList, getAllLists, getList, updateList, deleteList, ensureDefaultLists } from './providers/kairosLists.js'
-import { loadStatuses, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus } from './providers/kairosStatuses.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
+import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags, getTagPalette, setTagColor, removeTagFromPalette } from './providers/kairosConfig.js'
+import { encodeTags } from './providers/tagCodec.js'
+import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
+
+// One-time: convert each task's legacy listId into a tag named after the list,
+// then clear the listId. Operates on state.boardItems (already loaded); patches the
+// recurring master once. Sets a prefs flag so it never re-runs after a clean pass.
+async function migrateListsToTags(token) {
+  if (getListsMigrated()) return
+  const targets = new Map()   // "calId:eventId" -> { calId, targetId, tagName }
+  for (const item of state.boardItems) {
+    if (!item.metadata?.listId) continue
+    const tagName = getList(item.metadata.listId)?.name
+    if (!tagName) continue
+    const calId    = item.source.account_id
+    const targetId = item.metadata.recurringEventId ?? item.source.external_id
+    targets.set(`${calId}:${targetId}`, { calId, targetId, tagName, tags: item.metadata.tags ?? [] })
+  }
+  let failures = 0
+  for (const { calId, targetId, tagName, tags } of targets.values()) {
+    const newTags = [...new Set([...tags, tagName])]
+    try {
+      await ensureTags(token, calId, [tagName])
+      await patchTaskProps(token, calId, targetId, { tags: encodeTags(newTags), listId: null })
+    } catch (err) { console.warn('list->tag migration failed:', err.message); failures++ }
+  }
+  // Reflect in the in-memory items so the current render shows tags, not lists.
+  for (const item of state.boardItems) {
+    const tagName = item.metadata?.listId ? getList(item.metadata.listId)?.name : null
+    if (tagName) {
+      item.metadata.tags   = [...new Set([...(item.metadata.tags ?? []), tagName])]
+      item.metadata.listId = null
+    }
+  }
+  if (failures === 0) { setListsMigrated(true); if (targets.size) console.log(`Migrated ${targets.size} lists to tags.`) }
+}
+
+// Load the per-calendar config events (statuses + tag palette), migrating any
+// legacy Firestore statuses into a calendar's config event the first time it's
+// created. Needs prefs loaded first (for the task-calendar list).
+async function loadStatusConfig(token) {
+  await loadFsStatuses(token).catch(() => {})   // migration source only
+  await loadConfig(token, getTaskCalendars(), calId => {
+    const fs = fsStatusesForCalendar(calId)
+    if (!fs.length) return null
+    const obj = {}
+    fs.forEach(s => { obj[s.id] = { name: s.name, order: s.order, inProgress: s.inProgress } })
+    return obj
+  })
+}
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
-import { renderList, destroyList } from './list.js'
-import { runMigration } from './migration.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.31.1'
+const VERSION   = '0.32.5'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -31,6 +78,43 @@ const state = {
   mobileDay: new Date(),   // day currently shown in the mobile day view
   pastDueTasks: [],        // incomplete tasks in the window's past bound — rolled forward to today on the calendar
   visibility: null,        // effective { start, end } window (Dates); session state, expands on calendar browse
+  filter: { text: '', tags: [] },   // active-view filter: title substring + tag AND-set (session only)
+}
+
+// Does an item pass the active filter? Title substring (case-insensitive) AND
+// must carry every filter tag. Empty filter passes everything.
+function matchesFilter(item) {
+  const f = state.filter
+  if (f.text && !(item.title ?? '').toLowerCase().includes(f.text.toLowerCase())) return false
+  if (f.tags.length) {
+    const tags = item.metadata?.tags ?? []
+    if (!f.tags.every(t => tags.includes(t))) return false
+  }
+  return true
+}
+
+function renderFilterBar() {
+  const chips = document.getElementById('filter-tags')
+  if (!chips) return
+  chips.innerHTML = ''
+  for (const name of state.filter.tags) {
+    const chip = el('span', 'filter-tag')
+    chip.textContent = name
+    const x = el('button', 'filter-tag-remove'); x.textContent = '×'
+    x.addEventListener('click', () => { state.filter.tags = state.filter.tags.filter(t => t !== name); renderFilterBar(); applyFilter() })
+    chip.appendChild(x)
+    chips.appendChild(chip)
+  }
+  document.getElementById('filter-datalist').innerHTML =
+    getAllTagNames().filter(n => !state.filter.tags.includes(n)).map(n => `<option value="${n}"></option>`).join('')
+  const active = !!state.filter.text || state.filter.tags.length > 0
+  document.getElementById('filter-clear').hidden = !active
+}
+
+// Re-apply the filter to the active view (no refetch — client-side).
+function applyFilter() {
+  if (state.view === 'calendar') renderItems(getVisibleItems())
+  else rerenderWorkView()
 }
 
 // ── Visibility period ─────────────────────────────────────────────────────────
@@ -209,6 +293,23 @@ function byCalendarThenTitle(a, b) {
 // Chip title with a bell marker for reminders (plain title for everything else).
 function _titleWithBell(item) {
   return (item.metadata?.isReminder ? '🔔 ' : '') + item.title
+}
+
+// Small coloured dots for an item's tags, appended to calendar chips (so tagged
+// items — including events — read as tagged). Returns null when there are none.
+function _tagDots(item) {
+  const tags = item.metadata?.tags ?? []
+  if (!tags.length) return null
+  const wrap = document.createElement('span')
+  wrap.className = 'cal-tag-dots'
+  wrap.title = tags.join(', ')
+  for (const t of tags.slice(0, 3)) {
+    const dot = document.createElement('span')
+    dot.className = 'cal-tag-dot'
+    dot.style.background = getTagColor(item.source.account_id, t)
+    wrap.appendChild(dot)
+  }
+  return wrap
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -469,7 +570,7 @@ function calendarModalCallbacks() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
-const WORK_VIEWS = ['board', 'list', 'reminders']
+const WORK_VIEWS = ['board', 'reminders']
 
 function setView(v) {
   state.view = v
@@ -477,15 +578,14 @@ function setView(v) {
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
   document.getElementById('board').hidden         = v !== 'board'
-  document.getElementById('list').hidden          = v !== 'list'
   document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
-  if (v !== 'list')  destroyList()
   const sel = document.getElementById('view-select')
   if (sel && sel.value !== v) sel.value = v
   _syncProjectSelectorVisibility()
 
   renderVisibilityPill()
+  renderFilterBar()
   stopPolling()
   if (isWork) {
     loadBoardData()
@@ -504,7 +604,7 @@ function populateViewSelect() {
   if (!sel) return
   const hasTaskCals = getTaskCalendars().length > 0
   const opts = [['calendar', 'Calendar']]
-  if (hasTaskCals) opts.push(['board', 'Board'], ['list', 'List'], ['reminders', 'Reminders'])
+  if (hasTaskCals) opts.push(['board', 'Board'], ['reminders', 'Reminders'])
   sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
   sel.value = state.view
 }
@@ -603,40 +703,9 @@ function rerenderBoard() {
   renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
 }
 
-function listCallbacks() {
-  return {
-    onCreate: (calendarId, listId) => openEditor(
-      { mode: 'task', calendarId: calendarId ?? currentProjectCalendarId(), listId },
-      { onSaved: loadBoardData },
-    ),
-    onEdit:   item => openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }),
-    onRefresh: loadBoardData,
-    onCreateList: async name => {
-      const token = await getToken()
-      if (!token) return
-      const calId = currentProjectCalendarId()
-      if (!calId) return
-      try {
-        const calLists = getListsForCalendar(calId)
-        const maxOrder = calLists.length ? Math.max(...calLists.map(l => l.order ?? 0)) : 0
-        await createList(token, calId, name, maxOrder + 10)
-        await loadBoardData()
-      } catch (err) {
-        console.error('Create list failed:', err)
-      }
-    },
-  }
-}
-
-function renderListView() {
-  const calId = currentProjectCalendarId()
-  renderList(getListsForCalendar(calId), getBoardItems(), listCallbacks(), calId)
-}
-
-// Re-render whichever work surface (board / list / reminders) is active.
+// Re-render whichever work surface (board / reminders) is active.
 function rerenderWorkView() {
   if (state.view === 'reminders') renderReminders()
-  else if (state.view === 'list')  renderListView()
   else rerenderBoard()
 }
 
@@ -647,7 +716,7 @@ function getReminders() {
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)
   const rems = state.boardItems.filter(i =>
-    i.metadata?.isReminder &&
+    i.metadata?.isReminder && matchesFilter(i) &&
     (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
   const today = todayMidnight()
@@ -723,10 +792,18 @@ function renderReminders() {
     const title = el('div', 'reminder-title')
     title.textContent = `🔔 ${item.title}${isRecurring ? ' ↻' : ''}`
 
+    const tags = el('div', 'reminder-tags')
+    for (const t of item.metadata?.tags ?? []) {
+      const chip = el('span', 'reminder-tag')
+      chip.style.background = getTagColor(item.source.account_id, t)
+      chip.textContent = t
+      tags.appendChild(chip)
+    }
+
     const when = el('div', 'reminder-when')
     when.textContent = _reminderWhen(item)
 
-    row.append(check, title, when)
+    row.append(check, title, tags, when)
     row.addEventListener('click', () =>
       openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }))
     listEl.appendChild(row)
@@ -756,7 +833,7 @@ function populateProjectSelector() {
 function _syncProjectSelectorVisibility() {
   const sel = document.getElementById('board-calendar-select')
   if (!sel) return
-  sel.hidden = !((state.view === 'board' || state.view === 'list') && getTaskCalendars().length > 0)
+  sel.hidden = !(state.view === 'board' && getTaskCalendars().length > 0)
 }
 
 function getBoardItems() {
@@ -765,7 +842,7 @@ function getBoardItems() {
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)   // include the whole end day
   const items = state.boardItems.filter(i =>
-    !i.metadata?.isReminder &&
+    !i.metadata?.isReminder && matchesFilter(i) &&
     (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
 
@@ -801,11 +878,13 @@ async function loadBoardData() {
   const token = await getToken()
   if (!token) return
   try {
-    // Prefs/lists/statuses first so the visibility window (and task calendars) are
-    // known before fetching — the task fetch is bounded to that window.
-    await Promise.all([loadPrefs(token), loadLists(token), loadStatuses(token)])
+    // Prefs/lists first so the visibility window and task-calendar list are known
+    // (the config load and windowed fetch both need them).
+    await Promise.all([loadPrefs(token), loadLists(token)])
+    await loadStatusConfig(token)
     ensureVisibilityReady()
     renderVisibilityPill()
+    renderFilterBar()
     const taskCalIds = getTaskCalendars()
     // Backfill statuses for task calendars designated before statuses existed
     // (ensureDefaultStatuses is a no-op where a calendar already has any).
@@ -823,7 +902,7 @@ async function loadBoardData() {
       )
     )
     state.boardItems = results.flat()
-    state.taskLists = getAllLists()
+    await migrateListsToTags(token).catch(console.warn)   // one-time listId -> tag
     populateProjectSelector()
     rerenderWorkView()
     ensureFooters(token, state.boardItems).catch(console.warn)
@@ -843,7 +922,7 @@ function getVisibleItems() {
   const visible = item => item.item_type !== 'EVENT' || !state.hiddenCalendars.has(item.source.account_id)
   const items   = state.items.filter(visible).filter(i => !isRollablePastDue(i))
   const rolled  = state.pastDueTasks.filter(visible).map(rollToToday)
-  return items.concat(rolled)
+  return items.concat(rolled).filter(matchesFilter)
 }
 
 // ── Calendar picker ───────────────────────────────────────────────────────────
@@ -906,16 +985,11 @@ function renderCalendarPicker() {
       if (state.taskCalendars.has(cal.id)) {
         state.taskCalendars.delete(cal.id)
         taskBtn.classList.remove('active')
-        panel.querySelector(`.cal-lists-panel[data-cal-id="${cal.id}"]`)?.remove()
       } else {
         state.taskCalendars.add(cal.id)
         taskBtn.classList.add('active')
         const token = await getToken()
-        if (token) {
-          await ensureDefaultLists(token, cal.id)
-          await ensureDefaultStatuses(token, cal.id)
-          row.insertAdjacentElement('afterend', buildListsPanel(cal.id))
-        }
+        if (token) await ensureDefaultStatuses(token, cal.id)   // seeds the config event
       }
       setTaskCalendars([...state.taskCalendars])
       updateWorkViewButtons()
@@ -924,156 +998,9 @@ function renderCalendarPicker() {
 
     row.append(lbl, taskBtn)
     panel.appendChild(row)
-
-    // ── Lists sub-panel (already a task calendar) ─────────────────────────
-    if (isTaskCal) panel.appendChild(buildListsPanel(cal.id))
   }
 }
 
-function buildListsPanel(calendarId) {
-  const lists = getListsForCalendar(calendarId)
-
-  const wrap = document.createElement('div')
-  wrap.className = 'cal-lists-panel'
-  wrap.dataset.calId = calendarId
-
-  const items = document.createElement('div')
-  items.className = 'cal-lists-items'
-  for (const list of lists) items.appendChild(buildListRow(list))
-
-  const addRow = document.createElement('div')
-  addRow.className = 'cal-lists-add-row'
-
-  const inp = document.createElement('input')
-  inp.type = 'text'
-  inp.className = 'cal-list-add-input'
-  inp.placeholder = 'New list…'
-
-  const addBtn = document.createElement('button')
-  addBtn.className = 'cal-list-add-btn'
-  addBtn.textContent = '+'
-
-  const doAdd = async () => {
-    const name = inp.value.trim()
-    if (!name) return
-    const token = await getToken()
-    if (!token) return
-    const all   = getListsForCalendar(calendarId)
-    const order = all.length ? Math.max(...all.map(l => l.order ?? 0)) + 10 : 0
-    const list  = await createList(token, calendarId, name, order)
-    inp.value   = ''
-    items.appendChild(buildListRow(list))
-  }
-  addBtn.addEventListener('click', doAdd)
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd() })
-
-  addRow.append(inp, addBtn)
-  wrap.append(items, addRow, buildMigrateSection(calendarId))
-  return wrap
-}
-
-function buildMigrateSection(calendarId) {
-  const section = document.createElement('div')
-  section.className = 'cal-migrate-section'
-
-  const btn = document.createElement('button')
-  btn.className   = 'cal-migrate-btn'
-  btn.textContent = 'Import Google Tasks →'
-  btn.title       = 'Migrate active Google Tasks into this calendar (tasks are marked complete in GT and auto-deleted by Google after 30 days)'
-
-  const status = document.createElement('div')
-  status.className = 'cal-migrate-status'
-  status.hidden    = true
-
-  btn.addEventListener('click', async () => {
-    if (!confirm(
-      'Migrate all active Google Tasks to this calendar?\n\n' +
-      'Each task will be imported as a calendar event. ' +
-      'The originals will be marked complete in Google Tasks (auto-deleted by Google after 30 days).'
-    )) return
-
-    btn.disabled  = true
-    status.hidden = false
-    status.textContent = 'Migrating…'
-
-    try {
-      const token = await getToken()
-      if (!token) { btn.disabled = false; return }
-
-      const result = await runMigration(token, ({ migrated, failed, total }) => {
-        status.textContent = `Migrating… ${migrated + failed}/${total}`
-      })
-
-      const parts = [`${result.migrated} imported`]
-      if (result.failed)  parts.push(`${result.failed} failed`)
-      if (result.skipped) parts.push(`${result.skipped} skipped`)
-      status.textContent = `Done — ${parts.join(', ')}`
-
-      if (result.migrated > 0) loadBoardData()
-    } catch (err) {
-      console.error('Migration failed:', err)
-      status.textContent = `Error: ${err.message}`
-      btn.disabled = false
-    }
-  })
-
-  section.append(btn, status)
-  return section
-}
-
-function buildListRow(list) {
-  const row = document.createElement('div')
-  row.className = 'cal-list-row'
-
-  const nameEl = document.createElement('span')
-  nameEl.className = 'cal-list-name'
-  nameEl.textContent = list.name
-
-  const renameBtn = document.createElement('button')
-  renameBtn.className = 'cal-list-btn'
-  renameBtn.title = 'Rename'
-  renameBtn.textContent = '✎'
-  renameBtn.addEventListener('click', () => {
-    const field = document.createElement('input')
-    field.type = 'text'
-    field.className = 'cal-list-rename-input'
-    field.value = nameEl.textContent
-    nameEl.replaceWith(field)
-    renameBtn.disabled = true
-    field.focus(); field.select()
-
-    const commit = async () => {
-      const val = field.value.trim() || nameEl.textContent
-      if (val !== nameEl.textContent) {
-        const token = await getToken()
-        if (token) await updateList(token, list.id, { name: val })
-      }
-      nameEl.textContent = val
-      field.replaceWith(nameEl)
-      renameBtn.disabled = false
-    }
-    field.addEventListener('blur', commit)
-    field.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  { e.preventDefault(); field.blur() }
-      if (e.key === 'Escape') { field.value = nameEl.textContent; field.blur() }
-    })
-  })
-
-  const delBtn = document.createElement('button')
-  delBtn.className = 'cal-list-btn'
-  delBtn.title = 'Delete'
-  delBtn.textContent = '×'
-  delBtn.addEventListener('click', async () => {
-    if (!confirm(`Delete "${nameEl.textContent}"?`)) return
-    const token = await getToken()
-    if (!token) return
-    await deleteList(token, list.id)
-    row.remove()
-  })
-
-  row.append(nameEl, renameBtn, delBtn)
-  return row
-}
 
 // Toggle all-day between top-3 cap and show-all
 document.getElementById('btn-allday-toggle').addEventListener('click', () => {
@@ -1221,6 +1148,46 @@ async function runSweepIfConfigured() {
 }
 
 // Open the Configure Kairos dialog (default intake list + Google Task Sweep).
+// Tag manager (in Configure Kairos): recolor or delete tags, grouped by calendar.
+function renderTagManager() {
+  const wrap = document.getElementById('tag-manager')
+  if (!wrap) return
+  wrap.innerHTML = ''
+  let any = false
+  for (const calId of getTaskCalendars()) {
+    const palette = getTagPalette(calId)
+    const names   = Object.keys(palette).sort((a, b) => a.localeCompare(b))
+    if (!names.length) continue
+    any = true
+    const calLbl = el('div', 'tag-mgr-cal')
+    calLbl.textContent = state.calendars.find(c => c.id === calId)?.summary ?? calId
+    wrap.appendChild(calLbl)
+    for (const name of names) {
+      const row   = el('div', 'tag-mgr-row')
+      const color = el('input', 'tag-mgr-color'); color.type = 'color'; color.value = palette[name]
+      color.addEventListener('change', async () => setTagColor(await getToken(), calId, name, color.value).catch(console.warn))
+      const label = el('span', 'tag-mgr-name'); label.textContent = name
+      const del   = el('button', 'tag-mgr-del'); del.textContent = '×'; del.title = 'Delete tag'
+      del.addEventListener('click', async () => {
+        if (!confirm(`Delete tag "${name}"? It will be removed from the palette and from loaded items on this calendar.`)) return
+        const token = await getToken(); if (!token) return
+        await removeTagFromPalette(token, calId, name).catch(console.warn)
+        // Untag loaded items (board + calendar) on this calendar.
+        for (const item of [...state.boardItems, ...state.items]) {
+          if (item.source.account_id !== calId || !item.metadata?.tags?.includes(name)) continue
+          const nt = item.metadata.tags.filter(t => t !== name)
+          await patchTaskProps(token, calId, item.source.external_id, { tags: encodeTags(nt) }).catch(console.warn)
+          item.metadata.tags = nt
+        }
+        renderTagManager()
+      })
+      row.append(color, label, del)
+      wrap.appendChild(row)
+    }
+  }
+  if (!any) { const e = el('div', 'sweep-section-hint'); e.textContent = 'No tags yet.'; wrap.appendChild(e) }
+}
+
 async function openConfigDialog() {
   const dialog   = document.getElementById('sweep-dialog')
   const container = document.getElementById('sweep-sources-container')
@@ -1232,6 +1199,7 @@ async function openConfigDialog() {
 
   dialog.hidden = false
   status.textContent = ''
+  renderTagManager()
 
   // Populate default intake status dropdown — statuses across all task calendars,
   // each labelled with its calendar to disambiguate same-named statuses.
@@ -1739,6 +1707,7 @@ function renderItems(items) {
         })
       }
 
+      { const d = _tagDots(item); if (d) chipEl.appendChild(d) }
       container.appendChild(chipEl)
     }
 
@@ -1884,6 +1853,7 @@ function renderItems(items) {
           el.appendChild(handle)
         }
       }
+      { const d = _tagDots(item); if (d) el.appendChild(d) }
       dayCol.appendChild(el)
     }
   }
@@ -2043,6 +2013,7 @@ function renderMobileDay() {
     chip.addEventListener('click', () => {
       openEditorForEdit(item, calendarModalCallbacks())
     })
+    { const d = _tagDots(item); if (d) chip.appendChild(d) }
     allDayContainer.appendChild(chip)
   }
 
@@ -2173,6 +2144,7 @@ function renderMobileDay() {
         openEditorForEdit(item, calendarModalCallbacks())
       })
     }
+    { const d = _tagDots(item); if (d) eventEl.appendChild(d) }
     col.appendChild(eventEl)
   }
 
@@ -2354,8 +2326,10 @@ async function render() {
           state.taskCalendars   = new Set(getTaskCalendars())
         }) : null),
         getToken().then(t => t ? loadLists(t) : null),
-        getToken().then(t => t ? loadStatuses(t) : null),
       ])
+      // Config events (statuses + tag palette) need the task-calendar list, so
+      // after prefs. Cosmetic for the calendar (in-progress ring), so non-blocking.
+      getToken().then(t => t ? loadStatusConfig(t).then(() => { renderItems(getVisibleItems()); renderFilterBar() }) : null).catch(console.warn)
       ensureVisibilityReady()
       renderVisibilityPill()
       state.items = items
@@ -2403,6 +2377,31 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
 // View toggle
 document.getElementById('view-select').addEventListener('change', e => setView(e.target.value))
 populateViewSelect()
+
+// Filter bar
+document.getElementById('filter-input').addEventListener('input', e => {
+  state.filter.text = e.target.value
+  document.getElementById('filter-clear').hidden = !(state.filter.text || state.filter.tags.length)
+  applyFilter()
+})
+document.getElementById('filter-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return
+  const val = e.target.value.trim()
+  const match = getAllTagNames().find(n => n.toLowerCase() === val.toLowerCase())
+  if (match && !state.filter.tags.includes(match)) {
+    state.filter.tags.push(match)
+    state.filter.text = ''
+    e.target.value = ''
+    renderFilterBar()
+    applyFilter()
+  }
+})
+document.getElementById('filter-clear').addEventListener('click', () => {
+  state.filter = { text: '', tags: [] }
+  document.getElementById('filter-input').value = ''
+  renderFilterBar()
+  applyFilter()
+})
 
 // Board / list project-calendar selector
 document.getElementById('board-calendar-select').addEventListener('change', e => {

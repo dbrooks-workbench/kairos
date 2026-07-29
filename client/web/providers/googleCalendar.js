@@ -3,6 +3,7 @@ import { loadPrefs, getTaskCalendars } from './kairosPrefs.js'
 import { loadCompletionStore, getCompletedAt } from './completionStore.js'
 import { loadLifeLog, getItemLog } from './lifeLog.js'
 import { getTaskEvents } from './calendarTasks.js'
+import { decodeTags } from './tagCodec.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -86,6 +87,7 @@ function normalizeEvent(event, calendar) {
       recurringEventId: event.recurringEventId ?? null,
       location: event.location ?? null,
       task_calendar: isTaskCal,
+      tags: decodeTags(event.extendedProperties?.private?.tags),
     },
     color: event.colorId ? resolveColor(event.colorId) : (calendar.backgroundColor ?? null),
     editable: event.organizer?.self === true,

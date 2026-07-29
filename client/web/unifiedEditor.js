@@ -12,8 +12,8 @@ import {
 } from './providers/calendarTasks.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
-import { getListsForCalendar } from './providers/kairosLists.js'
-import { getStatusesForCalendar } from './providers/kairosStatuses.js'
+import { getStatusesForCalendar, getStatus, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
+import { encodeTags } from './providers/tagCodec.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
@@ -22,6 +22,7 @@ import { openSnoozePopover } from './board.js'
 
 let _mode          = 'event'   // 'event' | 'task' | 'reminder'
 let _originalMode  = null      // mode the item was opened as (to detect type conversions)
+let _tags          = []        // tag names currently on the item being edited
 let _editItem      = null      // null = create mode
 let _callbacks     = {}
 let _kairosId           = null   // task mode: stable ID (null until first save)
@@ -474,7 +475,6 @@ function _setMode(mode, { locked = false } = {}) {
   el('ue-mode-reminder').disabled = locked
   el('ue-title').placeholder   = mode === 'reminder' ? 'Reminder…' : mode === 'task' ? 'Task title…' : 'Event title…'
   // Reminders carry no list/status/deadline/LOE — just a title, a when, and done.
-  el('ue-list-row').hidden     = mode !== 'task'
   el('ue-status-row').hidden   = mode !== 'task'
   el('ue-due-row').hidden      = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
@@ -522,21 +522,8 @@ async function _populateCalendars(preferredId, preloaded) {
     .join('')
   if (preferredId) sel.value = preferredId
 
-  // Populate list + status dropdowns after calendar is known (task mode only)
-  if (_mode === 'task') {
-    _populateList(_editItem?.metadata?.listId ?? null)
-    _populateStatus(_editItem?.metadata?.statusId ?? null)
-  }
-}
-
-function _populateList(preferredListId) {
-  const calId = el('ue-calendar').value
-  if (!calId) return
-  const lists = getListsForCalendar(calId)
-  const sel   = el('ue-list')
-  sel.innerHTML = '<option value="">— No list —</option>'
-    + lists.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
-  if (preferredListId) sel.value = preferredListId
+  // Populate the status dropdown after calendar is known (task mode only)
+  if (_mode === 'task') _populateStatus(_editItem?.metadata?.statusId ?? null)
 }
 
 function _populateStatus(preferredStatusId) {
@@ -547,6 +534,42 @@ function _populateStatus(preferredStatusId) {
   sel.innerHTML = '<option value="">— No status —</option>'
     + statuses.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')
   if (preferredStatusId) sel.value = preferredStatusId
+}
+
+// ── Tags (all item types) ─────────────────────────────────────────────────────
+function _renderTags() {
+  const calId = el('ue-calendar').value
+  const chips = el('ue-tags-chips')
+  chips.innerHTML = ''
+  for (const name of _tags) {
+    const chip = document.createElement('span')
+    chip.className = 'ue-tag-chip'
+    chip.style.background = getTagColor(calId, name)
+    chip.textContent = name
+    const x = document.createElement('button')
+    x.type = 'button'; x.className = 'ue-tag-remove'; x.textContent = '×'
+    x.title = 'Remove tag'
+    x.addEventListener('click', () => _removeTag(name))
+    chip.appendChild(x)
+    chips.appendChild(chip)
+  }
+  // Typeahead suggestions from this calendar's palette (minus already-applied tags).
+  el('ue-tags-datalist').innerHTML = getPaletteTagNames(calId)
+    .filter(n => !_tags.includes(n))
+    .map(n => `<option value="${esc(n)}"></option>`).join('')
+}
+
+function _addTag(raw) {
+  const name = (raw ?? '').trim()
+  if (!name || _tags.includes(name)) return
+  _tags.push(name)
+  el('ue-tags-input').value = ''
+  _renderTags()
+}
+
+function _removeTag(name) {
+  _tags = _tags.filter(t => t !== name)
+  _renderTags()
 }
 
 // ── Webhook token (task mode) ─────────────────────────────────────────────────
@@ -629,7 +652,12 @@ export function initEditor() {
     _preserveRrule = null
   })
   el('ue-calendar').addEventListener('change', () => {
-    if (_mode === 'task') { _populateList(); _populateStatus() }
+    if (_mode === 'task') _populateStatus()
+    _renderTags()   // palette colours + suggestions are per-calendar
+  })
+
+  el('ue-tags-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); _addTag(e.target.value) }
   })
 
   // Location URL link
@@ -719,6 +747,7 @@ export async function openEditor(opts = {}, callbacks = {}) {
   el('ue-recur').value       = ''
   el('ue-loe').value         = ''
   el('ue-due-date').value    = opts.dueDate ?? ''
+  _tags = [...(opts.tags ?? [])]
   el('ue-loe-error').hidden  = true
   el('ue-comment-input').value = ''
   el('custom-recur-panel').hidden = true
@@ -736,9 +765,9 @@ export async function openEditor(opts = {}, callbacks = {}) {
   _resetCustomRecur(today)
   await _populateCalendars(opts.calendarId ?? (mode === 'task' ? getTaskCalendars()[0] : null), opts.calendars ?? null)
   // List + status are populated (with blank option) inside _populateCalendars.
-  // Caller can request a specific list/status via opts.listId / opts.statusId.
-  if (mode === 'task' && opts.listId)   el('ue-list').value   = opts.listId
+  // Caller can request a specific status via opts.statusId.
   if (mode === 'task' && opts.statusId) el('ue-status').value = opts.statusId
+  _renderTags()
 
   el('unified-editor').hidden = false
   el('ue-title').focus()
@@ -785,6 +814,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   // The type can be changed in edit mode (converts on save). For recurring items a
   // type change applies to the whole series (see _save), so it's allowed too.
   _originalMode = mode
+  _tags = [...(item.metadata?.tags ?? [])]   // all item types carry tags
   _setMode(mode, { locked: false })
   _setAllDayUI(allDay)
   el('ue-allday').checked    = allDay
@@ -856,6 +886,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
     _locLink.hidden = !/^https?:\/\//i.test(locVal)
     _locLink.href   = locVal
   }
+  _renderTags()
 
   el('unified-editor').hidden = false
   el('ue-title').focus()
@@ -969,10 +1000,10 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  // Reminders have neither list, status, nor a separate deadline.
-  const listId    = isReminder ? null : (el('ue-list').value     || null)
-  const statusId  = isReminder ? null : (el('ue-status').value   || null)
-  const dueDate   = isReminder ? null : (el('ue-due-date').value || null)
+  // Reminders have neither status nor a separate deadline.
+  const statusId   = isReminder ? null : (el('ue-status').value   || null)
+  const statusName = statusId ? (getStatus(statusId)?.name ?? null) : null   // recovery backup
+  const dueDate    = isReminder ? null : (el('ue-due-date').value || null)
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -1007,8 +1038,9 @@ async function _saveTask(title) {
     title,
     body,
     kairosId,
-    listId,
     statusId,
+    statusName,
+    tags:         _tags,
     dueDate,
     isReminder,
     order:        _editItem?.metadata?.order ?? Date.now(),
@@ -1029,6 +1061,7 @@ async function _saveTask(title) {
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
+  ensureTags(token, calId, _tags).catch(console.warn)   // add new tags to the palette
 
   if (!_editItem) {
     await createTask(token, calId, taskData)
@@ -1102,18 +1135,21 @@ async function _saveEvent(title) {
   else if (_editItem && !freq && _editItem.recurrence)
     body.recurrence = []   // only clear if item was originally recurring
 
+  // Tags apply to events too.
+  body.extendedProperties = { private: { tags: encodeTags(_tags) } }
   // Converting a task/reminder → event: strip the task markers (and completion
   // prefix/footer, handled by summary/description above) so it becomes a plain event.
   if (_editItem?.item_type === 'TASK') {
-    body.extendedProperties = { private: {
+    Object.assign(body.extendedProperties.private, {
       isTask:  null, isReminder: null, kairosId: null,
-      listId:  null, statusId:   null, dueDate:  null, loe: null,
+      listId:  null, statusId:   null, statusName: null, dueDate: null, loe: null,
       order:   null, noDate:     null, unprocessed: null, completedAt: null,
-    } }
+    })
   }
 
   const token = await getToken()
   if (!token) { el('ue-save').disabled = false; return }
+  ensureTags(token, calId, _tags).catch(console.warn)   // add new tags to the palette
 
   if (_editItem?.metadata?.recurringEventId) {
     // A type conversion applies to the whole series — skip the scope prompt.
