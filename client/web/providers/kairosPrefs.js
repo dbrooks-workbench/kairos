@@ -26,6 +26,7 @@ const DEFAULTS = () => ({
   projectCalendarId:   null, // calendar the board + list views are scoped to (the active "project")
   visibilityStart:     null, // custom visibility-window start 'YYYY-MM-DD' (null = default: today-14d)
   visibilityEnd:       null, // custom visibility-window end   'YYYY-MM-DD' (null = default: today+14d)
+  maxWindowDays:       180,  // cap on the effective visibility span; browsing past it truncates the trailing end
   listsMigrated:       false, // one-time: legacy listId -> tag migration has run
 })
 
@@ -80,6 +81,7 @@ export function getIntakeStatusId()     { return _prefs?.intakeStatusId      ?? 
 export function getProjectCalendarId()  { return _prefs?.projectCalendarId   ?? null }
 export function getVisibilityStart()    { return _prefs?.visibilityStart     ?? null }
 export function getVisibilityEnd()      { return _prefs?.visibilityEnd       ?? null }
+export function getMaxWindowDays()      { return _prefs?.maxWindowDays       ?? 180 }
 export function getListsMigrated()      { return _prefs?.listsMigrated       ?? false }
 export function setListsMigrated(v) { if (_prefs) { _prefs.listsMigrated = !!v; _dirty = true; _scheduleSave() } }
 

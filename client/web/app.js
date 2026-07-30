@@ -2,7 +2,7 @@ import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount
 import { processSpawnDirectives } from './spawn.js'
 import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
-import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
+import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getMaxWindowDays, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
 import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
 import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags, getTagPalette, setTagColor, removeTagFromPalette } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.8'
+const VERSION   = '0.32.9'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -155,13 +155,32 @@ function ensureVisibilityReady() {
 
 // Widen the effective window to cover [from, to). Session-only. Returns true if
 // the window actually grew (so callers can refresh dependent views).
+//
+// The span is capped at getMaxWindowDays() (default 180). When browsing pushes
+// the window past the cap, we infer the shift direction from which end moved and
+// truncate the *other* (trailing) end — so the window slides with you rather than
+// growing without bound.
 function expandVisibility(from, to) {
   if (!state.visibility) initVisibility()
   const w = state.visibility
+  const prevStart = w.start.getTime(), prevEnd = w.end.getTime()
   let changed = false
   if (from < w.start) { w.start = new Date(from); changed = true }
   if (to   > w.end)   { w.end   = new Date(to);   changed = true }
-  return changed
+  if (!changed) return false
+
+  const DAY_MS = 86400000
+  const maxMs  = getMaxWindowDays() * DAY_MS
+  if (w.end.getTime() - w.start.getTime() > maxMs) {
+    const movedEnd   = w.end.getTime()   > prevEnd
+    const movedStart = w.start.getTime() < prevStart
+    // Shifting forward (end grew) → drop the old past bound; shifting back
+    // (start grew) → drop the future bound. If both moved (e.g. a jump), keep
+    // the forward end as the anchor.
+    if (movedStart && !movedEnd) w.end   = new Date(w.start.getTime() + maxMs)
+    else                         w.start = new Date(w.end.getTime()   - maxMs)
+  }
+  return true
 }
 
 // Keep the effective window a rolling buffer around the viewed week: always
