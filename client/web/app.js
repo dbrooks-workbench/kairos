@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.34.0'
+const VERSION   = '0.34.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -604,11 +604,11 @@ function calendarModalCallbacks() {
 
 const WORK_VIEWS = ['board', 'reminders']
 
-// Deep-link routing: each view has a URL path (Board lives at /events; /board is
-// accepted as an alias). The SPA fallback (_redirects) serves index.html for these
-// so they're bookmarkable and reload-safe.
-const VIEW_PATH = { calendar: '/calendar', board: '/events', reminders: '/reminders' }
-const PATH_VIEW = { '/calendar': 'calendar', '/events': 'board', '/board': 'board', '/reminders': 'reminders' }
+// Deep-link routing: each view has a URL path (the task Board lives at /board;
+// /tasks is accepted as a synonym). The SPA fallback (_redirects) serves
+// index.html for these so they're bookmarkable and reload-safe.
+const VIEW_PATH = { calendar: '/calendar', board: '/board', reminders: '/reminders' }
+const PATH_VIEW = { '/calendar': 'calendar', '/board': 'board', '/tasks': 'board', '/reminders': 'reminders' }
 
 // The view implied by the current URL path, or null if the path isn't a view.
 function _viewFromPath() {
