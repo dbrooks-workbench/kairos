@@ -52,6 +52,9 @@ export async function getCalendars(token) {
 function normalizeEvent(event, calendar) {
   // Task events are owned by calendarTasks.js; skip them here to avoid duplication.
   if (event.extendedProperties?.private?.isTask === 'true') return null
+  // The per-calendar Kairos config lives in a hidden all-day event at 1970 — never
+  // surface it as a calendar item.
+  if (event.extendedProperties?.private?.kairosConfig === 'true') return null
 
   const allDay = !!event.start?.date
   const start = allDay

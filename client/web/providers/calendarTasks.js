@@ -429,7 +429,11 @@ export async function getAllTaskEvents(token, calendarId, window = null) {
     return true
   })
 
-  return [...tagged, ...untagged].map(e => normalizeTask(e, calendarId))
+  // The per-calendar Kairos config event lives at the undated sentinel (1970) and
+  // would otherwise normalize into an undated Intake card — drop it here.
+  return [...tagged, ...untagged]
+    .filter(e => e.extendedProperties?.private?.kairosConfig !== 'true')
+    .map(e => normalizeTask(e, calendarId))
 }
 
 // Global one-time backfill: fetches all task MASTER events (not instances) across
@@ -456,6 +460,7 @@ export async function ensureAllFooters(token, calendarIds) {
     })).catch(err => { console.warn('[ensureAllFooters] native fetch failed:', calId, err.message); return [] })
     const native = raw
       .filter(e => e.extendedProperties?.private?.isTask !== 'true')
+      .filter(e => e.extendedProperties?.private?.kairosConfig !== 'true')
       .map(e => _normalizeNativeEvent(e, calId))
       .filter(Boolean)
     items.push(...native)
