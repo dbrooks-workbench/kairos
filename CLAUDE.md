@@ -237,7 +237,8 @@ A **reminder** is a lightweight sub-type of task (`isReminder` extendedProperty)
 A date window (default `[today − 14d, today + 14d]`) that bounds the aggregate views and the calendar roll-forward, keeping load in check. Session state in `state.visibility`; a custom window persists in prefs (`visibilityStart`/`visibilityEnd`), and "Use default" reverts to the relative default.
 
 - **Board / List / Reminders**: fetch *and* display are bounded to the window (`getAllTaskEvents(token, cal, window)` — recurring tasks expand only in-window; undated tasks always included/shown).
-- **Calendar**: navigation is free, but browsing to a week outside the window **widens** it for the session (never shifts — today stays the anchor), keeping the other views in sync and re-running the roll-forward against the wider past bound.
+- **Calendar**: navigation is free, but browsing **rolls the window as a ±14-day buffer around the viewed week** (`syncVisibilityToWeek`) — each week step pushes the leading bound out another 7 days *ahead* of you (not only when you hit the edge), keeping the other views in sync and re-running the roll-forward against the wider past bound.
+- **Max span (slide, don't grow)**: the span is capped at `getMaxWindowDays()` (pref `maxWindowDays`, default **180**). Once a widen would exceed the cap, `expandVisibility` infers the shift direction from which end moved vs the previous window and truncates the *trailing* end — browsing forward drops the old past bound, browsing back drops the future bound — so the window slides with you at a fixed six-month span rather than growing without bound. (An explicitly-set custom window larger than the cap isn't truncated until you browse past its edge.)
 - **Roll-forward** uses the window's past bound (replaced the old fixed 30-day lookback).
 - **Header**: a pill shows the window (e.g. `Jul 14 – Aug 11`) and opens a set/reset dialog.
 
