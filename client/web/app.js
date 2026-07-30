@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.33.2'
+const VERSION   = '0.34.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -604,7 +604,27 @@ function calendarModalCallbacks() {
 
 const WORK_VIEWS = ['board', 'reminders']
 
-function setView(v) {
+// Deep-link routing: each view has a URL path (Board lives at /events; /board is
+// accepted as an alias). The SPA fallback (_redirects) serves index.html for these
+// so they're bookmarkable and reload-safe.
+const VIEW_PATH = { calendar: '/calendar', board: '/events', reminders: '/reminders' }
+const PATH_VIEW = { '/calendar': 'calendar', '/events': 'board', '/board': 'board', '/reminders': 'reminders' }
+
+// The view implied by the current URL path, or null if the path isn't a view.
+function _viewFromPath() {
+  return PATH_VIEW[(window.location.pathname.replace(/\/+$/, '') || '/')] ?? null
+}
+
+// Reflect the active view in the address bar (preserving query/hash).
+function _syncUrlToView(v, replace = false) {
+  const path = VIEW_PATH[v] ?? '/calendar'
+  if (window.location.pathname === path) return
+  const url = path + window.location.search + window.location.hash
+  if (replace) history.replaceState({ view: v }, '', url)
+  else         history.pushState({ view: v }, '', url)
+}
+
+function setView(v, { updateUrl = true, replace = false } = {}) {
   state.view = v
   const isWork = WORK_VIEWS.includes(v)
   document.getElementById('calendar').hidden      = v !== 'calendar'
@@ -614,6 +634,7 @@ function setView(v) {
   if (v !== 'board') destroyBoard()
   _syncViewSwitchActive()
   _syncProjectSelectorVisibility()
+  if (updateUrl) _syncUrlToView(v, replace)
 
   renderVisibilityPill()
   renderFilterBar()
@@ -626,6 +647,18 @@ function setView(v) {
     startPolling(120_000)
   }
 }
+
+// Resolve a target view against availability: work views require a task calendar,
+// otherwise fall back to the calendar.
+function _availableView(v) {
+  return (WORK_VIEWS.includes(v) && getTaskCalendars().length === 0) ? 'calendar' : v
+}
+
+// Back/forward between deep-linked views.
+window.addEventListener('popstate', () => {
+  const target = _availableView(_viewFromPath() ?? 'calendar')
+  if (target !== state.view) setView(target, { updateUrl: false })
+})
 
 // Inline SVG icons for the view switcher (stroke = currentColor via CSS).
 const VIEW_DEFS = [
@@ -2561,6 +2594,13 @@ document.getElementById('sweep-dialog').addEventListener('click', e => {
 })
 
 render().then(async () => {
+  // Deep-link routing: switch to the view named by the URL path (prefs/task
+  // calendars are loaded by now, so availability is known). Canonicalize the
+  // root to /calendar so the address bar always names the current view.
+  const _initialView = _availableView(_viewFromPath() ?? 'calendar')
+  if (_initialView !== 'calendar') setView(_initialView, { replace: true })
+  else                             _syncUrlToView('calendar', true)
+
   // #timed-scroll is a flex column container; scrollTop = M shows timed-area
   // minute M at the top of the visible area below the sticky header.
   // No pinnedTop.offsetHeight offset needed — that caused the indicator to land
