@@ -1436,6 +1436,29 @@ body.resize-active * { cursor: ns-resize !important; }
   font-style: italic;
 }
 
+/* Intake column — the lowest-order status, where new/swept/status-less tasks
+   land. Subtle tint + a leading tray icon mark it regardless of its name. */
+.board-col-intake {
+  background: #e8f0fe;
+  box-shadow: inset 0 0 0 1px rgba(26, 115, 232, 0.25);
+}
+.board-col-intake-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--today-color);
+}
+.board-col-intake-badge svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Ghost placeholder while dragging a column */
 .board-col-ghost { opacity: 0.4; }
 

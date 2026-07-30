@@ -245,9 +245,10 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
     }
   }
 
+  const intakeStatusId = _statuses[0]?.id ?? null   // lowest-order = the intake column
   for (const status of _statuses) {
     const colItems = sortedItems(activeByStatus[status.id] ?? [], status.id)
-    const col      = buildCol(status, colItems, 'user', doneWindow)
+    const col      = buildCol(status, colItems, 'user', doneWindow, status.id === intakeStatusId)
     board.appendChild(col)
     _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
       group:      'tasks',
@@ -288,12 +289,12 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
-function buildCol(status, items, colType, doneWindow) {
+function buildCol(status, items, colType, doneWindow, isIntake = false) {
   const isUser = colType === 'user'
   const isDone = colType === 'done'
 
   const col = document.createElement('div')
-  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}`
+  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}${isIntake ? ' board-col-intake' : ''}`
   if (isUser) col.dataset.statusId = status.id
 
   const hdr = document.createElement('div')
@@ -305,6 +306,18 @@ function buildCol(status, items, colType, doneWindow) {
     dragHandle.textContent = '⠿'
     dragHandle.title       = 'Drag to reorder'
     hdr.appendChild(dragHandle)
+  }
+
+  // Intake badge — this (lowest-order) column is where new, swept, and
+  // status-less tasks land. A leading icon clarifies the role regardless of the
+  // column's name.
+  if (isIntake) {
+    const badge = document.createElement('span')
+    badge.className = 'board-col-intake-badge'
+    badge.title     = 'Intake — new, swept, and status-less tasks land here'
+    badge.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+      + '<path d="M3 12h5l2 3h4l2-3h5"/><path d="M5 5h14v14H5z"/></svg>'
+    hdr.appendChild(badge)
   }
 
   const titleEl = document.createElement('span')
