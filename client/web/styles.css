@@ -2814,6 +2814,11 @@ body.resize-active * { cursor: ns-resize !important; }
 /* Recur icon must not steal flex space from the title span */
 .mobile-allday-chip.type-task .task-recur-icon { flex: none; }
 
+/* Tag dots must not inherit the blanket `span { flex: 1 }` above, or they
+   stretch into a wide oval (same fix as the desktop all-day chip). */
+.mobile-allday-chip.type-task .cal-tag-dots,
+.mobile-allday-chip.type-task .cal-tag-dot { flex: none; }
+
 /* Completed state — matches desktop .allday-event.completed */
 .mobile-allday-chip.completed {
   background: transparent !important;
