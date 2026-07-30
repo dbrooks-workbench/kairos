@@ -12,7 +12,7 @@ import {
 } from './providers/calendarTasks.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
-import { getStatusesForCalendar, getStatus, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
+import { getStatusesForCalendar, getStatus, getDefaultStatusId, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
 import { getTaskCalendars } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
@@ -531,9 +531,10 @@ function _populateStatus(preferredStatusId) {
   if (!calId) return
   const statuses = getStatusesForCalendar(calId)
   const sel      = el('ue-status')
-  sel.innerHTML = '<option value="">— No status —</option>'
-    + statuses.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')
-  if (preferredStatusId) sel.value = preferredStatusId
+  // Tasks always carry a status — no "none" option; new tasks default to the
+  // calendar's intake (first) status.
+  sel.innerHTML = statuses.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')
+  sel.value = preferredStatusId ?? getDefaultStatusId(calId) ?? ''
 }
 
 // ── Tags (all item types) ─────────────────────────────────────────────────────
@@ -1000,8 +1001,9 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  // Reminders have neither status nor a separate deadline.
-  const statusId   = isReminder ? null : (el('ue-status').value   || null)
+  // Reminders have neither status nor a separate deadline. Every non-reminder
+  // task must carry a status — fall back to the calendar's intake status.
+  const statusId   = isReminder ? null : (el('ue-status').value || getDefaultStatusId(calId))
   const statusName = statusId ? (getStatus(statusId)?.name ?? null) : null   // recovery backup
   const dueDate    = isReminder ? null : (el('ue-due-date').value || null)
   const allDay    = el('ue-allday').checked

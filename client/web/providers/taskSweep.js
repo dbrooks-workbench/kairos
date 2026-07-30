@@ -23,7 +23,16 @@ async function _gtFetch(token, url, options = {}) {
       ...options.headers,
     },
   })
-  if (!res.ok) throw new Error(`GT ${res.status}: ${res.statusText}`)
+  if (!res.ok) {
+    // Surface Google's actual reason (e.g. "insufficient authentication scopes",
+    // "Tasks API has not been used…") — a bare status hides why the sweep failed.
+    let reason = res.statusText || ''
+    try {
+      const body = await res.json()
+      reason = body?.error?.message || body?.error?.errors?.[0]?.message || reason
+    } catch { /* non-JSON body */ }
+    throw new Error(`Google Tasks ${res.status}${reason ? `: ${reason}` : ''}`)
+  }
   return res.status === 204 ? null : res.json()
 }
 

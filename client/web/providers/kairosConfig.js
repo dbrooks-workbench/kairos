@@ -148,6 +148,13 @@ export function getStatusesForCalendar(calendarId) {
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
+// The default "intake" status for a calendar: its lowest-order status (the first
+// board column, seeded as "Intake"). Used so every task gets a status even when
+// the user doesn't pick one. Returns null if the calendar has no statuses yet.
+export function getDefaultStatusId(calendarId) {
+  return getStatusesForCalendar(calendarId)[0]?.id ?? null
+}
+
 export function getStatus(statusId) {
   for (const [calendarId, c] of Object.entries(_config)) {
     if (c.statuses[statusId]) return { id: statusId, calendarId, ...c.statuses[statusId] }

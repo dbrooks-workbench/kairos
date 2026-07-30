@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.33.0'
+const VERSION   = '0.33.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1314,8 +1314,18 @@ async function openConfigDialog() {
         row.appendChild(document.createTextNode(list.title ?? list.id))
         group.appendChild(row)
       }
-    }).catch(() => {
-      loadingEl.textContent = 'Failed to load lists'
+    }).catch(err => {
+      console.warn(`[sweep] GT list load failed for ${account.email ?? account.id}:`, err)
+      loadingEl.textContent = `Couldn't load lists — ${err.message || err}`
+      // Missing scope on an account connected before Tasks access was granted:
+      // offer a one-click reconnect that re-runs consent for this account.
+      if (/\b40[13]\b/.test(err.message || '') || /scope/i.test(err.message || '')) {
+        const btn = document.createElement('button')
+        btn.className   = 'sweep-reconnect-btn'
+        btn.textContent = 'Reconnect account'
+        btn.onclick     = () => addAccount()
+        group.appendChild(btn)
+      }
     })
   }
 

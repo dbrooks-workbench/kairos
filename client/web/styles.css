@@ -343,6 +343,18 @@ body {
   font-style: italic;
 }
 
+.sweep-reconnect-btn {
+  margin: 2px 0 4px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--today-color);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--today-color);
+  cursor: pointer;
+}
+.sweep-reconnect-btn:hover { background: var(--today-color); color: #fff; }
+
 .sweep-panel-footer {
   display: flex;
   align-items: center;
