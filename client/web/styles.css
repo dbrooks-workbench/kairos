@@ -1615,15 +1615,42 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 .visibility-pill:hover { color: var(--text); border-color: var(--today-color); }
 
-/* Header view selector (Calendar / Board / List / Reminders) */
-.view-select {
-  font-size: 13px;
-  padding: 4px 8px;
+/* Header view switcher — segmented icon buttons (Calendar / Board / Reminders) */
+.view-switch {
+  display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 6px;
+  overflow: hidden;
   background: var(--bg);
-  color: var(--text);
+}
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
+}
+.view-switch button:first-child { border-left: none; }
+.view-switch button:hover { background: #f0f0f0; color: var(--text); }
+.view-switch button.active {
+  background: var(--today-color);
+  color: #fff;
+}
+.view-switch svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Reminders view */

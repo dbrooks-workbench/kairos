@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.32.12'
+const VERSION   = '0.33.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -612,8 +612,7 @@ function setView(v) {
   document.getElementById('board').hidden         = v !== 'board'
   document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
-  const sel = document.getElementById('view-select')
-  if (sel && sel.value !== v) sel.value = v
+  _syncViewSwitchActive()
   _syncProjectSelectorVisibility()
 
   renderVisibilityPill()
@@ -628,17 +627,45 @@ function setView(v) {
   }
 }
 
-// The work views (board/list/reminders) only make sense with a task calendar.
-// Rebuild the view dropdown accordingly and fall back to the calendar if a work
-// view is active when the last task calendar is removed.
+// Inline SVG icons for the view switcher (stroke = currentColor via CSS).
+const VIEW_DEFS = [
+  ['calendar',  'Calendar',  '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>'],
+  ['board',     'Board',     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/>'],
+  ['reminders', 'Reminders', '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'],
+]
+
+// The work views (board/reminders) only make sense with a task calendar. Rebuild
+// the segmented switcher accordingly and fall back to the calendar if a work view
+// is active when the last task calendar is removed.
 function populateViewSelect() {
-  const sel = document.getElementById('view-select')
-  if (!sel) return
+  const wrap = document.getElementById('view-switch')
+  if (!wrap) return
   const hasTaskCals = getTaskCalendars().length > 0
-  const opts = [['calendar', 'Calendar']]
-  if (hasTaskCals) opts.push(['board', 'Board'], ['reminders', 'Reminders'])
-  sel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
-  sel.value = state.view
+  const views = hasTaskCals ? VIEW_DEFS : VIEW_DEFS.filter(([v]) => !WORK_VIEWS.includes(v))
+  wrap.innerHTML = ''
+  for (const [v, label, svg] of views) {
+    const btn = document.createElement('button')
+    btn.type          = 'button'
+    btn.dataset.view  = v
+    btn.title         = label
+    btn.setAttribute('role', 'tab')
+    btn.setAttribute('aria-label', label)
+    btn.innerHTML     = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>`
+    btn.addEventListener('click', () => setView(v))
+    wrap.appendChild(btn)
+  }
+  _syncViewSwitchActive()
+}
+
+// Reflect the active view on the switcher buttons (aria + highlight).
+function _syncViewSwitchActive() {
+  const wrap = document.getElementById('view-switch')
+  if (!wrap) return
+  for (const btn of wrap.children) {
+    const on = btn.dataset.view === state.view
+    btn.classList.toggle('active', on)
+    btn.setAttribute('aria-selected', on ? 'true' : 'false')
+  }
 }
 
 function updateWorkViewButtons() {
@@ -2406,8 +2433,7 @@ if (new URLSearchParams(window.location.search).get('auth_error')) {
   alert('Sign-in failed. Please try again.')
 }
 
-// View toggle
-document.getElementById('view-select').addEventListener('change', e => setView(e.target.value))
+// View switcher — buttons wire their own click handlers in populateViewSelect().
 populateViewSelect()
 
 // Filter bar
