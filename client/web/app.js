@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.35.1'
+const VERSION   = '0.35.2'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -666,9 +666,12 @@ const VIEW_DEFS = [
 function populateViewSelect() {
   const wrap = document.getElementById('view-switch')
   if (!wrap) return
+  // The active-project <select> lives inside the switcher (after the Board icon);
+  // rebuild only the buttons and keep the select in place as the last segment.
+  const sel = document.getElementById('board-calendar-select')
+  wrap.querySelectorAll('button').forEach(b => b.remove())
   const hasTaskCals = getTaskCalendars().length > 0
   const views = hasTaskCals ? VIEW_DEFS : VIEW_DEFS.filter(([v]) => !WORK_VIEWS.includes(v))
-  wrap.innerHTML = ''
   for (const [v, label, svg] of views) {
     const btn = document.createElement('button')
     btn.type          = 'button'
@@ -678,7 +681,7 @@ function populateViewSelect() {
     btn.setAttribute('aria-label', label)
     btn.innerHTML     = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>`
     btn.addEventListener('click', () => setView(v))
-    wrap.appendChild(btn)
+    wrap.insertBefore(btn, sel)   // buttons before the trailing select
   }
   _syncViewSwitchActive()
 }
@@ -687,7 +690,7 @@ function populateViewSelect() {
 function _syncViewSwitchActive() {
   const wrap = document.getElementById('view-switch')
   if (!wrap) return
-  for (const btn of wrap.children) {
+  for (const btn of wrap.querySelectorAll('button')) {
     const on = btn.dataset.view === state.view
     btn.classList.toggle('active', on)
     btn.setAttribute('aria-selected', on ? 'true' : 'false')
