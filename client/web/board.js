@@ -262,13 +262,9 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
     const colItems = sortedItems(activeByStatus[status.id] ?? [], status.id)
     const col      = buildCol(status, colItems, 'user', doneWindow, status.id === intakeStatusId)
     board.appendChild(col)
-    _sortables.push(Sortable.create(col.querySelector('.board-task-list'), {
-      group:      'tasks',
-      animation:  150,
-      ghostClass: 'board-ghost',
-      dragClass:  'board-dragging',
-      sort: colSortMode(status.id) !== 'date',
-      onEnd: handleDrop,
+    _sortables.push(_taskSortable(col.querySelector('.board-task-list'), {
+      dragClass: 'board-dragging',
+      sort:      colSortMode(status.id) !== 'date',
     }))
   }
 
@@ -288,13 +284,7 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
     if (!collapsed) {
       // Drop-target so a routine can be dragged to Done to complete it; sort:false
       // keeps it date-ordered and blocks in-column reordering.
-      _sortables.push(Sortable.create(recurCol.querySelector('.board-task-list'), {
-        group:      'tasks',
-        animation:  150,
-        ghostClass: 'board-ghost',
-        sort:       false,
-        onEnd:      handleDrop,
-      }))
+      _sortables.push(_taskSortable(recurCol.querySelector('.board-task-list'), { sort: false }))
     }
   }
 
@@ -305,22 +295,19 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
   )
   board.appendChild(doneCol)
   board.appendChild(buildAddStatusCol(callbacks))
-  if (!doneCollapsed) {
-    // Drop-target so dragging a card here completes it; skipped when collapsed.
-    _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
-      group:      'tasks',
-      animation:  150,
-      ghostClass: 'board-ghost',
-      onEnd: handleDrop,
-    }))
-  }
+  // Always a drop target — even collapsed, so a card can be dropped onto the strip
+  // to complete it without expanding.
+  _sortables.push(_taskSortable(doneCol.querySelector('.board-task-list')))
 
   _sortables.push(Sortable.create(board, {
-    animation:  150,
-    handle:     '.board-col-drag-handle',
-    draggable:  '.board-col-reorderable',
-    ghostClass: 'board-col-ghost',
-    onEnd: handleColReorder,
+    animation:      150,
+    handle:         '.board-col-drag-handle',
+    draggable:      '.board-col-reorderable',
+    ghostClass:     'board-col-ghost',
+    forceFallback:  true,
+    fallbackOnBody: true,
+    onStart:        _onDragStart,
+    onEnd:          handleColReorder,
   }))
 
   document.querySelectorAll('.board-task-list[data-status-id]').forEach(el => {
@@ -700,7 +687,50 @@ function buildChips(item) {
 
 // ── Drag-drop ─────────────────────────────────────────────────────────────────
 
+// Escape-to-cancel: SortableJS has already moved the card in the DOM by the time
+// a drag ends, so a bare Escape would "drop where it is". We run drags in fallback
+// mode (which delivers keydown normally), flag an Escape, end the drag, and revert
+// in the drop handlers instead of persisting.
+let _dragCancelled = false
+function _onDragKeydown(e) {
+  if (e.key !== 'Escape') return
+  _dragCancelled = true
+  // End the drag now. SortableJS's fallback binds whichever release event started
+  // it (pointer or mouse), so fire both — the second is a no-op once it finalizes.
+  if (window.PointerEvent) document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+  document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+}
+function _onDragStart() {
+  _dragCancelled = false
+  document.addEventListener('keydown', _onDragKeydown)
+}
+// Returns true if the just-ended drag was cancelled (and reverts the board).
+// Re-renders locally from unchanged state — instant, no server refetch.
+function _dragWasCancelled() {
+  document.removeEventListener('keydown', _onDragKeydown)
+  if (!_dragCancelled) return false
+  _dragCancelled = false
+  _rerender()
+  return true
+}
+
+// Create a task-list Sortable with the shared options (fallback mode + Escape
+// cancel). `extra` overrides/extends per column (e.g. sort:false).
+function _taskSortable(listEl, extra = {}) {
+  return Sortable.create(listEl, {
+    group:          'tasks',
+    animation:      150,
+    ghostClass:     'board-ghost',
+    forceFallback:  true,
+    fallbackOnBody: true,   // clone on <body> so it isn't clipped by column overflow
+    onStart:        _onDragStart,
+    onEnd:          handleDrop,
+    ...extra,
+  })
+}
+
 async function handleDrop(evt) {
+  if (_dragWasCancelled()) return
   const { item: cardEl, from, to } = evt
   if (from === to && evt.oldIndex === evt.newIndex) return
 
@@ -819,6 +849,7 @@ function _updateColumnCounts() {
 }
 
 async function handleColReorder() {
+  if (_dragWasCancelled()) return
   const board  = document.getElementById('board')
   const colEls = [...board.querySelectorAll('.board-col-reorderable')]
   const token  = await getToken()

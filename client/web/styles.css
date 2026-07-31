@@ -1458,6 +1458,16 @@ body.resize-active * { cursor: ns-resize !important; }
   writing-mode: vertical-rl;
   text-orientation: mixed;
 }
+/* Collapsed Done stays a drop target: reveal its (empty) list as a thin dashed
+   drop zone so a card can be dropped onto the strip to complete it. */
+.board-col-done.board-col-collapsed .board-task-list {
+  display: block;
+  flex: 1;
+  min-height: 96px;
+  margin: 4px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
 
 /* Ghost placeholder while dragging a column */
 .board-col-ghost { opacity: 0.4; }
