@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.35.0'
+const VERSION   = '0.35.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -906,17 +906,11 @@ function getVisibleItems() {
   return items.concat(rolled).filter(matchesFilter)
 }
 
-// ── Calendar picker ───────────────────────────────────────────────────────────
-
-function updateCalPickerBadge() {
-  const visible = state.calendars.filter(c => !state.hiddenCalendars.has(c.id))
-  document.getElementById('btn-calendars').innerHTML =
-    `Calendars <span class="count">${visible.length}/${state.calendars.length}</span>`
-}
+// ── Calendar picker (lives in the Configure Kairos dialog) ─────────────────────
 
 function renderCalendarPicker() {
   const panel = document.getElementById('cal-picker-panel')
-  updateCalPickerBadge()
+  if (!panel) return
 
   if (state.calendars.length === 0) {
     panel.innerHTML = '<div class="cal-picker-empty">No calendars found</div>'
@@ -942,7 +936,6 @@ function renderCalendarPicker() {
       if (cb.checked) state.hiddenCalendars.delete(cal.id)
       else            state.hiddenCalendars.add(cal.id)
       setHiddenCalendars([...state.hiddenCalendars])
-      updateCalPickerBadge()
       renderItems(getVisibleItems())
     })
 
@@ -988,21 +981,6 @@ document.getElementById('btn-allday-toggle').addEventListener('click', () => {
   state.allDayExpanded = !state.allDayExpanded
   renderAllDayToggle()
   renderItems(getVisibleItems())
-})
-
-// Toggle picker panel open/close
-document.getElementById('btn-calendars').addEventListener('click', e => {
-  e.stopPropagation()
-  const panel = document.getElementById('cal-picker-panel')
-  panel.hidden = !panel.hidden
-})
-
-document.addEventListener('click', () => {
-  document.getElementById('cal-picker-panel').hidden = true
-})
-
-document.getElementById('cal-picker-panel').addEventListener('click', e => {
-  e.stopPropagation()
 })
 
 // ── Auth + sweep UI ───────────────────────────────────────────────────────────
@@ -1180,6 +1158,7 @@ async function openConfigDialog() {
 
   dialog.hidden = false
   status.textContent = ''
+  renderCalendarPicker()
   renderTagManager()
 
   // Populate default intake status dropdown — statuses across all task calendars,

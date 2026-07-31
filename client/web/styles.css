@@ -375,51 +375,15 @@ body {
   flex-shrink: 0;
 }
 
-/* ── Calendar picker ─────────────────────── */
-
-#cal-picker-wrap {
-  position: relative;
-}
-
-#btn-calendars {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-#btn-calendars:hover { background: #f1f3f4; }
-
-#btn-calendars .count {
-  font-size: 11px;
-  background: var(--today-color);
-  color: #fff;
-  border-radius: 10px;
-  padding: 1px 6px;
-}
+/* ── Calendar picker (in the Configure Kairos dialog) ─────────────────────── */
 
 #cal-picker-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-  min-width: 220px;
-  max-height: 360px;
+  max-height: 320px;
   overflow-y: auto;
-  z-index: 100;
   padding: 6px 0;
 }
-
-#cal-picker-panel[hidden] { display: none; }
 
 .cal-picker-item {
   display: flex;
@@ -1662,10 +1626,11 @@ body.resize-active * { cursor: ns-resize !important; }
 .col-inprogress-btn:hover { opacity: 0.7; }
 .col-inprogress-btn.active { opacity: 1; filter: none; }
 
-/* Board / list project-calendar selector */
+/* Active-project selector — sits next to the Board icon in the view switcher */
 .board-calendar-select {
   font-size: 13px;
   padding: 3px 6px;
+  max-width: 180px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -2729,8 +2694,6 @@ body.resize-active * { cursor: ns-resize !important; }
 
   /* Week nav arrows and label are irrelevant on mobile (day view has its own) */
   #btn-prev, #btn-next, #week-label { display: none !important; }
-  /* Calendars picker is a secondary feature; reclaim the space */
-  #cal-picker-wrap { display: none !important; }
   /* Shrink app name slightly so header fits */
   #app-name { font-size: 15px; }
 

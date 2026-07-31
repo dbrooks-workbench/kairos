@@ -20,14 +20,10 @@
         <span id="week-label"></span>
       </div>
       <div id="header-right">
-        <select id="board-calendar-select" class="board-calendar-select" title="Project (calendar)" hidden></select>
         <button id="btn-visibility" class="visibility-pill" title="Visibility window — click to adjust"></button>
         <button id="btn-add" class="btn-add" title="New event or task">+</button>
         <div id="view-switch" class="view-switch" role="tablist" aria-label="View"></div>
-        <div id="cal-picker-wrap">
-          <button id="btn-calendars">Calendars</button>
-          <div id="cal-picker-panel" hidden></div>
-        </div>
+        <select id="board-calendar-select" class="board-calendar-select" title="Active project (calendar)" hidden></select>
         <div id="account-wrap">
           <div id="account-status"></div>
           <div id="account-panel" hidden></div>
@@ -303,6 +299,11 @@
         <button id="sweep-dialog-close" class="modal-close-btn" title="Close">×</button>
       </div>
       <div class="sweep-panel-body">
+        <div class="sweep-section">
+          <div class="sweep-section-label">Calendars</div>
+          <div class="sweep-section-hint">Choose which calendars show on the calendar, and which act as task / project calendars.</div>
+          <div id="cal-picker-panel"></div>
+        </div>
         <div class="sweep-section">
           <div class="sweep-section-label">Default intake status</div>
           <div class="sweep-section-hint">New captures — voice items and swept tasks — land in this status for processing.</div>
