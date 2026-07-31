@@ -1459,6 +1459,42 @@ body.resize-active * { cursor: ns-resize !important; }
   stroke-linejoin: round;
 }
 
+/* Recurring column — segregated home for already-planned routines. Tinted to
+   read as distinct from the workflow columns; collapses to a thin vertical strip
+   so it stays out of the way while planning. */
+.board-col-recurring { background: #efedf7; }
+.board-recur-toggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.board-recur-toggle:hover { color: var(--text); }
+.board-recur-icon {
+  color: #6b5bb5;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.board-col-collapsed {
+  width: 36px;
+  min-width: 36px;
+}
+.board-col-collapsed .board-task-list { display: none; }
+.board-col-collapsed .board-col-header {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+}
+.board-col-collapsed .board-col-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
 /* Ghost placeholder while dragging a column */
 .board-col-ghost { opacity: 0.4; }
 
@@ -1650,7 +1686,7 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 .visibility-pill:hover { color: var(--text); border-color: var(--today-color); }
 
-/* Header view switcher — segmented icon buttons (Calendar / Board / Reminders) */
+/* Header view switcher — segmented icon buttons (Calendar / Board) */
 .view-switch {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -1687,55 +1723,6 @@ body.resize-active * { cursor: ns-resize !important; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-
-/* Reminders view */
-#reminders {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px;
-  background: #f8f9fa;
-}
-.reminders-header { margin-bottom: 12px; }
-.reminders-add-btn {
-  font-size: 13px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  cursor: pointer;
-}
-.reminders-add-btn:hover { border-color: var(--today-color); }
-.reminders-empty { color: var(--text-muted); font-size: 14px; padding: 8px 2px; }
-.reminders-list { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
-.reminder-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-.reminder-row:hover { border-color: var(--today-color); }
-.reminder-row.done { opacity: 0.55; }
-.reminder-check {
-  flex-shrink: 0;
-  width: 18px; height: 18px;
-  border: 1.5px solid var(--border);
-  border-radius: 50%;
-  background: var(--bg);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-}
-.reminder-check.done { background: var(--task-color); border-color: var(--task-color); }
-.reminder-title { flex: 1; font-size: 14px; color: var(--text); }
-.reminder-row.done .reminder-title { text-decoration: line-through; }
-.reminder-when { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 
 .done-window-toggle {
   display: flex;
@@ -1920,16 +1907,6 @@ body.resize-active * { cursor: ns-resize !important; }
 .allday-event.type-task .cal-tag-dots,
 .allday-event.type-task .cal-tag-dot { flex: none; }
 
-/* Reminder-row tags */
-.reminder-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.reminder-tag {
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 9px;
-  color: #fff;
-  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
-  white-space: nowrap;
-}
 .board-chip-comments       { background: #f1f3f4; color: var(--text-muted); }
 
 .board-ghost    { opacity: 0.25 !important; }

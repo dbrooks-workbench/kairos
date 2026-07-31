@@ -94,9 +94,6 @@
     <!-- Board view -->
     <div id="board" hidden></div>
 
-    <!-- Reminders view (flat list of reminders) -->
-    <div id="reminders" hidden></div>
-
     <!-- Unified event / task editor modal -->
     <div id="unified-editor" hidden>
       <div class="modal-panel" id="unified-editor-panel">
@@ -105,7 +102,6 @@
           <div class="editor-mode-toggle">
             <button type="button" id="ue-mode-event"    class="mode-btn active">Event</button>
             <button type="button" id="ue-mode-task"     class="mode-btn">Task</button>
-            <button type="button" id="ue-mode-reminder" class="mode-btn">Reminder</button>
           </div>
           <button id="ue-close" class="modal-close-btn" title="Close">×</button>
         </div>
@@ -343,7 +339,7 @@
       </div>
       <div class="sweep-panel-body">
         <div class="sweep-section">
-          <div class="sweep-section-hint">Bounds the board, list, and reminders views — and how far back past-due tasks roll forward onto today. Default is 14 days before and after today.</div>
+          <div class="sweep-section-hint">Bounds the board — and how far back past-due tasks roll forward onto today. Default is 14 days before and after today.</div>
           <div class="modal-field-row">
             <label class="modal-label">Start</label>
             <input id="visibility-start-input" class="modal-input" type="date">

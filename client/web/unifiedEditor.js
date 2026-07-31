@@ -20,7 +20,7 @@ import { openSnoozePopover } from './board.js'
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _mode          = 'event'   // 'event' | 'task' | 'reminder'
+let _mode          = 'event'   // 'event' | 'task'
 let _originalMode  = null      // mode the item was opened as (to detect type conversions)
 let _tags          = []        // tag names currently on the item being edited
 let _editItem      = null      // null = create mode
@@ -461,20 +461,15 @@ function _applyRruleToCustomPanel(rrule) {
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
 
-// Reminders are a lightweight sub-type of task (calendar-backed, completable),
-// so most task/event branching treats reminder like task.
-function _isTaskMode() { return _mode === 'task' || _mode === 'reminder' }
+function _isTaskMode() { return _mode === 'task' }
 
 function _setMode(mode, { locked = false } = {}) {
   _mode = mode
   el('ue-mode-event').classList.toggle('active',    mode === 'event')
   el('ue-mode-task').classList.toggle('active',     mode === 'task')
-  el('ue-mode-reminder').classList.toggle('active', mode === 'reminder')
   el('ue-mode-event').disabled    = locked
   el('ue-mode-task').disabled     = locked
-  el('ue-mode-reminder').disabled = locked
-  el('ue-title').placeholder   = mode === 'reminder' ? 'Reminder…' : mode === 'task' ? 'Task title…' : 'Event title…'
-  // Reminders carry no list/status/deadline/LOE — just a title, a when, and done.
+  el('ue-title').placeholder   = mode === 'task' ? 'Task title…' : 'Event title…'
   el('ue-status-row').hidden   = mode !== 'task'
   el('ue-due-row').hidden      = mode !== 'task'
   el('ue-loe-row').hidden      = mode !== 'task'
@@ -511,8 +506,7 @@ async function _populateCalendars(preferredId, preloaded) {
     }
   }
 
-  // Reminders live on task calendars alongside tasks (orthogonal to list/status,
-  // not to the calendar) so the board fetch surfaces them for the Reminders view.
+  // Tasks live on the designated task calendars; events on any writable calendar.
   const filtered = _isTaskMode()
     ? cals.filter(c => taskCalIds.has(c.id))
     : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
@@ -613,12 +607,6 @@ export function initEditor() {
     if (_mode === 'task') return
     const cur = el('ue-calendar').value
     _setMode('task')
-    _populateCalendars(cur || getTaskCalendars()[0] || null, null)
-  })
-  el('ue-mode-reminder').addEventListener('click', () => {
-    if (_mode === 'reminder') return
-    const cur = el('ue-calendar').value
-    _setMode('reminder')
     _populateCalendars(cur || getTaskCalendars()[0] || null, null)
   })
 
@@ -788,7 +776,7 @@ export async function openEditorForEdit(item, callbacks = {}) {
   const isTask = item.item_type === 'TASK'
               || !!item.metadata?.task_calendar
               || taskCalSet.has(item.source.account_id)
-  const mode   = item.metadata?.isReminder ? 'reminder' : (isTask ? 'task' : 'event')
+  const mode   = isTask ? 'task' : 'event'
   _kairosId    = isTask ? (item.metadata?.kairosId ?? null) : null
 
   // Load activity log
@@ -988,9 +976,7 @@ async function _save() {
 }
 
 async function _saveTask(title) {
-  const isReminder = _mode === 'reminder'
-  // Reminders carry no LOE — skip its validation and value entirely.
-  const rawLoe = isReminder ? '' : el('ue-loe').value.trim()
+  const rawLoe = el('ue-loe').value.trim()
   const loe    = rawLoe ? normalizeLoe(rawLoe) : null
   if (rawLoe && !loe) {
     el('ue-loe-error').hidden = false
@@ -1001,11 +987,10 @@ async function _saveTask(title) {
 
   const calId     = el('ue-calendar').value
   if (!calId) { el('ue-save').disabled = false; return }
-  // Reminders have neither status nor a separate deadline. Every non-reminder
-  // task must carry a status — fall back to the calendar's intake status.
-  const statusId   = isReminder ? null : (el('ue-status').value || getDefaultStatusId(calId))
+  // Every task must carry a status — fall back to the calendar's intake status.
+  const statusId   = el('ue-status').value || getDefaultStatusId(calId)
   const statusName = statusId ? (getStatus(statusId)?.name ?? null) : null   // recovery backup
-  const dueDate    = isReminder ? null : (el('ue-due-date').value || null)
+  const dueDate    = el('ue-due-date').value || null
   const allDay    = el('ue-allday').checked
   const startDate = el('ue-start-date').value || null
   const endDate   = el('ue-end-date').value   || null
@@ -1044,7 +1029,6 @@ async function _saveTask(title) {
     statusName,
     tags:         _tags,
     dueDate,
-    isReminder,
     order:        _editItem?.metadata?.order ?? Date.now(),
     loe,
     date:         startDate,
@@ -1139,8 +1123,9 @@ async function _saveEvent(title) {
 
   // Tags apply to events too.
   body.extendedProperties = { private: { tags: encodeTags(_tags) } }
-  // Converting a task/reminder → event: strip the task markers (and completion
-  // prefix/footer, handled by summary/description above) so it becomes a plain event.
+  // Converting a task → event: strip the task markers (and completion prefix/
+  // footer, handled by summary/description above) so it becomes a plain event.
+  // isReminder is cleared too, to clean up any legacy reminder flag.
   if (_editItem?.item_type === 'TASK') {
     Object.assign(body.extendedProperties.private, {
       isTask:  null, isReminder: null, kairosId: null,

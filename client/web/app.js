@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.34.1'
+const VERSION   = '0.35.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -118,9 +118,9 @@ function applyFilter() {
 }
 
 // ── Visibility period ─────────────────────────────────────────────────────────
-// A date window (default [today-14d, today+14d]) that bounds the board/list/
-// reminders views and the calendar roll-forward. A custom window is persisted in
-// prefs; calendar browsing widens the effective window for the session only.
+// A date window (default [today-14d, today+14d]) that bounds the board and the
+// calendar roll-forward. A custom window is persisted in prefs; calendar browsing
+// widens the effective window for the session only.
 const VIS_DEFAULT_DAYS = 14
 
 function _visDefaultWindow() {
@@ -320,11 +320,6 @@ function calRank(id) {
 function byCalendarThenTitle(a, b) {
   return (calRank(a.source.account_id) - calRank(b.source.account_id))
     || (a.title ?? '').localeCompare(b.title ?? '')
-}
-
-// Chip title with a bell marker for reminders (plain title for everything else).
-function _titleWithBell(item) {
-  return (item.metadata?.isReminder ? '🔔 ' : '') + item.title
 }
 
 // Small coloured dots for an item's tags, appended to calendar chips (so tagged
@@ -602,13 +597,13 @@ function calendarModalCallbacks() {
 
 // ── View switching ────────────────────────────────────────────────────────────
 
-const WORK_VIEWS = ['board', 'reminders']
+const WORK_VIEWS = ['board']
 
 // Deep-link routing: each view has a URL path (the task Board lives at /board;
 // /tasks is accepted as a synonym). The SPA fallback (_redirects) serves
 // index.html for these so they're bookmarkable and reload-safe.
-const VIEW_PATH = { calendar: '/calendar', board: '/board', reminders: '/reminders' }
-const PATH_VIEW = { '/calendar': 'calendar', '/board': 'board', '/tasks': 'board', '/reminders': 'reminders' }
+const VIEW_PATH = { calendar: '/calendar', board: '/board' }
+const PATH_VIEW = { '/calendar': 'calendar', '/board': 'board', '/tasks': 'board' }
 
 // The view implied by the current URL path, or null if the path isn't a view.
 function _viewFromPath() {
@@ -630,7 +625,6 @@ function setView(v, { updateUrl = true, replace = false } = {}) {
   document.getElementById('calendar').hidden      = v !== 'calendar'
   document.getElementById('mobile-cal').hidden    = v !== 'calendar'
   document.getElementById('board').hidden         = v !== 'board'
-  document.getElementById('reminders').hidden     = v !== 'reminders'
   if (v !== 'board') destroyBoard()
   _syncViewSwitchActive()
   _syncProjectSelectorVisibility()
@@ -664,11 +658,10 @@ window.addEventListener('popstate', () => {
 const VIEW_DEFS = [
   ['calendar',  'Calendar',  '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>'],
   ['board',     'Board',     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/>'],
-  ['reminders', 'Reminders', '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'],
 ]
 
-// The work views (board/reminders) only make sense with a task calendar. Rebuild
-// the segmented switcher accordingly and fall back to the calendar if a work view
+// The Board view only makes sense with a task calendar. Rebuild the segmented
+// switcher accordingly and fall back to the calendar if a work view
 // is active when the last task calendar is removed.
 function populateViewSelect() {
   const wrap = document.getElementById('view-switch')
@@ -795,112 +788,9 @@ function rerenderBoard() {
   renderBoard(getStatusesForCalendar(calId), getBoardItems(), boardCallbacks(), state.doneWindow, calId)
 }
 
-// Re-render whichever work surface (board / reminders) is active.
+// Re-render the active work surface (the board).
 function rerenderWorkView() {
-  if (state.view === 'reminders') renderReminders()
-  else rerenderBoard()
-}
-
-// ── Reminders view ──────────────────────────────────────────────────────────
-// A flat list of reminders (isReminder task events) within the visibility window,
-// deduped by recurring series. Incomplete first (by date), completed dimmed after.
-function getReminders() {
-  const w       = visibilityWindow()
-  const endExcl = addDays(w.end, 1)
-  const rems = state.boardItems.filter(i =>
-    i.metadata?.isReminder && matchesFilter(i) &&
-    (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
-  )
-  const today = todayMidnight()
-  const bestBySeries = new Map()
-  for (const item of rems) {
-    const sid = item.metadata?.recurringEventId
-    if (!sid || item.status === 'COMPLETED') continue
-    const prev = bestBySeries.get(sid)
-    const is = item.start ?? new Date(0), ps = prev?.start ?? new Date(0)
-    const ia = is >= today, pa = ps >= today
-    if (!prev || (ia && !pa) || (ia && pa && is < ps) || (!ia && !pa && is > ps)) bestBySeries.set(sid, item)
-  }
-  return [...rems.filter(i => !i.metadata?.recurringEventId), ...bestBySeries.values()]
-}
-
-async function toggleReminder(item) {
-  const token = await getToken()
-  if (!token) return
-  const isDone = item.status === 'COMPLETED'
-  try {
-    if (isDone) await calUncompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
-    else        await calCompleteTask(token, item.source.account_id, item.source.external_id, item.title, item)
-    await loadBoardData()   // refetch + re-render the active (reminders) view
-  } catch (err) {
-    console.error('Toggle reminder failed:', err)
-  }
-}
-
-function _reminderWhen(item) {
-  if (!item.start || item.metadata?.noDate) return 'No date'
-  const d = new Date(item.start)
-  const datePart = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-  if (item.all_day) return datePart
-  return `${datePart} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-}
-
-function renderReminders() {
-  const root = document.getElementById('reminders')
-  root.innerHTML = ''
-
-  const header = el('div', 'reminders-header')
-  const addBtn = el('button', 'reminders-add-btn')
-  addBtn.textContent = '+ New reminder'
-  addBtn.addEventListener('click', () =>
-    openEditor({ mode: 'reminder', calendarId: currentProjectCalendarId() }, { onSaved: loadBoardData }))
-  header.appendChild(addBtn)
-  root.appendChild(header)
-
-  const rems = getReminders()
-  const rank    = i => i.status === 'COMPLETED' ? 1 : 0
-  const dateVal = i => i.start ? +new Date(i.start) : Infinity
-  rems.sort((a, b) =>
-    rank(a) - rank(b) || dateVal(a) - dateVal(b) || (a.title ?? '').localeCompare(b.title ?? ''))
-
-  if (!rems.length) {
-    const empty = el('div', 'reminders-empty')
-    empty.textContent = 'No reminders in view.'
-    root.appendChild(empty)
-    return
-  }
-
-  const listEl = el('div', 'reminders-list')
-  for (const item of rems) {
-    const isDone = item.status === 'COMPLETED'
-    const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
-    const row = el('div', `reminder-row${isDone ? ' done' : ''}`)
-
-    const check = el('button', `reminder-check${isDone ? ' done' : ''}`)
-    check.setAttribute('aria-label', isDone ? 'Mark incomplete' : 'Mark complete')
-    if (isDone) check.textContent = '✓'
-    check.addEventListener('click', e => { e.stopPropagation(); toggleReminder(item) })
-
-    const title = el('div', 'reminder-title')
-    title.textContent = `🔔 ${item.title}${isRecurring ? ' ↻' : ''}`
-
-    const tags = el('div', 'reminder-tags')
-    for (const t of item.metadata?.tags ?? []) {
-      const chip = el('span', 'reminder-tag')
-      chip.style.background = getTagColor(item.source.account_id, t)
-      chip.textContent = t
-      tags.appendChild(chip)
-    }
-
-    const when = el('div', 'reminder-when')
-    when.textContent = _reminderWhen(item)
-
-    row.append(check, title, tags, when)
-    row.addEventListener('click', () =>
-      openEditorForEdit(item, { onSaved: loadBoardData, onDeleted: loadBoardData }))
-    listEl.appendChild(row)
-  }
-  root.appendChild(listEl)
+  rerenderBoard()
 }
 
 // Fill the board/list project-calendar <select> from the designated task calendars.
@@ -929,12 +819,11 @@ function _syncProjectSelectorVisibility() {
 }
 
 function getBoardItems() {
-  // Exclude reminders (no list/status — they live in the Reminders view) and bound
-  // to the visibility window by task date; undated tasks always show.
+  // Bound to the visibility window by task date; undated tasks always show.
   const w       = visibilityWindow()
   const endExcl = addDays(w.end, 1)   // include the whole end day
   const items = state.boardItems.filter(i =>
-    !i.metadata?.isReminder && matchesFilter(i) &&
+    matchesFilter(i) &&
     (!i.start || i.metadata?.noDate || (i.start >= w.start && i.start < endExcl))
   )
 
@@ -1747,7 +1636,7 @@ function renderItems(items) {
         })
 
         const titleSpan = document.createElement('span')
-        titleSpan.textContent = _titleWithBell(item)
+        titleSpan.textContent = item.title
 
         const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
         const recurIcon = isRecurring ? (() => {
@@ -1795,7 +1684,7 @@ function renderItems(items) {
       } else {
         if (item.color) applyColor(chipEl, item.color)
         const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-        chipEl.textContent = _titleWithBell(item)
+        chipEl.textContent = item.title
         if (isRecurringEv) {
           chipEl.style.paddingRight = '14px'
           const icon = document.createElement('span')
@@ -1895,7 +1784,7 @@ function renderItems(items) {
         textWrap.className = 'timed-task-text'
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = _titleWithBell(item)
+        titleEl.textContent = item.title
         const timeEl = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -1933,7 +1822,7 @@ function renderItems(items) {
       } else {
         const titleEl = document.createElement('div')
         titleEl.className   = 'event-title'
-        titleEl.textContent = _titleWithBell(item)
+        titleEl.textContent = item.title
         const timeEl  = document.createElement('div')
         timeEl.className   = 'event-time'
         timeEl.textContent = formatTimeRange(start, end)
@@ -2087,7 +1976,7 @@ function renderMobileDay() {
       })
 
       const titleSpan = document.createElement('span')
-      titleSpan.textContent = _titleWithBell(item)
+      titleSpan.textContent = item.title
 
       const isRecurring = !!(item.recurrence || item.metadata?.recurringEventId)
       const parts = [check, titleSpan]
@@ -2102,7 +1991,7 @@ function renderMobileDay() {
     } else {
       if (item.color) applyColor(chip, item.color)
       const isRecurringEv = !!(item.recurrence || item.metadata?.recurringEventId)
-      chip.textContent = _titleWithBell(item)
+      chip.textContent = item.title
       if (isRecurringEv) {
         chip.style.paddingRight = '14px'
         const icon = document.createElement('span')
@@ -2191,7 +2080,7 @@ function renderMobileDay() {
       textWrap.className = 'timed-task-text'
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = _titleWithBell(item)
+      titleEl.textContent = item.title
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)
@@ -2229,7 +2118,7 @@ function renderMobileDay() {
     } else {
       const titleEl = document.createElement('div')
       titleEl.className   = 'mobile-event-title'
-      titleEl.textContent = _titleWithBell(item)
+      titleEl.textContent = item.title
       const timeEl = document.createElement('div')
       timeEl.className   = 'mobile-event-time'
       timeEl.textContent = formatTimeRange(start, end)

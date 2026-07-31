@@ -4,11 +4,18 @@ import {
   completeTask, uncompleteTask, patchTaskProps, patchTaskDate, rebalanceColumn,
 } from './providers/calendarTasks.js'
 import { patchTask } from './providers/googleTasksIntake.js'
-import { getTaskColumnSort, setTaskColumnSort } from './providers/kairosPrefs.js'
+import { getTaskColumnSort, setTaskColumnSort, getRecurringCollapsed, setRecurringCollapsed } from './providers/kairosPrefs.js'
 import { updateStatus, deleteStatus, getTagColor } from './providers/kairosConfig.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
-const DONE_COL_ID = '__done__'
+const DONE_COL_ID      = '__done__'
+const RECURRING_COL_ID = '__recurring__'
+
+// Recurring tasks are "already planned" (a fixed cadence auto-slots every
+// occurrence), so they're segregated into a synthetic Recurring column instead of
+// cluttering the workflow columns — and never enter Done (completing an instance
+// just advances the series to the next occurrence).
+const _isRecurring = item => !!(item.recurrence || item.metadata?.recurringEventId)
 
 let _sortables  = []
 let _callbacks  = {}
@@ -227,15 +234,20 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
   const board = document.getElementById('board')
 
   // Only this calendar's task events; partition active tasks by effective status,
-  // completed ones into the synthetic Done column.
+  // recurring ones into the synthetic Recurring column, completed ones into Done.
   const items = calendarId
     ? boardItems.filter(i => i.source.account_id === calendarId)
     : boardItems
   const activeByStatus = {}
   const doneItems      = []
+  const recurringItems = []
 
   for (const item of items) {
-    if (item.status === 'COMPLETED') {
+    if (_isRecurring(item)) {
+      // Recurring tasks never go to Done; a completed occurrence just drops out
+      // (the series' next instance becomes the card).
+      if (item.status !== 'COMPLETED') recurringItems.push(item)
+    } else if (item.status === 'COMPLETED') {
       doneItems.push(item)
     } else {
       const sid = _effectiveStatusId(item)
@@ -258,6 +270,32 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
       sort: colSortMode(status.id) !== 'date',
       onEnd: handleDrop,
     }))
+  }
+
+  // Synthetic Recurring column (sits between the workflow columns and Done).
+  // Shown only when there are recurring tasks; collapsible to a thin strip.
+  if (recurringItems.length) {
+    const collapsed = getRecurringCollapsed()
+    const byDate    = [...recurringItems].sort((a, b) => {
+      const ad = a.due ?? a.start, bd = b.due ?? b.start
+      if (!ad && !bd) return (a.title ?? '').localeCompare(b.title ?? '')
+      if (!ad) return 1
+      if (!bd) return -1
+      return new Date(ad) - new Date(bd)
+    })
+    const recurCol  = buildRecurringCol(byDate, collapsed)
+    board.appendChild(recurCol)
+    if (!collapsed) {
+      // Drop-target so a routine can be dragged to Done to complete it; sort:false
+      // keeps it date-ordered and blocks in-column reordering.
+      _sortables.push(Sortable.create(recurCol.querySelector('.board-task-list'), {
+        group:      'tasks',
+        animation:  150,
+        ghostClass: 'board-ghost',
+        sort:       false,
+        onEnd:      handleDrop,
+      }))
+    }
   }
 
   const doneCol = buildCol(
@@ -444,6 +482,50 @@ function buildCol(status, items, colType, doneWindow, isIntake = false) {
   return col
 }
 
+// Re-render the board from the last-render state (used by the collapse toggle).
+function _rerender() {
+  renderBoard(_statuses, _boardItems, _callbacks, _doneWindow, _calendarId)
+}
+
+// The synthetic Recurring column: a ↻ header with a collapse toggle, and cards for
+// each recurring series (one per series, already deduped upstream). Collapsed, it
+// shrinks to a thin vertical strip so it stays out of the way while planning.
+function buildRecurringCol(items, collapsed) {
+  const col = document.createElement('div')
+  col.className = `board-col board-col-recurring${collapsed ? ' board-col-collapsed' : ''}`
+
+  const hdr = document.createElement('div')
+  hdr.className = 'board-col-header'
+
+  const toggle = document.createElement('button')
+  toggle.className = 'board-recur-toggle'
+  toggle.title     = collapsed ? 'Expand recurring' : 'Collapse recurring'
+  toggle.textContent = collapsed ? '▸' : '▾'
+  toggle.addEventListener('click', () => { setRecurringCollapsed(!collapsed); _rerender() })
+
+  const icon = document.createElement('span')
+  icon.className   = 'board-recur-icon'
+  icon.textContent = '↻'
+
+  const titleEl = document.createElement('span')
+  titleEl.className   = 'board-col-title'
+  titleEl.textContent = 'Recurring'
+
+  const countEl = document.createElement('span')
+  countEl.className   = 'board-col-count'
+  countEl.textContent = items.length
+
+  hdr.append(toggle, icon, titleEl, countEl)
+
+  const listEl = document.createElement('div')
+  listEl.className        = 'board-task-list'
+  listEl.dataset.statusId = RECURRING_COL_ID
+  if (!collapsed) for (const item of items) listEl.appendChild(buildCard(item))
+
+  col.append(hdr, listEl)
+  return col
+}
+
 function buildAddStatusCol(callbacks) {
   const col = document.createElement('div')
   col.className = 'board-col board-col-add'
@@ -611,6 +693,16 @@ async function handleDrop(evt) {
   const toStatusId   = to.dataset.statusId
   const calendarId   = cardEl.dataset.calendarId
   const extId        = cardEl.dataset.extId
+
+  // Recurring is a derived column: you can't make a task recurring by dropping into
+  // it, and dragging a routine to a workflow column shouldn't silently rewrite its
+  // status. Only recurring → Done (complete this occurrence) is meaningful; anything
+  // else reverts via a refresh.
+  if (toStatusId === RECURRING_COL_ID ||
+      (fromStatusId === RECURRING_COL_ID && toStatusId !== DONE_COL_ID)) {
+    _callbacks.onRefresh?.()
+    return
+  }
 
   if (fromStatusId === toStatusId) {
     if (fromStatusId === DONE_COL_ID) return
