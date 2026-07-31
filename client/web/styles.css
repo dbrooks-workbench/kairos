@@ -1427,7 +1427,7 @@ body.resize-active * { cursor: ns-resize !important; }
    read as distinct from the workflow columns; collapses to a thin vertical strip
    so it stays out of the way while planning. */
 .board-col-recurring { background: #efedf7; }
-.board-recur-toggle {
+.board-col-collapse-toggle {
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1437,7 +1437,7 @@ body.resize-active * { cursor: ns-resize !important; }
   padding: 0 2px;
   flex-shrink: 0;
 }
-.board-recur-toggle:hover { color: var(--text); }
+.board-col-collapse-toggle:hover { color: var(--text); }
 .board-recur-icon {
   color: #6b5bb5;
   font-size: 13px;

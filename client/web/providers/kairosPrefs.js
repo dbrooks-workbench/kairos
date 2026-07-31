@@ -28,6 +28,7 @@ const DEFAULTS = () => ({
   visibilityEnd:       null, // custom visibility-window end   'YYYY-MM-DD' (null = default: today+14d)
   maxWindowDays:       180,  // cap on the effective visibility span; browsing past it truncates the trailing end
   recurringCollapsed:  false, // board: the synthetic Recurring column is collapsed to a strip
+  doneCollapsed:       false, // board: the synthetic Done column is collapsed to a strip
   listsMigrated:       false, // one-time: legacy listId -> tag migration has run
 })
 
@@ -85,6 +86,8 @@ export function getVisibilityEnd()      { return _prefs?.visibilityEnd       ?? 
 export function getMaxWindowDays()      { return _prefs?.maxWindowDays       ?? 180 }
 export function getRecurringCollapsed() { return _prefs?.recurringCollapsed  ?? false }
 export function setRecurringCollapsed(v) { if (_prefs) { _prefs.recurringCollapsed = !!v; _dirty = true; _scheduleSave() } }
+export function getDoneCollapsed()      { return _prefs?.doneCollapsed       ?? false }
+export function setDoneCollapsed(v) { if (_prefs) { _prefs.doneCollapsed = !!v; _dirty = true; _scheduleSave() } }
 export function getListsMigrated()      { return _prefs?.listsMigrated       ?? false }
 export function setListsMigrated(v) { if (_prefs) { _prefs.listsMigrated = !!v; _dirty = true; _scheduleSave() } }
 

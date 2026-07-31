@@ -4,7 +4,7 @@ import {
   completeTask, uncompleteTask, patchTaskProps, patchTaskDate, rebalanceColumn,
 } from './providers/calendarTasks.js'
 import { patchTask } from './providers/googleTasksIntake.js'
-import { getTaskColumnSort, setTaskColumnSort, getRecurringCollapsed, setRecurringCollapsed } from './providers/kairosPrefs.js'
+import { getTaskColumnSort, setTaskColumnSort, getRecurringCollapsed, setRecurringCollapsed, getDoneCollapsed, setDoneCollapsed } from './providers/kairosPrefs.js'
 import { updateStatus, deleteStatus, getTagColor } from './providers/kairosConfig.js'
 import { appendLogEntry } from './providers/lifeLog.js'
 
@@ -298,18 +298,22 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
     }
   }
 
+  const doneCollapsed = getDoneCollapsed()
   const doneCol = buildCol(
     { id: DONE_COL_ID, name: 'Done', calendarId: null },
-    doneItems.slice(0, 100), 'done', doneWindow,
+    doneItems.slice(0, 100), 'done', doneWindow, false, doneCollapsed,
   )
   board.appendChild(doneCol)
   board.appendChild(buildAddStatusCol(callbacks))
-  _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
-    group:      'tasks',
-    animation:  150,
-    ghostClass: 'board-ghost',
-    onEnd: handleDrop,
-  }))
+  if (!doneCollapsed) {
+    // Drop-target so dragging a card here completes it; skipped when collapsed.
+    _sortables.push(Sortable.create(doneCol.querySelector('.board-task-list'), {
+      group:      'tasks',
+      animation:  150,
+      ghostClass: 'board-ghost',
+      onEnd: handleDrop,
+    }))
+  }
 
   _sortables.push(Sortable.create(board, {
     animation:  150,
@@ -327,16 +331,27 @@ export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, ca
 
 // ── Column ────────────────────────────────────────────────────────────────────
 
-function buildCol(status, items, colType, doneWindow, isIntake = false) {
+function buildCol(status, items, colType, doneWindow, isIntake = false, collapsed = false) {
   const isUser = colType === 'user'
   const isDone = colType === 'done'
 
   const col = document.createElement('div')
-  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}${isIntake ? ' board-col-intake' : ''}`
+  col.className = `board-col${isDone ? ' board-col-done' : ' board-col-reorderable'}${isIntake ? ' board-col-intake' : ''}${collapsed ? ' board-col-collapsed' : ''}`
   if (isUser) col.dataset.statusId = status.id
 
   const hdr = document.createElement('div')
   hdr.className = 'board-col-header'
+
+  // Done is collapsible to a thin strip (persisted) so completed work can be
+  // tucked away while planning.
+  if (isDone) {
+    const toggle = document.createElement('button')
+    toggle.className   = 'board-col-collapse-toggle'
+    toggle.title       = collapsed ? 'Expand Done' : 'Collapse Done'
+    toggle.textContent = collapsed ? '▸' : '▾'
+    toggle.addEventListener('click', () => { setDoneCollapsed(!collapsed); _rerender() })
+    hdr.appendChild(toggle)
+  }
 
   if (isUser) {
     const dragHandle = document.createElement('span')
@@ -459,7 +474,7 @@ function buildCol(status, items, colType, doneWindow, isIntake = false) {
     hdr.appendChild(delBtn)
   }
 
-  if (isDone) {  // Done-window toggle only on sentinel Done column
+  if (isDone && !collapsed) {  // Done-window toggle only on sentinel Done column
     const toggle = document.createElement('div')
     toggle.className = 'done-window-toggle'
     for (const days of [7, 30, 90]) {
@@ -476,7 +491,7 @@ function buildCol(status, items, colType, doneWindow, isIntake = false) {
   listEl.className        = 'board-task-list'
   listEl.dataset.statusId = status.id
 
-  for (const item of items) listEl.appendChild(buildCard(item))
+  if (!collapsed) for (const item of items) listEl.appendChild(buildCard(item))
 
   col.append(hdr, listEl)
   return col
@@ -498,7 +513,7 @@ function buildRecurringCol(items, collapsed) {
   hdr.className = 'board-col-header'
 
   const toggle = document.createElement('button')
-  toggle.className = 'board-recur-toggle'
+  toggle.className = 'board-col-collapse-toggle'
   toggle.title     = collapsed ? 'Expand recurring' : 'Collapse recurring'
   toggle.textContent = collapsed ? '▸' : '▾'
   toggle.addEventListener('click', () => { setRecurringCollapsed(!collapsed); _rerender() })
