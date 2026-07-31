@@ -1626,23 +1626,24 @@ body.resize-active * { cursor: ns-resize !important; }
 .col-inprogress-btn:hover { opacity: 0.7; }
 .col-inprogress-btn.active { opacity: 1; filter: none; }
 
-/* Active-project selector — an integrated segment of the view switcher, right
-   after the Board icon (shown only on the board view). No border/radius of its
-   own; a left divider matches the button segments, and the switcher's rounded
-   overflow clips its right edge. */
+/* Active-project selector — a small control nestled *inside* the view switcher,
+   right after the Board icon (shown only on the board view). Vertically centered
+   and inset with margin so it floats within the bar rather than reading as
+   another full-height segment. */
 .view-switch .board-calendar-select {
-  font-size: 13px;
-  padding: 0 8px;
-  height: 28px;
-  max-width: 170px;
-  border: none;
-  border-left: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
+  align-self: center;
+  height: 20px;
+  margin: 0 4px;
+  padding: 0 4px;
+  max-width: 150px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
   color: var(--text);
   cursor: pointer;
 }
-.view-switch .board-calendar-select:hover { background: #f0f0f0; }
+.view-switch .board-calendar-select:hover { border-color: var(--today-color); }
 
 /* Visibility-period indicator pill in the header */
 .visibility-pill {
