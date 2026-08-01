@@ -1015,8 +1015,11 @@ async function _saveTask(title) {
     return
   }
 
+  // CUSTOM: build the rule from the custom panel (or preserve an edited one) — the
+  // create/update-task path persists this directly; the recurring-scope handlers
+  // recompute their own rule and ignore it.
   const recurrence = freq === 'CUSTOM'
-    ? undefined
+    ? (_preserveRrule ?? _buildCustomRrule())
     : freq
       ? (_buildRrule(freq, startDate) ?? null)
       : (_editItem?.recurrence ? null : undefined)
