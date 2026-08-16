@@ -14,7 +14,7 @@ import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parser
 import { generateKairosId } from './providers/driveTaskMeta.js'
 import { getStatusesForCalendar, getStatus, getDefaultStatusId, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
-import { getTaskCalendars } from './providers/kairosPrefs.js'
+import { getTaskCalendars, getLastUsedTaskCalendarId, getLastUsedEventCalendarId, setLastUsedTaskCalendarId, setLastUsedEventCalendarId } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
 import { openSnoozePopover } from './board.js'
 
@@ -511,10 +511,19 @@ async function _populateCalendars(preferredId, preloaded) {
     ? cals.filter(c => taskCalIds.has(c.id))
     : cals.filter(c => (c.accessRole === 'owner' || c.accessRole === 'writer') && !taskCalIds.has(c.id))
 
-  sel.innerHTML = filtered
-    .map(c => `<option value="${esc(c.id)}"${c.primary ? ' selected' : ''}>${esc(c.summary)}</option>`)
-    .join('')
-  if (preferredId) sel.value = preferredId
+  sel.innerHTML = filtered.map(c => `<option value="${esc(c.id)}">${esc(c.summary)}</option>`).join('')
+
+  // Selection priority: explicit match → last-used → single calendar → primary → first
+  const validIds  = new Set(filtered.map(c => c.id))
+  const lastUsed  = _isTaskMode() ? getLastUsedTaskCalendarId() : getLastUsedEventCalendarId()
+  const primary   = filtered.find(c => c.primary)
+  const chosen    = (preferredId && validIds.has(preferredId) ? preferredId : null)
+                 ?? (lastUsed && validIds.has(lastUsed) ? lastUsed : null)
+                 ?? (filtered.length === 1 ? filtered[0].id : null)
+                 ?? primary?.id
+                 ?? filtered[0]?.id
+                 ?? ''
+  sel.value = chosen
 
   // Populate the status dropdown after calendar is known (task mode only)
   if (_mode === 'task') _populateStatus(_editItem?.metadata?.statusId ?? null)
@@ -965,8 +974,14 @@ async function _save() {
   el('ue-save-error').hidden = true
 
   try {
-    if (_isTaskMode()) await _saveTask(title)
-    else               await _saveEvent(title)
+    const calId = el('ue-calendar').value
+    if (_isTaskMode()) {
+      if (calId) setLastUsedTaskCalendarId(calId)
+      await _saveTask(title)
+    } else {
+      if (calId) setLastUsedEventCalendarId(calId)
+      await _saveEvent(title)
+    }
   } catch (err) {
     console.error('Save failed:', err)
     el('ue-save-error').textContent = err.message || 'Save failed'

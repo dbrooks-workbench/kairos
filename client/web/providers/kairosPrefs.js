@@ -30,6 +30,8 @@ const DEFAULTS = () => ({
   recurringCollapsed:  false, // board: the synthetic Recurring column is collapsed to a strip
   doneCollapsed:       false, // board: the synthetic Done column is collapsed to a strip
   listsMigrated:       false, // one-time: legacy listId -> tag migration has run
+  lastUsedTaskCalendarId:  null,
+  lastUsedEventCalendarId: null,
 })
 
 let _prefs       = null
@@ -88,8 +90,10 @@ export function getRecurringCollapsed() { return _prefs?.recurringCollapsed  ?? 
 export function setRecurringCollapsed(v) { if (_prefs) { _prefs.recurringCollapsed = !!v; _dirty = true; _scheduleSave() } }
 export function getDoneCollapsed()      { return _prefs?.doneCollapsed       ?? false }
 export function setDoneCollapsed(v) { if (_prefs) { _prefs.doneCollapsed = !!v; _dirty = true; _scheduleSave() } }
-export function getListsMigrated()      { return _prefs?.listsMigrated       ?? false }
+export function getListsMigrated()          { return _prefs?.listsMigrated           ?? false }
 export function setListsMigrated(v) { if (_prefs) { _prefs.listsMigrated = !!v; _dirty = true; _scheduleSave() } }
+export function getLastUsedTaskCalendarId()  { return _prefs?.lastUsedTaskCalendarId  ?? null }
+export function getLastUsedEventCalendarId() { return _prefs?.lastUsedEventCalendarId ?? null }
 
 // ── Setters ───────────────────────────────────────────────────────────────────
 
@@ -140,6 +144,20 @@ export function setVisibilityWindow(startStr, endStr) {
   if (!_prefs) return
   _prefs.visibilityStart = startStr ?? null
   _prefs.visibilityEnd   = endStr   ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setLastUsedTaskCalendarId(id) {
+  if (!_prefs) return
+  _prefs.lastUsedTaskCalendarId = id ?? null
+  _dirty = true
+  _scheduleSave()
+}
+
+export function setLastUsedEventCalendarId(id) {
+  if (!_prefs) return
+  _prefs.lastUsedEventCalendarId = id ?? null
   _dirty = true
   _scheduleSave()
 }
