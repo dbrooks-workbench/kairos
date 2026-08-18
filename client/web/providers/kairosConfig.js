@@ -227,6 +227,10 @@ export function getTagColor(calendarId, name) {
   return _config[calendarId]?.palette?.[name] ?? defaultTagColor(name)
 }
 
+export function isConfigLoaded(calendarId) {
+  return Object.prototype.hasOwnProperty.call(_config, calendarId)
+}
+
 // All tag names known for a calendar (palette entries -- used for the typeahead).
 export function getPaletteTagNames(calendarId) {
   return Object.keys(_config[calendarId]?.palette ?? {}).sort((a, b) => a.localeCompare(b))

@@ -12,7 +12,7 @@ import {
 } from './providers/calendarTasks.js'
 import { normalizeLoe, nowTimestamp, displayTimestamp } from './providers/parsers.js'
 import { generateKairosId } from './providers/driveTaskMeta.js'
-import { getStatusesForCalendar, getStatus, getDefaultStatusId, getTagColor, getPaletteTagNames, ensureTags } from './providers/kairosConfig.js'
+import { getStatusesForCalendar, getStatus, getDefaultStatusId, getTagColor, getPaletteTagNames, ensureTags, isConfigLoaded, loadConfig } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
 import { getTaskCalendars, getLastUsedTaskCalendarId, getLastUsedEventCalendarId, setLastUsedTaskCalendarId, setLastUsedEventCalendarId } from './providers/kairosPrefs.js'
 import { getItemLog, appendLogEntry, updateLogEntry, deleteLogEntry } from './providers/lifeLog.js'
@@ -524,6 +524,13 @@ async function _populateCalendars(preferredId, preloaded) {
                  ?? filtered[0]?.id
                  ?? ''
   sel.value = chosen
+
+  // If this calendar's config hasn't been loaded yet (event calendars aren't
+  // preloaded at startup), load it on demand so the tag palette is available
+  // for autocomplete. Re-renders tags once the async load completes.
+  if (chosen && !isConfigLoaded(chosen)) {
+    getToken().then(tok => tok && loadConfig(tok, [chosen])).then(_renderTags).catch(() => {})
+  }
 
   // Populate the status dropdown after calendar is known (task mode only)
   if (_mode === 'task') _populateStatus(_editItem?.metadata?.statusId ?? null)
