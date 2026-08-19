@@ -617,13 +617,13 @@ export function initEditor() {
     if (_mode === 'event') return
     const cur = el('ue-calendar').value
     _setMode('event')
-    _populateCalendars(cur || null, null)
+    _populateCalendars(cur || null, null).then(_renderTags)
   })
   el('ue-mode-task').addEventListener('click', () => {
     if (_mode === 'task') return
     const cur = el('ue-calendar').value
     _setMode('task')
-    _populateCalendars(cur || getTaskCalendars()[0] || null, null)
+    _populateCalendars(cur || getTaskCalendars()[0] || null, null).then(_renderTags)
   })
 
   el('ue-allday').addEventListener('change', () => _setAllDayUI(el('ue-allday').checked))
