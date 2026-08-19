@@ -7,6 +7,12 @@ import { decodeTags } from './tagCodec.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3'
 
+// Sync tokens per calendar (regular events only — task events use a separate fetch).
+// Populated after each successful full fetch; cleared on 410 (stale token).
+const _syncTokens = new Map()   // calendarId → nextSyncToken
+
+export function clearSyncTokens() { _syncTokens.clear() }
+
 const EVENT_STATUS = {
   confirmed: 'CONFIRMED',
   tentative: 'TENTATIVE',
@@ -36,12 +42,14 @@ export async function apiError(label, res) {
 async function paginate(token, url) {
   const items = []
   let pageToken = null
+  let syncToken = null
   do {
     const data = await get(token, pageToken ? `${url}&pageToken=${pageToken}` : url)
     if (data.items?.length) items.push(...data.items)
     pageToken = data.nextPageToken ?? null
+    if (!pageToken) syncToken = data.nextSyncToken ?? null
   } while (pageToken)
-  return items
+  return { items, syncToken }
 }
 
 export async function getCalendars(token) {
@@ -198,10 +206,11 @@ export async function getEvents(token, start, end) {
         orderBy: 'startTime',
         maxResults: '2500',
       })
-      const events = await paginate(
+      const { items: events, syncToken } = await paginate(
         token,
         `${BASE}/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
       )
+      if (syncToken) _syncTokens.set(calendar.id, syncToken)
       // normalizeEvent returns null for isTask=true events — filter them out.
       const normalized = events.map(e => normalizeEvent(e, calendar)).filter(Boolean)
 
@@ -228,4 +237,55 @@ export async function getEvents(token, start, end) {
       if (r.status === 'rejected') { console.warn('Calendar fetch error:', r.reason); return [] }
       return r.value
     })
+}
+
+// Incremental refresh using stored sync tokens. Only covers non-task calendars
+// (task events use a separate filtered fetch that would need its own token).
+// Returns a merged CalendarItem[] on success, or null if any token is stale/missing
+// (caller should fall back to getEvents for a full re-fetch).
+//
+// `calendars` — the current calendarList (pass state.calendars from app.js).
+// `currentItems` — the last known full item list to merge into.
+export async function fetchDelta(token, calendars, currentItems) {
+  const taskCalIds = new Set(getTaskCalendars())
+
+  // Only include non-task calendars that already have a sync token.
+  // If any non-task calendar is missing a token, we can't do a complete delta.
+  const nonTaskCals = calendars.filter(c =>
+    !taskCalIds.has(c.id) && c.accessRole !== 'freeBusyReader'
+  )
+  if (nonTaskCals.length === 0) return null
+  if (nonTaskCals.some(c => !_syncTokens.has(c.id))) return null
+
+  await Promise.all([loadCompletionStore(token), loadLifeLog(token)])
+
+  let merged = [...currentItems]
+  let stale  = false
+
+  await Promise.allSettled(nonTaskCals.map(async calendar => {
+    const syncToken = _syncTokens.get(calendar.id)
+    const params = new URLSearchParams({ syncToken, singleEvents: 'true', maxResults: '2500' })
+    const url = `${BASE}/calendars/${encodeURIComponent(calendar.id)}/events?${params}`
+
+    let delta, newToken
+    try {
+      ;({ items: delta, syncToken: newToken } = await paginate(token, url))
+    } catch (err) {
+      if (err.message?.includes('410')) { _syncTokens.delete(calendar.id); stale = true; return }
+      throw err
+    }
+    if (newToken) _syncTokens.set(calendar.id, newToken)
+
+    for (const event of delta) {
+      if (event.extendedProperties?.private?.kairosConfig === 'true') continue
+      const id = `gcal:${calendar.id}:${event.id}`
+      merged = merged.filter(i => i.id !== id)
+      if (event.status !== 'cancelled') {
+        const normalized = normalizeEvent(event, calendar)
+        if (normalized) merged.push(normalized)
+      }
+    }
+  }))
+
+  return stale ? null : merged
 }

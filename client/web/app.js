@@ -1,6 +1,6 @@
 import { getToken, getTokens, isAuthenticated, logout, logoutAccount, addAccount, loginUrl, invalidateCache } from './auth.js'
 import { processSpawnDirectives } from './spawn.js'
-import { getCalendars, getEvents, updateEvent } from './providers/googleCalendar.js'
+import { getCalendars, getEvents, fetchDelta, clearSyncTokens, updateEvent } from './providers/googleCalendar.js'
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getMaxWindowDays, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
 import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
@@ -59,10 +59,10 @@ import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
 import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
-import { initTimedDrag, destroyTimedDrag } from './calendarDrag.js'
+import { initTimedDrag, destroyTimedDrag, isDragging } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.36.6'
+const VERSION   = '0.37.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -417,11 +417,16 @@ async function loadCalendars() {
 
 async function fetchItems(start, end) {
   const token = await getToken()
-  if (!token) return []
-  const items = await getEvents(token, start, end)
-    .catch(err => { console.error('Calendar events fetch failed:', err); return [] })
-  _weekCache.set(start.getTime(), { items, ts: Date.now() })
-  return items
+  if (!token) return null
+  try {
+    const items = await getEvents(token, start, end)
+    _weekCache.set(start.getTime(), { items, ts: Date.now() })
+    return items
+  } catch (err) {
+    console.error('Calendar events fetch failed:', err)
+    clearSyncTokens()   // stale token may have caused a rate-limit cascade; start fresh
+    return null
+  }
 }
 
 async function handleToggleTask(item) {
@@ -576,11 +581,64 @@ function preloadAdjacentWeeks() {
 
 // ── Calendar-view modal callbacks ─────────────────────────────────────────────
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let _toastTimer = null
+function showToast(msg) {
+  let el = document.getElementById('kairos-toast')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'kairos-toast'
+    document.body.appendChild(el)
+  }
+  el.textContent = msg
+  el.classList.add('visible')
+  if (_toastTimer) clearTimeout(_toastTimer)
+  _toastTimer = setTimeout(() => { el.classList.remove('visible'); _toastTimer = null }, 4000)
+}
+
+// ── Calendar-view item refresh ────────────────────────────────────────────────
+
+// Used by polling and visibilitychange. Tries a sync-token delta first; falls
+// back to a full fetch. Skips entirely if a drag is active (post-drag onRefresh
+// fires immediately after, ensuring consistency).
+async function _refreshItems() {
+  if (isDragging()) return
+
+  const end = addDays(state.weekStart, 7)
+
+  // Try incremental delta (fetchDelta returns null until tokens are populated
+  // after the first full fetch, or when coverage is incomplete — caller falls through)
+  const token = await getToken()
+  if (token && state.calendars.length) {
+    const delta = await fetchDelta(token, state.calendars, state.items).catch(err => {
+      console.warn('Delta fetch failed, falling back to full refresh:', err)
+      return null
+    })
+    if (delta !== null) {
+      state.items = delta
+      renderItems(getVisibleItems())
+      return
+    }
+  }
+
+  // Full fetch fallback
+  const items = await fetchItems(state.weekStart, end)
+  if (items !== null) {
+    state.items = items
+    renderItems(getVisibleItems())
+  } else {
+    showToast('Could not refresh calendar — showing last known data')
+  }
+}
+
 async function refreshCalendarItems() {
   const end  = addDays(state.weekStart, 7)
   const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
-  state.items = items
-  renderItems(getVisibleItems())
+  if (items !== null) {
+    state.items = items
+    renderItems(getVisibleItems())
+  }
 }
 
 function calendarModalCallbacks() {
@@ -714,10 +772,7 @@ function startPolling(ms) {
     if (WORK_VIEWS.includes(state.view)) {
       await loadBoardData()
     } else {
-      const end  = addDays(state.weekStart, 7)
-      const [items] = await Promise.all([fetchItems(state.weekStart, end), refreshPastDueTasks()])
-      state.items = items
-      renderItems(getVisibleItems())
+      await _refreshItems()
     }
   }, ms)
 }
@@ -731,14 +786,12 @@ function stopPolling() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
   invalidateCache()
+  clearSyncTokens()   // force full re-fetch on tab return — token covers changes while hidden
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
       if (WORK_VIEWS.includes(state.view)) loadBoardData()
-      else fetchItems(state.weekStart, addDays(state.weekStart, 7)).then(items => {
-        state.items = items
-        renderItems(getVisibleItems())
-      })
+      else _refreshItems()
     })
 })
 
@@ -2305,7 +2358,11 @@ async function render() {
       getToken().then(t => t ? loadStatusConfig(t).then(() => { renderItems(getVisibleItems()); renderFilterBar() }) : null).catch(console.warn)
       ensureVisibilityReady()
       renderVisibilityPill()
-      state.items = items
+      if (items !== null) {
+        state.items = items
+      } else {
+        showToast('Calendar failed to load — check your connection and refresh')
+      }
       renderItems(getVisibleItems())
       getToken().then(t => { if (t) ensureFooters(t, state.items).catch(console.warn) })
     }

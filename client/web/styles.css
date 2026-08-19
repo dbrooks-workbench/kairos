@@ -602,6 +602,28 @@ body {
 
 #connect-banner a:hover { text-decoration: underline; }
 
+/* ── Toast notification ──────────────────────────────────────────────────────*/
+#kairos-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  background: #323232;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 9999;
+}
+#kairos-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ── Calendar shell ──────────────────────────────────────────────────────────
    #timed-scroll is THE single scroll container. #col-headers, #allday-row,
    and #timed-area are all direct children so they share one content width.

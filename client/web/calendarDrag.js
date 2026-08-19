@@ -55,6 +55,8 @@ export function initTimedDrag(weekStart, items, cbs) {
   document.addEventListener('mouseup',   _onUp)
 }
 
+export function isDragging() { return _drag !== null }
+
 export function destroyTimedDrag() {
   const tc = document.getElementById('timed-cols')
   if (tc) {
