@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag, isDragging } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.37.0'
+const VERSION   = '0.37.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -410,9 +410,73 @@ async function loadCalendars() {
   try {
     state.calendars = await getCalendars(token)
     renderCalendarPicker()
+    ensureCalendarWatches(token, state.calendars).catch(err =>
+      console.warn('Watch registration failed:', err)
+    )
   } catch (err) {
     console.error('Failed to load calendar list:', err)
   }
+}
+
+// ── Calendar push-notification watches ───────────────────────────────────────
+
+const _WATCH_URL     = 'https://kairos.inlandsoftware.com/api/calendar-webhook'
+const _WATCH_RENEW_T = 24 * 60 * 60 * 1000   // re-register if expiring within 24 h
+
+async function ensureCalendarWatches(token, calendars) {
+  // Google requires a public HTTPS callback — skip in local dev
+  if (window.location.hostname === 'localhost') return
+
+  // Check current watch expiry
+  const pollRes = await fetch('/api/calendar-poll', { credentials: 'include' }).catch(() => null)
+  if (!pollRes?.ok) return
+  const { watchExpiry } = await pollRes.json()
+  if (watchExpiry && watchExpiry > Date.now() + _WATCH_RENEW_T) return  // still fresh
+
+  // Get the webhook token used to authenticate Google's callbacks
+  const wtRes = await fetch('/api/webhook-token', { credentials: 'include' }).catch(() => null)
+  if (!wtRes?.ok) return
+  const { token: webhookToken } = await wtRes.json()
+  if (!webhookToken) return
+
+  // Register a watch per calendar (skipping freeBusy-only calendars)
+  const channels = []
+  await Promise.allSettled(
+    calendars
+      .filter(c => c.accessRole !== 'freeBusyReader')
+      .map(async cal => {
+        const res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events/watch`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id:      crypto.randomUUID(),
+              type:    'web_hook',
+              address: _WATCH_URL,
+              token:   webhookToken,
+              params:  { ttl: '604800' },   // request 7 days; Google may grant less
+            }),
+          }
+        )
+        if (!res.ok) { console.warn(`Watch failed for ${cal.id}:`, res.status); return }
+        const data = await res.json()
+        channels.push({
+          channelId:  data.id,
+          resourceId: data.resourceId,
+          calendarId: cal.id,
+          expiration: Number(data.expiration),
+        })
+      })
+  )
+
+  if (!channels.length) return
+  await fetch('/api/save-watch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channels }),
+    credentials: 'include',
+  }).catch(() => {})
 }
 
 async function fetchItems(start, end) {
@@ -618,6 +682,7 @@ async function _refreshItems() {
     if (delta !== null) {
       state.items = delta
       renderItems(getVisibleItems())
+      _lastRefreshedAt = Date.now()
       return
     }
   }
@@ -627,6 +692,7 @@ async function _refreshItems() {
   if (items !== null) {
     state.items = items
     renderItems(getVisibleItems())
+    _lastRefreshedAt = Date.now()
   } else {
     showToast('Could not refresh calendar — showing last known data')
   }
@@ -638,6 +704,7 @@ async function refreshCalendarItems() {
   if (items !== null) {
     state.items = items
     renderItems(getVisibleItems())
+    _lastRefreshedAt = Date.now()
   }
 }
 
@@ -693,10 +760,10 @@ function setView(v, { updateUrl = true, replace = false } = {}) {
   stopPolling()
   if (isWork) {
     loadBoardData()
-    startPolling(60_000)
+    startPolling()
   } else {
     render()
-    startPolling(120_000)
+    startPolling()
   }
 }
 
@@ -762,19 +829,37 @@ function updateWorkViewButtons() {
 
 // ── Polling ───────────────────────────────────────────────────────────────────
 
-let _pollHandle = null
+let _pollHandle   = null
+let _lastRefreshedAt = 0      // set after every successful refresh; compared to changedAt from KV
+let _lastSpawnAt  = 0
+const _SPAWN_MIN  = 2 * 60 * 1000   // spawn scan runs at most once per 2 min
 
-function startPolling(ms) {
+function startPolling() {
   stopPolling()
   _pollHandle = setInterval(async () => {
     if (document.hidden) return
-    await runSpawnScan()
-    if (WORK_VIEWS.includes(state.view)) {
-      await loadBoardData()
-    } else {
-      await _refreshItems()
+
+    // Spawn scan — keep at the prior 2-minute effective cadence
+    if (Date.now() - _lastSpawnAt >= _SPAWN_MIN) {
+      await runSpawnScan()
+      _lastSpawnAt = Date.now()
     }
-  }, ms)
+
+    // KV change poll — check if Google notified us of a change since last refresh
+    try {
+      const res = await fetch('/api/calendar-poll', { credentials: 'include' })
+      if (!res.ok) return
+      const { changedAt } = await res.json()
+      if (changedAt && changedAt > _lastRefreshedAt) {
+        if (WORK_VIEWS.includes(state.view)) await loadBoardData()
+        else await _refreshItems()
+        // _lastRefreshedAt is updated inside _refreshItems / loadBoardData doesn't
+        // need it tracked (board has its own freshness logic)
+      }
+    } catch (err) {
+      console.warn('Calendar poll failed:', err)
+    }
+  }, 20_000)
 }
 
 function stopPolling() {
@@ -2547,7 +2632,7 @@ render().then(async () => {
   runSpawnScan()
   runSweepIfConfigured()
   setInterval(runSweepIfConfigured, SWEEP_INTERVAL)
-  startPolling(120_000)
+  startPolling()
 
   // One-time global footer backfill — fetches masters (not instances) so recurring
   // tasks propagate the footer to all future instances via description inheritance.
