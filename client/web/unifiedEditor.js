@@ -379,15 +379,18 @@ function _initCustomRecur() {
   el('crp-freq').addEventListener('change', e => {
     _crpFreq = e.target.value
     el('crp-days-row').hidden = _crpFreq !== 'WEEKLY'
+    _preserveRrule = null   // user edited the panel — rebuild from UI state on save
   })
   el('crp-interval').addEventListener('input', e => {
     _crpInterval = Math.max(1, parseInt(e.target.value, 10) || 1)
+    _preserveRrule = null
   })
   document.querySelectorAll('.crp-day').forEach(btn => {
     btn.addEventListener('click', () => {
       const day = btn.dataset.day
       if (_crpByDay.has(day)) { _crpByDay.delete(day); btn.classList.remove('active') }
       else                    { _crpByDay.add(day);    btn.classList.add('active') }
+      _preserveRrule = null
     })
   })
   document.querySelectorAll('input[name="crp-end"]').forEach(radio => {
@@ -395,10 +398,11 @@ function _initCustomRecur() {
       _crpEndType = e.target.value
       el('crp-end-date').disabled  = _crpEndType !== 'date'
       el('crp-end-count').disabled = _crpEndType !== 'count'
+      _preserveRrule = null
     })
   })
-  el('crp-end-date').addEventListener('input',  e => { _crpEndDate  = e.target.value })
-  el('crp-end-count').addEventListener('input', e => { _crpEndCount = parseInt(e.target.value, 10) || 10 })
+  el('crp-end-date').addEventListener('input',  e => { _crpEndDate  = e.target.value; _preserveRrule = null })
+  el('crp-end-count').addEventListener('input', e => { _crpEndCount = parseInt(e.target.value, 10) || 10; _preserveRrule = null })
 }
 
 function _resetCustomRecur(startDateStr) {
@@ -1355,7 +1359,7 @@ async function _saveAllTask(token, calId, taskData) {
   const masterEndTime = master.end?.dateTime   ? master.end.dateTime.slice(11, 16)   : null
   // Rebuild RRULE using master's start date to keep BYDAY consistent
   const freq  = el('ue-recur').value
-  const rrule = freq === 'CUSTOM' ? _preserveRrule
+  const rrule = freq === 'CUSTOM' ? (_preserveRrule ?? _buildCustomRrule())
     : freq ? (_buildRrule(freq, masterDate) ?? null) : null
   const tdForMaster = {
     ...taskData,
