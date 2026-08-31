@@ -1125,6 +1125,12 @@ async function _saveEvent(title) {
   }
 
   if (allDay) {
+    if (!startDate) {
+      el('ue-save-error').textContent = 'Please add a date.'
+      el('ue-save-error').hidden = false
+      el('ue-save').disabled = false
+      return
+    }
     const endD = new Date((endDate <= startDate ? startDate : endDate) + 'T00:00:00')
     endD.setDate(endD.getDate() + 1)
     const pad = v => String(v).padStart(2, '0')
@@ -1279,8 +1285,11 @@ async function _executeWithScope(scope) {
       else if (scope === 'following') await _saveFollowingTask(token, calId, td)
       else                            await updateTask(token, calId, extId, { ...td, recurrence: undefined })
     } else {
-      const calId   = _editItem.source.account_id
-      const extId   = _editItem.source.external_id
+      const calId = _editItem.source.account_id
+      const extId = _editItem.source.external_id
+      // Google doesn't allow changing an instance's format (timed ↔ all-day) without
+      // also updating the master — redirect 'this' to 'all' when the format changes.
+      if (scope === 'this' && !!_editItem.all_day !== !!pending.start?.date) scope = 'all'
       if (scope === 'all')            await _saveAll(token, pending)
       else if (scope === 'following') await _saveFollowing(token, pending)
       else                            await updateEvent(token, calId, extId, pending)
@@ -1306,13 +1315,28 @@ async function _saveAll(token, body) {
   if (body.description !== undefined)  mb.description = body.description
   if (body.recurrence?.length)         mb.recurrence  = body.recurrence
   if (body.extendedProperties)         mb.extendedProperties = body.extendedProperties  // task→event marker clearing
+  const pad = v => String(v).padStart(2, '0')
   if (body.start?.dateTime && master.start?.dateTime) {
-    const newTime  = body.start.dateTime.slice(11)
-    const origDate = master.start.dateTime.slice(0, 11)
+    // timed → timed: preserve master's anchor date, apply new time
+    const newTime    = body.start.dateTime.slice(11)
+    const origDate   = master.start.dateTime.slice(0, 11)
     mb.start = { dateTime: origDate + newTime, timeZone: body.start.timeZone }
     const newEndTime  = body.end.dateTime.slice(11)
     const origEndDate = master.end?.dateTime?.slice(0, 11) ?? origDate
     mb.end = { dateTime: origEndDate + newEndTime, timeZone: body.end.timeZone }
+  } else if (body.start?.date && master.start?.dateTime) {
+    // timed → all-day: convert master using its own anchor date (not the instance's date)
+    const masterDate = master.start.dateTime.slice(0, 10)
+    const endD = new Date(masterDate + 'T00:00:00')
+    endD.setDate(endD.getDate() + 1)
+    mb.start = { date: masterDate }
+    mb.end   = { date: `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}` }
+  } else if (body.start?.dateTime && master.start?.date) {
+    // all-day → timed: convert master using its own anchor date with the new time
+    const masterDate    = master.start.date
+    const masterEndDate = master.end?.date ?? masterDate
+    mb.start = { dateTime: `${masterDate}T${body.start.dateTime.slice(11)}`, timeZone: body.start.timeZone }
+    mb.end   = { dateTime: `${masterEndDate}T${body.end.dateTime.slice(11)}`, timeZone: body.end.timeZone }
   }
   await updateEvent(token, calId, masterId, mb)
 }
