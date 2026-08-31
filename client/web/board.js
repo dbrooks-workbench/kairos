@@ -17,7 +17,8 @@ const RECURRING_COL_ID = '__recurring__'
 // just advances the series to the next occurrence).
 const _isRecurring = item => !!(item.recurrence || item.metadata?.recurringEventId)
 
-let _sortables  = []
+let _sortables    = []
+let _boardDragging = false   // true while a Sortable drag is in flight; guards external re-renders
 let _callbacks  = {}
 let _statuses   = []   // Kairos statuses [{id, calendarId, name, order, inProgress}] for the selected calendar
 let _calendarId = null // calendar the board is scoped to
@@ -213,10 +214,13 @@ export function initSnooze() {
 // ── Board render ──────────────────────────────────────────────────────────────
 
 export function destroyBoard() {
+  _boardDragging = false   // defensive: clear state if board is torn down mid-drag
   _sortables.forEach(s => { try { s.destroy() } catch {} })
   _sortables = []
   document.getElementById('board').innerHTML = ''
 }
+
+export function isBoardDragging() { return _boardDragging }
 
 export function renderBoard(statuses, boardItems, callbacks, doneWindow = 30, calendarId = null) {
   _statuses   = [...statuses].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
@@ -701,7 +705,8 @@ function _onDragKeydown(e) {
   document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
 }
 function _onDragStart() {
-  _dragCancelled = false
+  _dragCancelled  = false
+  _boardDragging  = true
   document.addEventListener('keydown', _onDragKeydown)
 }
 // Returns true if the just-ended drag was cancelled (and reverts the board).
@@ -710,6 +715,7 @@ function _dragWasCancelled() {
   document.removeEventListener('keydown', _onDragKeydown)
   if (!_dragCancelled) return false
   _dragCancelled = false
+  _boardDragging = false
   _rerender()
   return true
 }
@@ -731,6 +737,7 @@ function _taskSortable(listEl, extra = {}) {
 
 async function handleDrop(evt) {
   if (_dragWasCancelled()) return
+  _boardDragging = false   // SortableJS has settled the DOM; safe for external re-renders
   const { item: cardEl, from, to } = evt
   if (from === to && evt.oldIndex === evt.newIndex) return
 
@@ -850,6 +857,7 @@ function _updateColumnCounts() {
 
 async function handleColReorder() {
   if (_dragWasCancelled()) return
+  _boardDragging = false
   const board  = document.getElementById('board')
   const colEls = [...board.querySelectorAll('.board-col-reorderable')]
   const token  = await getToken()

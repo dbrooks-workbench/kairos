@@ -56,13 +56,13 @@ async function loadStatusConfig(token) {
 }
 import { setCompleted, setUncompleted } from './providers/completionStore.js'
 import { appendLogEntry, relinkLogEntries } from './providers/lifeLog.js'
-import { renderBoard, destroyBoard, initSnooze, openSnoozePopover } from './board.js'
+import { renderBoard, destroyBoard, isBoardDragging, initSnooze, openSnoozePopover } from './board.js'
 import { runSweep, getGtLists } from './providers/taskSweep.js'
 import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag, isDragging } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.37.3'
+const VERSION   = '0.37.4'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -851,7 +851,7 @@ function startPolling() {
       if (!res.ok) return
       const { changedAt } = await res.json()
       if (changedAt && changedAt > _lastRefreshedAt) {
-        if (WORK_VIEWS.includes(state.view)) await loadBoardData()
+        if (WORK_VIEWS.includes(state.view)) { if (!isBoardDragging()) await loadBoardData() }
         else await _refreshItems()
         // _lastRefreshedAt is updated inside _refreshItems / loadBoardData doesn't
         // need it tracked (board has its own freshness logic)
@@ -875,7 +875,7 @@ document.addEventListener('visibilitychange', () => {
   runSpawnScan()
     .then(() => {
       runSweepIfConfigured()
-      if (WORK_VIEWS.includes(state.view)) loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) { if (!isBoardDragging()) loadBoardData() }
       else _refreshItems()
     })
 })
@@ -1441,7 +1441,7 @@ async function runSpawnScan() {
     const items  = await fetchItems(today, future)
     const { spawned } = await processSpawnDirectives(items, state.taskLists)
     if (spawned > 0) {
-      if (WORK_VIEWS.includes(state.view)) loadBoardData()
+      if (WORK_VIEWS.includes(state.view)) { if (!isBoardDragging()) loadBoardData() }
       else refreshCalendarItems()
     }
   } catch (err) {
