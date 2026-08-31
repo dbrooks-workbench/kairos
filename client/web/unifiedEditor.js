@@ -1188,6 +1188,16 @@ async function _saveEvent(title) {
     return
   }
 
+  // Validate start/end format before hitting the API — catches any date-construction
+  // bugs locally so the error is descriptive rather than "Invalid start time" from Google.
+  if (body.start?.date && !/^\d{4}-\d{2}-\d{2}$/.test(body.start.date))
+    throw new Error(`Bad start date: "${body.start.date}"`)
+  if (body.end?.date && !/^\d{4}-\d{2}-\d{2}$/.test(body.end.date))
+    throw new Error(`Bad end date: "${body.end.date}"`)
+  if (body.start?.dateTime && !/^\d{4}-\d{2}-\d{2}T/.test(body.start.dateTime))
+    throw new Error(`Bad start dateTime: "${body.start.dateTime}"`)
+  console.log('[saveEvent] body:', JSON.stringify(body), 'extId:', _editItem?.source.external_id)
+
   let savedId = _editItem?.source.external_id ?? null
   if (_editItem) {
     const origCal = _originalCalendarId ?? _editItem.source.account_id

@@ -34,7 +34,10 @@ export async function apiError(label, res) {
   try {
     const body = await res.json()
     const e = body?.error
-    reason = e?.message || e?.errors?.[0]?.message || e?.errors?.[0]?.reason || reason
+    const primary = e?.message || reason
+    const detail  = e?.errors?.map(x => `${x.domain || ''}.${x.reason || ''}: ${x.message || ''}`).join('; ')
+    reason = detail ? `${primary} [${detail}]` : primary
+    console.error(`[apiError] ${label} ${res.status}:`, body?.error ?? body)
   } catch { /* non-JSON body */ }
   return new Error(`${label}: ${res.status}${reason ? ` ${reason}` : ''}`)
 }
