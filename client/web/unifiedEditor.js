@@ -1134,11 +1134,14 @@ async function _saveEvent(title) {
     const endD = new Date((endDate <= startDate ? startDate : endDate) + 'T00:00:00')
     endD.setDate(endD.getDate() + 1)
     const pad = v => String(v).padStart(2, '0')
-    body.start = { date: startDate }
-    body.end   = { date: `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}` }
+    // Null out dateTime/timeZone: Google PATCH deep-merges start/end, so old
+    // dateTime stays unless explicitly cleared, causing "Invalid start time."
+    body.start = { date: startDate, dateTime: null, timeZone: null }
+    body.end   = { date: `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}`, dateTime: null, timeZone: null }
   } else {
-    body.start = { dateTime: `${startDate}T${startTime}:00`, timeZone: tz }
-    body.end   = { dateTime: `${endDate}T${endTime}:00`,     timeZone: tz }
+    // Null out date for the same reason: existing date must be cleared when converting to timed.
+    body.start = { date: null, dateTime: `${startDate}T${startTime}:00`, timeZone: tz }
+    body.end   = { date: null, dateTime: `${endDate}T${endTime}:00`,     timeZone: tz }
   }
 
   if (freq && !startDate) {
@@ -1196,8 +1199,6 @@ async function _saveEvent(title) {
     throw new Error(`Bad end date: "${body.end.date}"`)
   if (body.start?.dateTime && !/^\d{4}-\d{2}-\d{2}T/.test(body.start.dateTime))
     throw new Error(`Bad start dateTime: "${body.start.dateTime}"`)
-  console.log('[saveEvent] body:', JSON.stringify(body), 'extId:', _editItem?.source.external_id)
-
   let savedId = _editItem?.source.external_id ?? null
   if (_editItem) {
     const origCal = _originalCalendarId ?? _editItem.source.account_id
@@ -1339,14 +1340,14 @@ async function _saveAll(token, body) {
     const masterDate = master.start.dateTime.slice(0, 10)
     const endD = new Date(masterDate + 'T00:00:00')
     endD.setDate(endD.getDate() + 1)
-    mb.start = { date: masterDate }
-    mb.end   = { date: `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}` }
+    mb.start = { date: masterDate, dateTime: null, timeZone: null }
+    mb.end   = { date: `${endD.getFullYear()}-${pad(endD.getMonth()+1)}-${pad(endD.getDate())}`, dateTime: null, timeZone: null }
   } else if (body.start?.dateTime && master.start?.date) {
     // all-day → timed: convert master using its own anchor date with the new time
     const masterDate    = master.start.date
     const masterEndDate = master.end?.date ?? masterDate
-    mb.start = { dateTime: `${masterDate}T${body.start.dateTime.slice(11)}`, timeZone: body.start.timeZone }
-    mb.end   = { dateTime: `${masterEndDate}T${body.end.dateTime.slice(11)}`, timeZone: body.end.timeZone }
+    mb.start = { date: null, dateTime: `${masterDate}T${body.start.dateTime.slice(11)}`, timeZone: body.start.timeZone }
+    mb.end   = { date: null, dateTime: `${masterEndDate}T${body.end.dateTime.slice(11)}`, timeZone: body.end.timeZone }
   }
   await updateEvent(token, calId, masterId, mb)
 }
