@@ -215,6 +215,10 @@ export function initSnooze() {
 
 export function destroyBoard() {
   _boardDragging = false   // defensive: clear state if board is torn down mid-drag
+  // SortableJS removes its fallback clone after the onEnd callback returns, but
+  // destroyBoard() is sometimes called FROM onEnd (via _dragWasCancelled → _rerender).
+  // s.destroy() then fires before SortableJS can clean up — remove the clone explicitly.
+  document.querySelectorAll('.sortable-fallback').forEach(el => el.remove())
   _sortables.forEach(s => { try { s.destroy() } catch {} })
   _sortables = []
   document.getElementById('board').innerHTML = ''

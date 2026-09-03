@@ -129,6 +129,9 @@ export async function loadConfig(token, calendarIds, seedStatuses = null) {
 }
 
 async function _loadOne(token, calendarId, seedStatuses) {
+  // Skip re-fetch if already in memory: updateStatus/createStatus keep _config current,
+  // and re-fetching races with in-flight PATCHes (e.g. column reorder not yet propagated).
+  if (_config[calendarId]) return
   const existing = await _findConfigEvent(token, calendarId)
   if (existing) {
     _config[calendarId] = _parseConfigEvent(existing)

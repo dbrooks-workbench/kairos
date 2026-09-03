@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag, isDragging } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.38.0'
+const VERSION   = '0.38.1'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -1423,7 +1423,7 @@ async function openConfigDialog() {
       if (result.failed)  parts.push(`${result.failed} failed`)
       if (result.skipped) parts.push(`${result.skipped} skipped`)
       status.textContent = `Done — ${parts.join(', ')}`
-      if (result.swept > 0) { _weekCache.clear(); loadBoardData() }
+      if (result.swept > 0) { _weekCache.clear(); if (!isBoardDragging()) loadBoardData() }
     } catch (err) {
       status.textContent = `Error: ${err.message}`
     } finally {
