@@ -414,21 +414,28 @@ function buildCol(status, items, colType, doneWindow, isIntake = false, collapse
       })
     })
 
-    // Hammer toggle: mark this status as an "in progress" stage. Many statuses
-    // may be flagged; any task in a flagged status gets the green treatment.
+    // Progress toggle: cycles none → ready → in-progress → none.
+    // "ready" pins undated tasks to today's calendar slot; "in-progress" gives the green ring.
+    const _PROGRESS_CYCLE = { '': 'ready', 'ready': 'in-progress', 'in-progress': '' }
+    const _PROGRESS_ICON  = { '': '🔨', 'ready': '⚑', 'in-progress': '🔨' }
+    const _PROGRESS_TITLE = {
+      '':            'Mark as Ready (pins undated tasks to today)',
+      'ready':       'Ready — click to mark as In Progress',
+      'in-progress': 'In Progress — click to clear',
+    }
+    const curProgress = status.progress ?? (status.inProgress ? 'in-progress' : '')
     const hammerBtn = document.createElement('button')
-    hammerBtn.className   = `col-inprogress-btn${status.inProgress ? ' active' : ''}`
-    hammerBtn.textContent = '🔨'
-    hammerBtn.title       = status.inProgress
-      ? 'In-progress stage — click to unset'
-      : 'Mark as an in-progress stage'
+    hammerBtn.className   = `col-inprogress-btn${curProgress === 'in-progress' ? ' active' : curProgress === 'ready' ? ' ready' : ''}`
+    hammerBtn.textContent = _PROGRESS_ICON[curProgress] ?? '🔨'
+    hammerBtn.title       = _PROGRESS_TITLE[curProgress] ?? ''
     hammerBtn.addEventListener('click', async () => {
       try {
         const token = await getToken()
-        if (token) await updateStatus(token, status.id, { inProgress: !status.inProgress })
+        const next = _PROGRESS_CYCLE[status.progress ?? (status.inProgress ? 'in-progress' : '')] ?? 'ready'
+        if (token) await updateStatus(token, status.id, { progress: next })
         _callbacks.onRefresh?.()
       } catch (err) {
-        console.error('Toggle in-progress failed:', err)
+        console.error('Toggle progress failed:', err)
       }
     })
     hdr.appendChild(hammerBtn)
@@ -589,9 +596,11 @@ function buildCard(item) {
   const today     = new Date(); today.setHours(0, 0, 0, 0)
   const isPastDue = !isDone && item.due && new Date(item.due).setHours(0, 0, 0, 0) < today
   const st        = item.metadata?.statusId ? _statuses.find(s => s.id === item.metadata.statusId) : null
-  const inProgress = !isDone && !isPastDue && !!st?.inProgress
+  const progress   = st?.progress ?? (st?.inProgress ? 'in-progress' : '')
+  const inProgress = !isDone && !isPastDue && progress === 'in-progress'
+  const isReady    = !isDone && !isPastDue && progress === 'ready'
   const card   = document.createElement('div')
-  card.className          = `board-card${isDone ? ' board-card-done' : ''}${inProgress ? ' in-progress' : ''}`
+  card.className          = `board-card${isDone ? ' board-card-done' : ''}${inProgress ? ' in-progress' : ''}${isReady ? ' ready' : ''}`
   card.dataset.itemId     = item.id
   card.dataset.statusId   = _effectiveStatusId(item) ?? ''
   card.dataset.calendarId = item.source.account_id

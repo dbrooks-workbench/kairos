@@ -1,5 +1,6 @@
 import { generateKairosId } from './driveTaskMeta.js'
 import { encodeTags, decodeTags } from './tagCodec.js'
+import { getReadyStatusIds } from './kairosConfig.js'
 
 // Task events stored in Google Calendar using extendedProperties.private.
 // isTask='true' marks the event as a Kairos task (never a regular event).
@@ -363,7 +364,39 @@ export async function getTaskEvents(token, calendarId, start, end) {
     orderBy:      'startTime',
     maxResults:   '2500',
   })
-  return (await _fetchPage(token, calendarId, params)).map(e => normalizeTask(e, calendarId))
+  const dated = (await _fetchPage(token, calendarId, params)).map(e => normalizeTask(e, calendarId))
+
+  // Inject undated "Ready" tasks into today's slot so they surface on the calendar
+  // even though they have no scheduled date (stored at the sentinel 1970-01-01).
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  if (today >= start && today < end) {
+    const readyIds = getReadyStatusIds()
+    if (readyIds.size > 0) {
+      const sentinelParams = new URLSearchParams({
+        privateExtendedProperty: 'isTask=true',
+        timeMin:      KAIROS_UNDATED_SENTINEL + 'T00:00:00Z',
+        timeMax:      KAIROS_UNDATED_SENTINEL + 'T23:59:59Z',
+        singleEvents: 'true',
+        orderBy:      'startTime',
+        maxResults:   '2500',
+      })
+      const sentinelRaw = await _fetchPage(token, calendarId, sentinelParams)
+      const existingExtIds = new Set(dated.map(t => t.source.external_id))
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+      for (const e of sentinelRaw) {
+        const sid = e.extendedProperties?.private?.statusId
+        if (!sid || !readyIds.has(sid)) continue
+        if (existingExtIds.has(e.id)) continue   // already in range (shouldn't happen for undated)
+        const task = normalizeTask(e, calendarId)
+        // Override the sentinel date to today for calendar rendering
+        task.start = new Date(todayStr + 'T00:00:00')
+        task.due   = task.start
+        dated.push(task)
+      }
+    }
+  }
+
+  return dated
 }
 
 // Returns all task events for board view: Kairos-tagged events plus any untagged

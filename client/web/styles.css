@@ -1012,6 +1012,12 @@ body.resize-active * { cursor: ns-resize !important; }
   box-shadow: 0 0 0 2px var(--task-color);
 }
 
+/* Ready task chips — amber ring: staged and waiting to be worked */
+.allday-event.ready,
+.cal-event.ready {
+  box-shadow: 0 0 0 2px #f59e0b;
+}
+
 /* Calendar drag-to-move */
 .allday-event.type-task[draggable="true"] { cursor: grab; }
 .allday-event.type-task.drag-source { opacity: 0.4; }
@@ -1660,6 +1666,7 @@ body.resize-active * { cursor: ns-resize !important; }
 }
 .col-inprogress-btn:hover { opacity: 0.7; }
 .col-inprogress-btn.active { opacity: 1; filter: none; }
+.col-inprogress-btn.ready  { opacity: 1; filter: none; color: #f59e0b; }
 
 /* Active-project selector — a small control nestled *inside* the view switcher,
    right after the Board icon (shown only on the board view). Vertically centered
@@ -1785,6 +1792,10 @@ body.resize-active * { cursor: ns-resize !important; }
 /* In-progress status — green border (matches the calendar chip ring) */
 .board-card.in-progress {
   border-color: var(--task-color);
+}
+
+.board-card.ready {
+  border-color: #f59e0b;
 }
 
 .board-card-title {
@@ -2877,6 +2888,7 @@ body.resize-active * { cursor: ns-resize !important; }
 .mobile-allday-chip.is-past     { opacity: 0.45; }
 .mobile-allday-chip.past-due    { box-shadow: 0 0 0 2px #c5221f; }
 .mobile-allday-chip.in-progress { box-shadow: 0 0 0 2px var(--task-color); }
+.mobile-allday-chip.ready       { box-shadow: 0 0 0 2px #f59e0b; }
 
 #mobile-timed-area {
   flex-shrink: 0;
@@ -2949,6 +2961,7 @@ body.resize-active * { cursor: ns-resize !important; }
 .mobile-cal-event.is-past     { opacity: 0.45; }
 .mobile-cal-event.past-due    { box-shadow: 0 0 0 2px #c5221f; }
 .mobile-cal-event.in-progress { box-shadow: 0 0 0 2px var(--task-color); }
+.mobile-cal-event.ready       { box-shadow: 0 0 0 2px #f59e0b; }
 
 .mobile-event-title { font-weight: 600; line-height: 1.3; }
 .mobile-event-time  { font-weight: 400; opacity: 0.85; font-size: 11px; line-height: 1.3; }

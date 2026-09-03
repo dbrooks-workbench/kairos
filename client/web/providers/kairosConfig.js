@@ -6,7 +6,8 @@
 //
 // Config event: an all-day event at 1970-01-01, marked extendedProperties.private
 // kairosConfig='true', with:
-//   s_<statusId> = 'name<US>order<US>inProgress'   (one property per status)
+//   s_<statusId> = 'name<US>order<US>progressFlag'  (one property per status)
+//     progressFlag: '' = none, '1' = in-progress, 'r' = ready (pins undated tasks to today)
 //   tagPalette   = JSON { "<tagName>": "<color>", ... }   (structured for growth)
 //
 // This replaces the Firestore-backed statuses. User-scoped data (prefs, life log)
@@ -19,10 +20,10 @@ const SEP             = String.fromCharCode(31)   // unit separator -- cannot co
 const MARKER          = 'kairosConfig'
 
 const DEFAULT_STATUSES = [
-  { name: 'Intake',      inProgress: false },
-  { name: 'Backlog',     inProgress: false },
-  { name: 'Up Next',     inProgress: false },
-  { name: 'In Progress', inProgress: true  },
+  { name: 'Intake',      progress: ''            },
+  { name: 'Backlog',     progress: ''            },
+  { name: 'Up Next',     progress: 'ready'       },
+  { name: 'In Progress', progress: 'in-progress' },
 ]
 
 // Deterministic fallback colour when a tag isn't in the palette (stable per name).
@@ -33,7 +34,7 @@ export function defaultTagColor(name) {
   return TAG_PALETTE_FALLBACK[Math.abs(h) % TAG_PALETTE_FALLBACK.length]
 }
 
-// In-memory: { [calendarId]: { eventId, statuses: {id: {name,order,inProgress}}, palette: {name: color} } }
+// In-memory: { [calendarId]: { eventId, statuses: {id: {name,order,progress}}, palette: {name: color} } }
 let _config    = {}
 let _saveToken = null
 
@@ -94,11 +95,15 @@ async function _createConfigEvent(token, calendarId, statuses, palette) {
 
 // -- Encoding ----------------------------------------------------------------
 function _encodeStatus(s) {
-  return `${s.name}${SEP}${s.order ?? 0}${SEP}${s.inProgress ? '1' : ''}`
+  // progressFlag: '' = none, '1' = in-progress (legacy compat), 'r' = ready
+  const flag = s.progress === 'in-progress' ? '1' : s.progress === 'ready' ? 'r' : ''
+  return `${s.name}${SEP}${s.order ?? 0}${SEP}${flag}`
 }
 function _decodeStatus(val) {
-  const [name, order, inProgress] = val.split(SEP)
-  return { name: name ?? '', order: Number(order) || 0, inProgress: inProgress === '1' }
+  const [name, order, flag] = val.split(SEP)
+  // '1' is the legacy in-progress flag written before tri-state was introduced
+  const progress = flag === '1' ? 'in-progress' : flag === 'r' ? 'ready' : ''
+  return { name: name ?? '', order: Number(order) || 0, progress }
 }
 
 function _parseConfigEvent(event) {
@@ -133,7 +138,7 @@ async function _loadOne(token, calendarId, seedStatuses) {
   let statuses = (seedStatuses && seedStatuses(calendarId)) || null
   if (!statuses) {
     statuses = {}
-    DEFAULT_STATUSES.forEach((s, i) => { statuses[_genId()] = { name: s.name, order: i * 10, inProgress: s.inProgress } })
+    DEFAULT_STATUSES.forEach((s, i) => { statuses[_genId()] = { name: s.name, order: i * 10, progress: s.progress } })
   }
   const event = await _createConfigEvent(token, calendarId, statuses, {})
   _config[calendarId] = { eventId: event.id, statuses, palette: {} }
@@ -173,18 +178,26 @@ export function getAllStatuses() {
 export function getInProgressStatusIds() {
   const set = new Set()
   for (const c of Object.values(_config)) {
-    for (const [id, s] of Object.entries(c.statuses)) if (s.inProgress) set.add(id)
+    for (const [id, s] of Object.entries(c.statuses)) if (s.progress === 'in-progress') set.add(id)
   }
   return set
 }
 
-export async function createStatus(token, calendarId, name, order = 0, inProgress = false) {
+export function getReadyStatusIds() {
+  const set = new Set()
+  for (const c of Object.values(_config)) {
+    for (const [id, s] of Object.entries(c.statuses)) if (s.progress === 'ready') set.add(id)
+  }
+  return set
+}
+
+export async function createStatus(token, calendarId, name, order = 0, progress = '') {
   const c = _config[calendarId]
   if (!c) return null
   const id = _genId()
-  c.statuses[id] = { name, order, inProgress }
+  c.statuses[id] = { name, order, progress }
   await _patchEvent(token ?? _saveToken, calendarId, c.eventId, { [`s_${id}`]: _encodeStatus(c.statuses[id]) })
-  return { id, calendarId, name, order, inProgress }
+  return { id, calendarId, name, order, progress }
 }
 
 export async function updateStatus(token, statusId, changes) {
@@ -212,7 +225,7 @@ export async function ensureDefaultStatuses(token, calendarId) {
   const c = _config[calendarId]
   if (c && Object.keys(c.statuses).length === 0) {
     for (let i = 0; i < DEFAULT_STATUSES.length; i++) {
-      await createStatus(token, calendarId, DEFAULT_STATUSES[i].name, i * 10, DEFAULT_STATUSES[i].inProgress)
+      await createStatus(token, calendarId, DEFAULT_STATUSES[i].name, i * 10, DEFAULT_STATUSES[i].progress)
     }
   }
   return getStatusesForCalendar(calendarId)

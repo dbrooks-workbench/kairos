@@ -4,7 +4,7 @@ import { getCalendars, getEvents, fetchDelta, clearSyncTokens, updateEvent } fro
 import { getAllTaskEvents, getTaskEvents, completeTask as calCompleteTask, uncompleteTask as calUncompleteTask, patchTaskProps, patchTaskDate, findTaskByKairosId, ensureFooters, ensureAllFooters } from './providers/calendarTasks.js'
 import { loadPrefs, getHiddenCalendars, setHiddenCalendars, getTaskCalendars, setTaskCalendars, getSweepSources, setSweepSources, getIntakeStatusId, setIntakeStatusId, getProjectCalendarId, setProjectCalendarId, getVisibilityStart, getVisibilityEnd, setVisibilityWindow, getMaxWindowDays, getListsMigrated, setListsMigrated } from './providers/kairosPrefs.js'
 import { loadLists, getList } from './providers/kairosLists.js'   // retained only for the one-time listId→tag migration
-import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags, getTagPalette, setTagColor, removeTagFromPalette } from './providers/kairosConfig.js'
+import { loadConfig, ensureDefaultStatuses, getStatusesForCalendar, getStatus, getAllStatuses, getInProgressStatusIds, getReadyStatusIds, createStatus, getTagColor, getAllTagNames, ensureTags, getTagPalette, setTagColor, removeTagFromPalette } from './providers/kairosConfig.js'
 import { encodeTags } from './providers/tagCodec.js'
 import { loadStatuses as loadFsStatuses, getStatusesForCalendar as fsStatusesForCalendar } from './providers/kairosStatuses.js'
 
@@ -50,7 +50,7 @@ async function loadStatusConfig(token) {
     const fs = fsStatusesForCalendar(calId)
     if (!fs.length) return null
     const obj = {}
-    fs.forEach(s => { obj[s.id] = { name: s.name, order: s.order, inProgress: s.inProgress } })
+    fs.forEach(s => { obj[s.id] = { name: s.name, order: s.order, progress: s.progress ?? (s.inProgress ? 'in-progress' : '') } })
     return obj
   })
 }
@@ -62,7 +62,7 @@ import { initEditor, openEditor, openEditorForEdit } from './unifiedEditor.js'
 import { initTimedDrag, destroyTimedDrag, isDragging } from './calendarDrag.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const VERSION   = '0.37.6'
+const VERSION   = '0.38.0'
 
 const state = {
   weekStart: getWeekStart(new Date()),
@@ -306,9 +306,14 @@ async function refreshPastDueTasks() {
 // Status IDs flagged "in progress" — refreshed at the top of each render pass so
 // task chips in those statuses get the green ring (past-due red still wins).
 let _inProgressIds = new Set()
+let _readyIds      = new Set()
 function isInProgressItem(item, isTask, isDone) {
   const sid = item.metadata?.statusId
   return isTask && !isDone && !!sid && _inProgressIds.has(sid)
+}
+function isReadyItem(item, isTask, isDone) {
+  const sid = item.metadata?.statusId
+  return isTask && !isDone && !!sid && _readyIds.has(sid)
 }
 
 // Rank a calendar by its position in the user's calendar list — used to order
@@ -1618,6 +1623,7 @@ function renderItems(items) {
   document.querySelectorAll('.cal-event, .allday-event, .allday-more').forEach(el => el.remove())
 
   _inProgressIds = getInProgressStatusIds()
+  _readyIds      = getReadyStatusIds()
   const _now = new Date()
   const _todayMidnight = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate())
 
@@ -1732,6 +1738,7 @@ function renderItems(items) {
         isPast && !isTask && !isDone ? 'is-past'   : '',
         isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
         !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
+        !isPastDue && !item.metadata?.rolledPastDue && isReadyItem(item, isTask, isDone)      ? 'ready'       : '',
         span.startsEarly             ? 'continues-left'  : '',
         span.endsLate                ? 'continues-right' : '',
       ].filter(Boolean).join(' ')
@@ -1865,6 +1872,7 @@ function renderItems(items) {
         _timedPast && !_timedTask && !_timedDone ? 'is-past'  : '',
         _timedTask && _timedPast  && !_timedDone ? 'past-due' : '',
         !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
+        !(_timedTask && _timedPast && !_timedDone) && isReadyItem(item, _timedTask, _timedDone)      ? 'ready'       : '',
       ].filter(Boolean).join(' ')
       el.dataset.itemId = item.id
       if (_timedTask && !_timedDone && item.color) applyColor(el, item.color)
@@ -2034,6 +2042,7 @@ function renderMobileDay() {
   if (window.innerWidth > 768) return  // desktop — skip
 
   _inProgressIds = getInProgressStatusIds()
+  _readyIds      = getReadyStatusIds()
   const day      = state.mobileDay
   const dayStart = new Date(day); dayStart.setHours(0, 0, 0, 0)
   const dayEnd   = new Date(dayStart.getTime() + 86_400_000)
@@ -2078,6 +2087,7 @@ function renderMobileDay() {
       isPast && !isTask && !isDone ? 'is-past'  : '',
       isPastDue || item.metadata?.rolledPastDue ? 'past-due' : '',
       !isPastDue && !item.metadata?.rolledPastDue && isInProgressItem(item, isTask, isDone) ? 'in-progress' : '',
+      !isPastDue && !item.metadata?.rolledPastDue && isReadyItem(item, isTask, isDone)      ? 'ready'       : '',
     ].filter(Boolean).join(' ')
     chip.title = item.title
 
@@ -2162,6 +2172,7 @@ function renderMobileDay() {
       _timedPast && !_timedTask && !_timedDone ? 'is-past'   : '',
       _timedTask && _timedPast  && !_timedDone ? 'past-due'  : '',
       !(_timedTask && _timedPast && !_timedDone) && isInProgressItem(item, _timedTask, _timedDone) ? 'in-progress' : '',
+      !(_timedTask && _timedPast && !_timedDone) && isReadyItem(item, _timedTask, _timedDone)      ? 'ready'       : '',
     ].filter(Boolean).join(' ')
     if (_timedTask && !_timedDone && item.color) applyColor(eventEl, item.color)
     else if (!_timedTask && item.color) applyColor(eventEl, item.color)
