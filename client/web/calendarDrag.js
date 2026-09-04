@@ -214,9 +214,12 @@ function _moveMove(e) {
 
 function _resizeMove(e) {
   const { el, startY, origHeight, origTop } = _drag
-  const newH = Math.max(13, snap(origHeight + (e.clientY - startY)))
-  el.style.height = `${newH}px`
-  const endMin = Math.min(1439, origTop + newH + 2)
+  // Snap the end time (not the height): rendered height = durMin - 2, so snapping
+  // the height directly produces a result 2 minutes off from the logical end time.
+  const rawEndMin = origTop + origHeight + 2 + (e.clientY - startY)
+  const endMin = Math.max(origTop + 15, Math.min(1439, snap(rawEndMin)))
+  const newH = endMin - origTop - 2
+  el.style.height = `${Math.max(13, newH)}px`
   const te = el.querySelector('.event-time')
   if (te) {
     const sh = Math.floor(origTop/60), sm = origTop % 60
@@ -295,11 +298,12 @@ async function _finishMove(drag, e) {
 
 async function _finishResize(drag, e) {
   const { item, el, origTop, origHeight, startY } = drag
-  const newH = Math.max(13, snap(origHeight + (e.clientY - startY)))
-  if (newH === origHeight) return
+  const origEndMin = origTop + origHeight + 2
+  const rawEndMin  = origEndMin + (e.clientY - startY)
+  const endMin     = Math.max(origTop + 15, Math.min(1439, snap(rawEndMin)))
+  if (endMin === origEndMin) return
   const colEl  = el.closest('.timed-col')
   const dayIdx = colEl ? +colEl.dataset.day : 0
-  const endMin = Math.min(1439, origTop + newH + 2)
   const newEnd = dateAt(dayIdx, endMin)
   const tz     = Intl.DateTimeFormat().resolvedOptions().timeZone
   try {

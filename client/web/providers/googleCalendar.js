@@ -142,10 +142,11 @@ export async function getEvent(token, calendarId, eventId) {
 // Calendar UI does for a guest.
 export async function getEventInstances(token, calendarId, masterId, timeMin, timeMax) {
   const qs = new URLSearchParams({ timeMin, timeMax, showDeleted: 'false', maxResults: '2500' })
-  return paginate(
+  const { items } = await paginate(
     token,
     `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(masterId)}/instances?${qs}`,
   )
+  return items
 }
 
 export async function updateEvent(token, calendarId, eventId, body) {

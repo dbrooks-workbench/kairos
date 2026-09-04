@@ -697,7 +697,11 @@ export function initEditor() {
   })
 
   el('unified-editor').addEventListener('click', e => { if (e.target === el('unified-editor')) _close() })
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el('unified-editor').hidden) _close() })
+  document.addEventListener('keydown', e => {
+    if (el('unified-editor').hidden) return
+    if (e.key === 'Escape') _close()
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) _save()
+  })
 
   // Scope modal
   el('recur-scope-cancel')?.addEventListener('click', () => {
@@ -1443,22 +1447,26 @@ async function _deleteFollowing(token) {
     try {
       await updateEvent(token, calId, masterId, { recurrence })
     } catch (err) {
-      // Rewriting the shared master's RRULE is organizer-only; a guest gets 403.
-      // The Google UI handles "this and following" for a guest by removing those
-      // occurrences from their own calendar — mirror that by deleting each
-      // following instance individually (a guest-permitted operation).
+      // Rewriting the master's RRULE is organizer-only; a guest gets 403.
+      // Swallow 403 and fall through to individual instance deletion below.
       if (!/\b403\b/.test(err.message || '')) throw err
-      await _removeFollowingInstances(token, calId, masterId)
     }
+    // Always delete individual instances to cover: (a) exception overrides that
+    // survive UNTIL because they are stored as separate events, (b) the 403 case
+    // where the RRULE patch was not permitted, and (c) any Google-side propagation
+    // lag in recurrence expansion. After a successful RRULE UNTIL patch this
+    // fetch returns zero items (no-op); after a 403 it deletes each instance one
+    // by one, mirroring what the Google Calendar UI does for a guest.
+    await _removeFollowingInstances(token, calId, masterId)
   } else {
     if (_isTaskMode()) await deleteTask(token, calId, _editItem.source.external_id)
     else               await deleteEvent(token, calId, _editItem.source.external_id)
   }
 }
 
-// Guest fallback for "this and following": delete every occurrence from the
-// selected one onward. Bounds an unbounded series at +5 years so the instance
-// expansion terminates; that covers any practical horizon a user is viewing.
+// Delete every instance from the selected one onward (up to +5 years). Called
+// by _deleteFollowing after (or instead of) the RRULE UNTIL patch to ensure all
+// visible instances are removed regardless of exception overrides or propagation lag.
 async function _removeFollowingInstances(token, calId, masterId) {
   const from   = new Date(_editItem.start)
   const timeMax = new Date(from); timeMax.setFullYear(timeMax.getFullYear() + 5)
